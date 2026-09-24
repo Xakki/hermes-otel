@@ -10,7 +10,10 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
-from ..helpers import clip_joined, optional_number, package_version, truncate_string
+from ..helpers import (
+    clip_joined, optional_number, package_version, redact_export_text,
+    sanitize_export_value, truncate_string,
+)
 from ..session_state import TurnSummary
 
 _DEFAULT_AGENT_NAME = "hermes-agent"
@@ -101,6 +104,16 @@ def _metric_model_labels(model: Any, provider: Any) -> Dict[str, str]:
     if provider:
         labels["provider"] = truncate_string(provider, _PROVIDER_MAX)
     return labels
+
+
+def _credential_identity_attributes(extra_kwargs: dict) -> Dict[str, str]:
+    """Preserve the exact pool-entry identity supplied for this API attempt."""
+    attrs: Dict[str, str] = {}
+    for key in ("credential_id", "account_name"):
+        value = extra_kwargs.get(key)
+        if isinstance(value, str) and value:
+            attrs[key] = value
+    return attrs
 
 
 def _gen_ai_attributes(session_id: Optional[str], operation_name: str) -> Dict[str, str]:
@@ -254,9 +267,13 @@ def _summary_attributes(summary: TurnSummary) -> Dict[str, Any]:
         attrs["hermes.turn.tool_count"] = len(summary.tool_names)
         attrs["hermes.turn.tools"] = clip_joined(sorted(summary.tool_names), ",")
     if summary.tool_targets:
-        attrs["hermes.turn.tool_targets"] = clip_joined(summary.tool_targets, "|")
+        attrs["hermes.turn.tool_targets"] = clip_joined(
+            [redact_export_text(item) for item in summary.tool_targets], "|"
+        )
     if summary.tool_commands:
-        attrs["hermes.turn.tool_commands"] = clip_joined(summary.tool_commands, "|")
+        attrs["hermes.turn.tool_commands"] = clip_joined(
+            [redact_export_text(item) for item in summary.tool_commands], "|"
+        )
     if summary.tool_outcomes:
         attrs["hermes.turn.tool_outcomes"] = clip_joined(sorted(summary.tool_outcomes), ",")
     if summary.skill_names:
@@ -309,8 +326,9 @@ def _message_json(role: str, content: Any) -> Optional[str]:
     if content is None or content == "":
         return None
     try:
-        return json.dumps([{"role": role, "content": str(content)}], ensure_ascii=False)
-    except (TypeError, ValueError):
+        safe_content = sanitize_export_value(content)
+        return json.dumps([{"role": role, "content": str(safe_content)}], ensure_ascii=False)
+    except Exception:
         return None
 
 
@@ -323,10 +341,14 @@ def _serialize_conversation_history(history: Any, max_chars: int) -> Optional[st
     if not history:
         return None
     try:
-        text = json.dumps(history, ensure_ascii=False, default=str)
+        safe_history = sanitize_export_value(history)
+    except Exception:
+        return None
+    try:
+        text = json.dumps(safe_history, ensure_ascii=False, default=str)
     except (TypeError, ValueError):
         try:
-            text = str(history)
+            text = redact_export_text(str(safe_history))
         except Exception:
             return None
     if len(text) <= max_chars:

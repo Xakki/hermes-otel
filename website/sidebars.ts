@@ -28,6 +28,7 @@ const sidebars: SidebarsConfig = {
         'backends/jaeger',
         'backends/tempo',
         'backends/otlp',
+        'backends/graylog-prometheus',
         'backends/lgtm',
         'backends/uptrace',
         'backends/openobserve',

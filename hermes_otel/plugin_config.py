@@ -180,13 +180,17 @@ class HermesOtelConfig:
     # right after the turn, so the wait is what gets its spans out.
     force_flush_wait_ms: int = 500
     # ── LLM span input fidelity ─────────────────────────────────────────
-    # Opt-in: serialise the full conversation_history onto the llm span's
+    # Opt-in: serialise the redacted conversation_history onto the llm span's
     # input.value so the UI shows every message instead of just the last
     # user turn. The api.* spans don't carry message-level detail, so
     # flipping this on is the easiest way to see what the model actually saw.
     capture_conversation_history: bool = False
     conversation_history_max_chars: int = 20_000
     # ── Content capture ─────────────────────────────────────────────────
+    # Optional unified request/log policy. When set, this overrides the legacy
+    # content_capture/capture_logs/log_level knobs with one explicit mode.
+    # Unset preserves the pre-existing configuration behavior.
+    level: Optional[str] = None  # debug | info | notice
     # What of the conversation content is recorded on spans:
     #   "full"     the complete prompt (system prompt + every message) and
     #              the complete response on every api.* span, unclipped;
@@ -217,6 +221,7 @@ class HermesOtelConfig:
     # logs). Set to e.g. "hermes_otel" to scope capture to plugin logs only.
     log_attach_logger: Optional[str] = None
     # ── OTel GenAI semantic-convention metrics ──────────────────────────
+    metrics_enabled: bool = False  # top-level YAML spelling: metrics.enabled
     # Emit spec-named instruments (gen_ai.client.*, gen_ai.agent.*) in
     # addition to the custom hermes.* metrics, so generic OTel-GenAI
     # dashboards/alerts work out of the box. Set false for hermes.* only.
@@ -516,6 +521,9 @@ def _parse_scalar(kind: Optional[str], key: str, value: Any) -> Any:
         if key == "content_capture":
             mode = text.strip().lower()
             return mode if mode in CONTENT_CAPTURE_MODES else None
+        if key == "level":
+            mode = text.strip().lower()
+            return mode if mode in ("debug", "info", "notice") else None
         norm = _STR_NORMALISERS.get(key)
         return norm(text) if norm else text
     return None
@@ -557,6 +565,13 @@ def load_config(path: Optional[Path] = None) -> HermesOtelConfig:
     """
     yaml_path = path if path is not None else resolve_config_path()
     yaml_data = _load_yaml(yaml_path) if yaml_path is not None else {}
+    yaml_data = dict(yaml_data)
+    metrics_config = yaml_data.pop("metrics", None)
+    if metrics_config is not None:
+        if isinstance(metrics_config, dict) and "enabled" in metrics_config:
+            yaml_data.setdefault("metrics_enabled", metrics_config["enabled"])
+        else:
+            logger.warning("[hermes-otel] config.yaml 'metrics' must contain an 'enabled' boolean")
 
     values: Dict[str, Any] = {}
     for key, raw in yaml_data.items():
@@ -567,10 +582,38 @@ def load_config(path: Optional[Path] = None) -> HermesOtelConfig:
             values[key] = coerced
 
     values.update(_load_env_overrides())
+    _reconcile_level(values)
     _reconcile_content_capture(values)
 
     # Build config with whatever we have; unset fields fall back to dataclass defaults.
     return replace(HermesOtelConfig(), **values)
+
+
+def _reconcile_level(values: Dict[str, Any]) -> None:
+    """Apply the unified request/log policy when a caller explicitly sets it."""
+    mode = values.get("level")
+    if mode is None:
+        return
+    policy = {
+        "debug": ("full", True, True, True, "DEBUG"),
+        "info": ("preview", True, False, False, "INFO"),
+        "notice": ("off", False, False, False, "WARNING"),
+    }.get(mode)
+    if policy is None:
+        return
+    content_mode, previews, full_prompts, full_responses, log_level = policy
+    expected = {
+        "content_capture": content_mode,
+        "capture_previews": previews,
+        "capture_full_prompts": full_prompts,
+        "capture_full_responses": full_responses,
+        "capture_logs": True,
+        "log_level": log_level,
+    }
+    for key, value in expected.items():
+        if key in values and values[key] != value:
+            logger.warning("[hermes-otel] %s is overridden by level: %s", key, mode)
+        values[key] = value
 
 
 _LEGACY_CONTENT_KEYS = ("capture_previews", "capture_full_prompts", "capture_full_responses")
@@ -693,6 +736,7 @@ FIELD_DOCS = {
     "capture_conversation_history": "Attach the full message JSON to `llm.*` spans",
     "conversation_history_max_chars": "JSON cap when conversation capture is on",
     "content_capture": "`full` (default): complete prompt and response on every `api.*` span · `preview`: clipped previews only · `off`: no content, metadata only; see [Conversation capture](/configuration/conversation-capture)",
+    "level": "Unified request/log policy: `debug` full content + DEBUG logs; `info` clipped content + INFO logs; `notice` no request/response content + WARNING logs. Overrides legacy capture/log-level settings when set.",
     "capture_full_prompts": "Deprecated: derived from `content_capture`; `false` keeps prompts as previews in `full` mode",
     "capture_full_responses": "Deprecated: derived from `content_capture`; `false` keeps responses as previews in `full` mode",
     "capture_sender_id": "Gateway sessions add `hermes.sender.id` and `user.id` (`platform:sender`)",
@@ -700,6 +744,7 @@ FIELD_DOCS = {
     "log_level": "Handler level: `DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL`",
     "log_attach_logger": "Logger to attach to; `null` = root, `hermes_otel` = the plugin only",
     "emit_genai_metrics": "Also emit the OTel GenAI spec metrics (`gen_ai.client.*`, `gen_ai.agent.*`)",
+    "metrics_enabled": "Export metrics only when top-level YAML `metrics.enabled` is `true`; defaults off",
     "skill_spans": "Open a `skill.<name>` span on each successful skill load, closed at turn end",
     "discovery_prompt": "Register a system-prompt section advertising `hermes_otel:observability` (changes what the model sees every turn; opt-in)",
     "dashboard_live": "Keep recent spans/metrics/logs in `$HERMES_HOME/hermes_otel_live.db` for the dashboard's Live mode",
@@ -751,9 +796,9 @@ FIELD_GROUPS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ),
     (
         "Spans and metrics",
-        ("emit_genai_metrics", "skill_spans", "suppress_mcp_ping_spans", "discovery_prompt"),
+        ("metrics_enabled", "emit_genai_metrics", "skill_spans", "suppress_mcp_ping_spans", "discovery_prompt"),
     ),
-    ("Logs", ("capture_logs", "log_level", "log_attach_logger")),
+    ("Logs", ("level", "capture_logs", "log_level", "log_attach_logger")),
     ("Dashboard", ("dashboard_live", "dashboard_live_max_spans", "dashboard_live_retention_hours")),
     ("Host metrics", ("host_metrics", "host_metrics_gpu", "host_metrics_interval_ms")),
     ("Backends", ("backends",)),

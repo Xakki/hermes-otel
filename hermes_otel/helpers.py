@@ -19,6 +19,81 @@ from typing import Any, Dict, List, Optional, Tuple
 _ANSI_RE = re.compile(r"\x1b(?:\][^\x07]*(?:\x07|\x1b\\)|\[[0-?]*[ -/]*[@-~]|[@-_])")
 
 _WHITESPACE_RE = re.compile(r"\s+")
+_FALLBACK_TOKEN_RE = re.compile(
+    r"(?i)\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+|"
+    r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{16,}|xox[baprs]-[A-Za-z0-9-]{16,})\b"
+)
+_AUTH_SCHEME_VALUE_RE = re.compile(r"(?i)\b(Bearer|Basic)\s+([^\s\"']+)")
+_SENSITIVE_EXPORT_KEYS = {
+    "authorization", "proxyauthorization", "authorizationtoken", "cookie", "cookies", "setcookie",
+    "apikey", "xapikey", "xauthtoken", "apisecret", "accesskey", "accesskeys",
+    "accesskeyid", "oauthtoken", "oauthaccesstoken",
+    "oauthrefreshtoken", "accesstoken", "refreshtoken", "idtoken", "sessiontoken",
+    "bearertoken", "clientsecret", "secretaccesskey", "password", "passwd", "secret",
+    "secretkey", "privatekey", "credentials", "passwords", "secrets",
+    "privatekeys", "secretkeys", "apikeys", "apitokens", "accesstokens",
+    "refreshtokens", "authtokens", "oauthtokens", "bearertokens",
+    "sessiontokens", "idtokens", "clientsecrets",
+}
+
+
+def redact_export_text(value: Any) -> str:
+    """Redact known credential patterns before text leaves the process."""
+    text = value if isinstance(value, str) else str(value)
+    try:
+        from agent.redact import redact_sensitive_text
+    except ImportError:
+        return _FALLBACK_TOKEN_RE.sub("[REDACTED]", text)
+    try:
+        safe = redact_sensitive_text(text, force=True, redact_url_credentials=True)
+        return _AUTH_SCHEME_VALUE_RE.sub(r"\1 [REDACTED]", safe)
+    except Exception:
+        return "[REDACTION_ERROR]"
+
+
+def sanitize_export_value(value: Any, *, _seen: Optional[set] = None, _depth: int = 0) -> Any:
+    """Copy a payload while redacting credential fields and recognizable secrets."""
+    if _depth > 30:
+        return "[MAX_DEPTH]"
+    if isinstance(value, str):
+        return redact_export_text(value)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    seen = _seen if _seen is not None else set()
+    marker = id(value)
+    if marker in seen:
+        return "[CYCLE]"
+    if isinstance(value, dict):
+        seen.add(marker)
+        out = {}
+        for key, item in value.items():
+            raw_key = str(key)
+            normalized = re.sub(r"[^a-z0-9]", "", raw_key.lower())
+            safe_key = redact_export_text(raw_key)
+            secret_key = normalized in _SENSITIVE_EXPORT_KEYS or normalized.endswith((
+                "apikey", "apikeys", "accesskey", "accesskeys", "accesskeyid",
+                "token", "auth", "secret", "secrets",
+                "secretkey", "secretkeys", "privatekeys", "password", "passwords",
+                "passwd", "credential", "credentials",
+            ))
+            secret_tokens = normalized.endswith("tokens") and not (
+                item is None or type(item) in (int, float)
+            )
+            out[safe_key] = (
+                "[REDACTED]" if secret_key or secret_tokens
+                else sanitize_export_value(item, _seen=seen, _depth=_depth + 1)
+            )
+        seen.remove(marker)
+        return out
+    if isinstance(value, (list, tuple, set)):
+        seen.add(marker)
+        out = [sanitize_export_value(item, _seen=seen, _depth=_depth + 1) for item in value]
+        seen.remove(marker)
+        return out
+    attributes = getattr(value, "__dict__", None)
+    if isinstance(attributes, dict) and attributes:
+        return sanitize_export_value(attributes, _seen=seen, _depth=_depth + 1)
+    return redact_export_text(value)
 
 
 def truncate_string(value: Any, max_len: int = 1000) -> str:
@@ -49,7 +124,8 @@ def clip_preview(text: Any, max_chars: int) -> Optional[str]:
     if text is None:
         return None
     try:
-        s = text if isinstance(text, str) else str(text)
+        safe_text = sanitize_export_value(text)
+        s = safe_text if isinstance(safe_text, str) else str(safe_text)
     except Exception:
         return None
     if not s:
@@ -634,12 +710,9 @@ def serialize_full(value: Any) -> Optional[str]:
     if value is None or value == "" or value == [] or value == {}:
         return None
     try:
-        return json.dumps(value, ensure_ascii=False, default=json_default)
+        return json.dumps(sanitize_export_value(value), ensure_ascii=False, default=json_default)
     except Exception:
-        try:
-            return str(value)
-        except Exception:
-            return None
+        return None
 
 
 def clip_joined(items: List[str], sep: str, limit: int = 500) -> str:

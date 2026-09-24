@@ -49,7 +49,7 @@ Outside `api.*` spans, content is a preview: ANSI stripped, whitespace collapsed
 
 ## The turn on the `llm.*` span
 
-`capture_conversation_history: true` additionally attaches the conversation as Hermes held it at the start of the turn to the `llm.*` span (`input.value` as JSON, capped at `conversation_history_max_chars`, 20,000 by default). It predates `content_capture: full` and is mostly redundant with it; keep it for backends where you look at the turn span rather than the per-call spans.
+`capture_conversation_history: true` additionally attaches the conversation as Hermes held it at the start of the turn to the `llm.*` span (`input.value` as JSON, capped at `conversation_history_max_chars`, 20,000 by default). Credential fields and recognizable bearer/API tokens are redacted before serialization and clipping; content remains sensitive and may contain unrecognized secrets. It predates `content_capture: full` and is mostly redundant with it; keep it for backends where you look at the turn span rather than the per-call spans.
 
 ```yaml
 capture_conversation_history: true

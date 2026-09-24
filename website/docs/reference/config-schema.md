@@ -38,6 +38,7 @@ The field table below is generated from `HermesOtelConfig` by `scripts/gen_confi
 | `force_flush_wait_ms` | int | `500` | How long the turn waits for that background flush before returning to Hermes; `0` = do not wait |
 | `capture_conversation_history` | bool | `false` | Attach the full message JSON to `llm.*` spans |
 | `conversation_history_max_chars` | int | `20000` | JSON cap when conversation capture is on |
+| `level` | string \| null | *(unset)* | Unified request/log policy: `debug` full content + DEBUG logs; `info` clipped content + INFO logs; `notice` no request/response content + WARNING logs. Overrides legacy capture/log-level settings when set. |
 | `content_capture` | string | `"full"` | `full` (default): complete prompt and response on every `api.*` span · `preview`: clipped previews only · `off`: no content, metadata only; see [Conversation capture](/configuration/conversation-capture) |
 | `capture_full_prompts` | bool | `true` | Deprecated: derived from `content_capture`; `false` keeps prompts as previews in `full` mode |
 | `capture_full_responses` | bool | `true` | Deprecated: derived from `content_capture`; `false` keeps responses as previews in `full` mode |
@@ -45,6 +46,7 @@ The field table below is generated from `HermesOtelConfig` by `scripts/gen_confi
 | `capture_logs` | bool | `false` | Attach an OTel LoggingHandler to Python logging; see [OTel logs](/configuration/logs) |
 | `log_level` | string | `"INFO"` | Handler level: `DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL` |
 | `log_attach_logger` | string \| null | *(unset)* | Logger to attach to; `null` = root, `hermes_otel` = the plugin only |
+| `metrics_enabled` | bool | `false` | Export metrics only when top-level YAML `metrics.enabled` is `true`; defaults off |
 | `emit_genai_metrics` | bool | `true` | Also emit the OTel GenAI spec metrics (`gen_ai.client.*`, `gen_ai.agent.*`) |
 | `skill_spans` | bool | `true` | Open a `skill.<name>` span on each successful skill load, closed at turn end |
 | `discovery_prompt` | bool | `false` | Register a system-prompt section advertising `hermes_otel:observability` (changes what the model sees every turn; opt-in) |

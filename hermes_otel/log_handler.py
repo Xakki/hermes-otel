@@ -23,11 +23,14 @@ attribute before adding a new one.
 from __future__ import annotations
 
 import logging
+import copy
+import traceback
 from typing import Any, Dict, List, Optional, Tuple
 
 from .backends import _ResolvedBackend
 from .debug_utils import debug_log, logger
 from .helpers import derive_signal_endpoint
+from .helpers import redact_export_text, sanitize_export_value
 
 try:
     # opentelemetry-sdk emits a DeprecationWarning on LoggingHandler import
@@ -58,6 +61,7 @@ except ImportError:  # pragma: no cover - exercised only when SDK missing
 _HANDLER_MARKER = "_hermes_otel_log_handler"
 # Logger level before install_handler lowered it, stamped on the handler.
 _PREVIOUS_LEVEL_ATTR = "_hermes_otel_previous_level"
+_PLUGIN_PREVIOUS_LEVEL_ATTR = "_hermes_otel_plugin_previous_level"
 
 # Loggers whose records we refuse to forward to the OTLP logs pipeline.
 # Two reasons each of these is on the list:
@@ -101,6 +105,51 @@ class _ExcludeOTelInternal(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401
         name = record.name or ""
         return not any(name.startswith(p) for p in _EXCLUDED_LOGGER_PREFIXES)
+
+
+_HERMES_LOGGER_PREFIXES = (
+    "agent", "gateway", "hermes_cli", "hermes_logging", "hermes",
+    "run_agent", "model_tools", "tools", "cron", "cli", "tui_gateway", "hermes_otel",
+)
+
+
+class _HermesSourceFilter(logging.Filter):
+    """Keep exported Python logs scoped to Hermes and its own OTel plugin."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        name = record.name or ""
+        return any(name == prefix or name.startswith(prefix + ".") for prefix in _HERMES_LOGGER_PREFIXES)
+
+
+_RESERVED_LOG_RECORD_FIELDS = frozenset(logging.makeLogRecord({}).__dict__) | {
+    "message", "asctime", "exc_text",
+}
+
+
+class _SanitizingHandler(logging.Handler):
+    """Copy and scrub each record before handing it to the OTel SDK handler."""
+
+    def __init__(self, inner: Any) -> None:
+        super().__init__(inner.level)
+        self._inner = inner
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            safe = copy.copy(record)
+            safe.msg = redact_export_text(record.getMessage())
+            safe.args = ()
+            if record.exc_info:
+                safe.exception_text = redact_export_text(
+                    "".join(traceback.format_exception(*record.exc_info))
+                )
+                safe.exc_info = None
+                safe.exc_text = None
+            for key, value in record.__dict__.items():
+                if key not in _RESERVED_LOG_RECORD_FIELDS:
+                    setattr(safe, key, sanitize_export_value(value))
+            self._inner.handle(safe)
+        except Exception:
+            return
 
 
 # ── Endpoint derivation ─────────────────────────────────────────────────────
@@ -204,22 +253,24 @@ def install_handler(
         level: Python logging level (``logging.INFO`` etc) the handler
             will accept.
         attach_logger: Logger name to attach the handler to. ``None``
-            means the root logger (captures everything). Pass e.g.
+            means the root logger with a Hermes-only source filter. Pass e.g.
             ``"hermes_otel"`` to scope capture to plugin logs only.
 
     Returns the ``LoggerProvider`` so the tracer can keep a reference for
     ``force_flush`` / ``shutdown``. Returns ``None`` when logs are disabled,
     unavailable, or no log-capable backend was provided.
     """
-    if not _LOGS_AVAILABLE or not processors:
+    if not _LOGS_AVAILABLE or not processors or LoggingHandler is None or LoggerProvider is None:
         return None
 
     provider = LoggerProvider(resource=resource)
     for proc, _backend in processors:
         provider.add_log_record_processor(proc)
 
-    handler = LoggingHandler(level=level, logger_provider=provider)
-    handler.addFilter(_ExcludeOTelInternal())
+    sdk_handler = LoggingHandler(level=level, logger_provider=provider)
+    sdk_handler.addFilter(_ExcludeOTelInternal())
+    handler = _SanitizingHandler(sdk_handler)
+    handler.addFilter(_HermesSourceFilter())
     setattr(handler, _HANDLER_MARKER, True)
 
     target = logging.getLogger(attach_logger) if attach_logger else logging.getLogger()
@@ -233,6 +284,14 @@ def install_handler(
     setattr(handler, _PREVIOUS_LEVEL_ATTR, target.level)
     if target.level == logging.NOTSET or target.level > level:
         target.setLevel(level)
+    # register() gives the plugin logger an explicit INFO level for its startup
+    # banner. Lowering only the root logger cannot admit its DEBUG request
+    # events: Python checks the emitting logger's level before propagation.
+    if target is logging.getLogger():
+        plugin_logger = logging.getLogger("hermes_otel")
+        if plugin_logger.level > level:
+            setattr(handler, _PLUGIN_PREVIOUS_LEVEL_ATTR, plugin_logger.level)
+            plugin_logger.setLevel(level)
 
     debug_log(
         f"log_handler installed: target={attach_logger or 'root'} "
@@ -254,6 +313,9 @@ def _remove_prior_handlers(target: logging.Logger) -> None:
             previous = getattr(h, _PREVIOUS_LEVEL_ATTR, None)
             if previous is not None:
                 target.setLevel(previous)
+            plugin_previous = getattr(h, _PLUGIN_PREVIOUS_LEVEL_ATTR, None)
+            if plugin_previous is not None:
+                logging.getLogger("hermes_otel").setLevel(plugin_previous)
 
 
 def uninstall_handler(attach_logger: Optional[str] = None) -> None:

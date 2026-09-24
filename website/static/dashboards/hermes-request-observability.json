@@ -1,0 +1,131 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "Prometheus receiving Hermes metrics through the existing Collector Remote Write route",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "title": "API requests · last hour",
+      "description": "Provider API attempts, including attempts that later failed. Account labels are absent when no credential-pool entry was selected.",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"refId": "A", "expr": "sum(increase(hermes_api_request_count_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[1h])) or vector(0)", "instant": true}],
+      "fieldConfig": {"defaults": {"unit": "short", "decimals": 0}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 2,
+      "title": "API failures · last hour",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"refId": "A", "expr": "sum(increase(hermes_api_error_count_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[1h])) or vector(0)", "instant": true}],
+      "fieldConfig": {"defaults": {"unit": "short", "decimals": 0}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 3,
+      "title": "Failure fraction · last hour",
+      "description": "Failed provider attempts divided by all provider attempts. Empty periods are not a 100% success guarantee.",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"refId": "A", "expr": "(sum(increase(hermes_api_error_count_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[1h])) or vector(0)) / clamp_min(sum(increase(hermes_api_request_count_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[1h])), 1)", "instant": true}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 4,
+      "title": "p95 provider latency",
+      "description": "Histogram of completed or failed LLM client operations; only emitted when emit_genai_metrics is true.",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(gen_ai_client_operation_duration_seconds_bucket{gen_ai_provider_name=~\"${provider:regex}\",gen_ai_request_model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__rate_interval])))", "instant": true}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 5,
+      "title": "Request rate by account / provider / model",
+      "type": "timeseries",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"refId": "A", "expr": "sum by (provider, model, account_name, credential_id) (rate(hermes_api_request_count_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__rate_interval]))", "legendFormat": "{{account_name}} · {{credential_id}} · {{provider}}/{{model}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 6,
+      "title": "Errors by status class / retryability",
+      "description": "Only bounded labels, never raw provider error text or request IDs.",
+      "type": "timeseries",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"refId": "A", "expr": "sum by (status_class, retryable) (rate(hermes_api_error_count_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__rate_interval]))", "legendFormat": "{{status_class}} · retryable={{retryable}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 7,
+      "title": "Token throughput by account / type",
+      "type": "timeseries",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 13},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"refId": "A", "expr": "sum by (account_name, token_type) (rate(hermes_token_usage_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__rate_interval]))", "legendFormat": "{{account_name}} · {{token_type}}"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 8,
+      "title": "Prompt-cache hit fraction",
+      "description": "Only requests with provider-reported cache accounting contribute.",
+      "type": "timeseries",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 13},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"refId": "A", "expr": "sum(rate(hermes_prompt_cache_tokens_total{cache_result=\"hit\",provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__rate_interval])) / clamp_min(sum(rate(hermes_prompt_cache_tokens_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__rate_interval])), 1e-9)"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}}
+    },
+    {
+      "id": 9,
+      "title": "Requests by selected account · dashboard range",
+      "description": "A missing account_name means Hermes did not identify a selected credential-pool entry. Search a specific request in Graylog by api_request_id.",
+      "type": "table",
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 22},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "targets": [{"refId": "A", "expr": "sum by (provider, model, credential_id, account_name) (increase(hermes_api_request_count_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__range]))", "format": "table", "instant": true}],
+      "fieldConfig": {"defaults": {"unit": "short", "decimals": 0}, "overrides": []},
+      "options": {"showHeader": true}
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["hermes", "otel", "graylog", "prometheus", "request-observability"],
+  "templating": {
+    "list": [
+      {"name": "provider", "label": "Provider", "type": "query", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}, "query": "label_values(hermes_api_request_count_total, provider)", "definition": "label_values(hermes_api_request_count_total, provider)", "multi": true, "includeAll": true, "allValue": ".*", "refresh": 2, "sort": 1, "current": {"selected": true, "text": "All", "value": "$__all"}},
+      {"name": "model", "label": "Model", "type": "query", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}, "query": "label_values(hermes_api_request_count_total, model)", "definition": "label_values(hermes_api_request_count_total, model)", "multi": true, "includeAll": true, "allValue": ".*", "refresh": 2, "sort": 1, "current": {"selected": true, "text": "All", "value": "$__all"}},
+      {"name": "account", "label": "Account name", "type": "query", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}, "query": "label_values(hermes_api_request_count_total, account_name)", "definition": "label_values(hermes_api_request_count_total, account_name)", "multi": true, "includeAll": true, "allValue": ".*", "refresh": 2, "sort": 1, "current": {"selected": true, "text": "All", "value": "$__all"}}
+    ]
+  },
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "Hermes · Request Observability",
+  "uid": "hermes-request-observability",
+  "version": 1
+}
