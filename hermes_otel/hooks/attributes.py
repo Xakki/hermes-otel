@@ -11,8 +11,12 @@ import json
 from typing import Any, Dict, Optional
 
 from ..helpers import (
-    clip_joined, optional_number, package_version, redact_export_text,
-    sanitize_export_value, truncate_string,
+    clip_joined,
+    optional_number,
+    package_version,
+    redact_export_text,
+    sanitize_export_value,
+    truncate_string,
 )
 from ..session_state import TurnSummary
 

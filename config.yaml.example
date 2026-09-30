@@ -147,6 +147,21 @@
 # Set false to emit only the hermes.* metrics.
 # Also settable via HERMES_OTEL_EMIT_GENAI_METRICS.
 # emit_genai_metrics: true
+#
+# Metric temporality for OTLP export (#233). Unset = the SDK default
+# (cumulative, or OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE). Set
+# `delta` for Datadog, New Relic and Logfire style backends; a backend entry's
+# own `metrics_temporality:` wins, and signoz / uptrace entries default to delta.
+# metrics_temporality: cumulative
+#
+# Histogram aggregation: `explicit` (spec bucket boundaries) or `exponential`
+# (base-2 exponential histograms; Prometheus native histograms, Datadog,
+# New Relic, Uptrace).
+# metrics_histogram: explicit
+#
+# Distinct values a label such as `model` or `tool_name` may take per process
+# before the rest fold into `other` (the Python SDK has no cardinality limit).
+# metrics_label_limit: 100
 
 # ── Skill execution-window spans ──────────────────────────────────────────────
 #
@@ -243,7 +258,7 @@
 # A healthy backend needs far less; a stuck one costs at most this much per
 # turn. 0 = do not wait (a one-shot `hermes -z` may then exit before its
 # spans are sent).
-# force_flush_wait_ms: 500
+# force_flush_wait_ms: 1500
 
 # ── BatchSpanProcessor tunables (non-blocking export) ─────────────────────────
 # Each backend gets its own processor with these settings. Defaults are fine
@@ -293,6 +308,10 @@
 # (for example Tempo query URL) while trace export still goes through an OTel
 # Collector entry. `trace: false` is accepted as a friendly alias.
 #
+# `ui_url:` links the entry's card in the dashboard's Settings tab to the
+# backend's web UI (needed where the UI is not on the OTLP origin, e.g.
+# Grafana for `lgtm`, Jaeger's :16686, SigNoz's :8080).
+#
 # When `backends:` is absent or empty, the plugin falls back to single-backend
 # env-var detection (LANGSMITH_TRACING, OTEL_LANGFUSE_*, OTEL_SIGNOZ_ENDPOINT,
 # OTEL_PARSEABLE_ENDPOINT, OTEL_JAEGER_ENDPOINT, OTEL_TEMPO_ENDPOINT,
@@ -322,12 +341,17 @@
 #     endpoint: http://localhost:4328/v1/traces
 #     # SigNoz Cloud requires an ingestion key; self-hosted ignores the header.
 #     ingestion_key_env: OTEL_SIGNOZ_INGESTION_KEY
+#     # Dashboard / skill read path (traces, metrics, logs): the UI/API port
+#     # and an API key (current SigNoz issues them from a service account).
+#     # query_port: 3301
+#     # api_key_env: SIGNOZ_API_KEY
 #
 #   - type: jaeger
 #     endpoint: http://localhost:4318/v1/traces
 #
 #   - type: tempo
 #     endpoint: http://localhost:3200/v1/traces
+#     # query_port: 3200            # dashboard read path (Tempo query API)
 #
 #   - type: otlp
 #     name: my-custom-collector
@@ -363,6 +387,13 @@
 # backends:
 #   - type: lgtm
 #     endpoint: http://localhost:4318/v1/traces
+#     # Dashboard / skill read path. With the compose stack nothing is needed:
+#     # Tempo :3200, Prometheus :9090 and Loki :3100 on the same host are
+#     # assumed. Elsewhere, name them (`off` disables a signal):
+#     # query_port: 3200
+#     # prometheus_url: http://prometheus:9090
+#     # metrics_match: '{__name__=~"hermes_.*"}'   # keep a shared Prometheus's list short
+#     # loki_url: http://loki:3100
 # capture_logs: true
 #
 # Do NOT use `type: tempo` for the LGTM stack — that's for standalone Tempo
@@ -381,6 +412,11 @@
 #     # throwaway-local — use `dsn_env:` instead of inline `dsn:`.
 #     dsn_env: UPTRACE_DSN
 #     # dsn: http://project1_secret@localhost:14318?grpc=14317
+#     # Dashboard / skill read path: Uptrace 2's query API wants a USER token
+#     # (Settings → API tokens), not the DSN's project token.
+#     # user_token_env: UPTRACE_USER_TOKEN
+#     # query_port: 14318
+#     # project_id: 1
 # capture_logs: true
 
 # ── OpenObserve quickstart ───────────────────────────────────────────────────

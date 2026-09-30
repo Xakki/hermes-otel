@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = REPO_ROOT / "config.yaml.example"
 
 # Top-level keys that are not dataclass fields but are real config.
-_TOP_LEVEL_BLOCKS = set()
+_TOP_LEVEL_BLOCKS = {"metrics"}
 
 
 def _example_top_level_keys() -> set:
@@ -35,7 +35,8 @@ def test_every_example_key_is_a_real_field():
 
 
 def test_every_field_is_documented_in_the_example():
-    missing = sorted(_fields() - _example_top_level_keys())
+    fields = _fields() - {"metrics_enabled"}
+    missing = sorted(fields - _example_top_level_keys())
     assert missing == [], f"add these knobs to config.yaml.example: {missing}"
 
 

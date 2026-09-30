@@ -21,10 +21,18 @@ _HARD_BODY_LIMIT = 128_000
 # Graylog drops an entire OTLP log record when a single text attribute grows
 # beyond its indexed-field limit. Keep each part below that limit in UTF-8 bytes.
 _BODY_PART_BYTES = 8_192
-_TRANSPORT_HEADER_KEYS = frozenset({
-    "headers", "extra_headers", "request_headers", "http_headers",
-    "authorization", "proxy_authorization", "cookie", "set_cookie",
-})
+_TRANSPORT_HEADER_KEYS = frozenset(
+    {
+        "headers",
+        "extra_headers",
+        "request_headers",
+        "http_headers",
+        "authorization",
+        "proxy_authorization",
+        "cookie",
+        "set_cookie",
+    }
+)
 
 
 def _without_transport_headers(values: Dict[str, Any]) -> Dict[str, Any]:
@@ -49,7 +57,9 @@ def _bounded_json(value: Any, limit: int) -> Tuple[Optional[str], int, bool]:
     return serialized[: max(0, limit - len(marker))] + marker, original_chars, True
 
 
-def _request_payload(kwargs: Dict[str, Any], *, detail: bool = False) -> Tuple[Dict[str, Any], bool]:
+def _request_payload(
+    kwargs: Dict[str, Any], *, detail: bool = False
+) -> Tuple[Dict[str, Any], bool]:
     request = kwargs.get("request")
     payload = _without_transport_headers(request) if isinstance(request, dict) else {}
     body = payload.get("body")
@@ -63,7 +73,8 @@ def _request_payload(kwargs: Dict[str, Any], *, detail: bool = False) -> Tuple[D
             payload = {"method": payload.get("method", "POST")}
             body = (
                 {"_options_preview": options.get("preview", ""), "_options_truncated": True}
-                if source_truncated else _without_transport_headers(options)
+                if source_truncated
+                else _without_transport_headers(options)
             )
         else:
             # An older Hermes host offers only the ordinary, size-capped view.
@@ -83,8 +94,14 @@ def _request_payload(kwargs: Dict[str, Any], *, detail: bool = False) -> Tuple[D
 def _base_attributes(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     attrs: Dict[str, Any] = {"hermes_api_event": True}
     for key in (
-        "api_request_id", "credential_id", "account_name", "provider", "model",
-        "api_mode", "api_call_count", "retry_count",
+        "api_request_id",
+        "credential_id",
+        "account_name",
+        "provider",
+        "model",
+        "api_mode",
+        "api_call_count",
+        "retry_count",
     ):
         value = kwargs.get(key)
         if value is not None and value != "":
@@ -107,12 +124,16 @@ def _emit_body_log(message: str, attributes: Dict[str, Any], body_key: str, leve
         parts.append(encoded[offset:end].decode("utf-8"))
         offset = end
     for index, part in enumerate(parts, start=1):
-        _LOG.log(level, message, extra={
-            **attributes,
-            body_key: part,
-            "body_part_index": index,
-            "body_part_count": len(parts),
-        })
+        _LOG.log(
+            level,
+            message,
+            extra={
+                **attributes,
+                body_key: part,
+                "body_part_index": index,
+                "body_part_count": len(parts),
+            },
+        )
 
 
 def emit_api_request_log(event: str, **kwargs: Any) -> None:
@@ -122,8 +143,12 @@ def emit_api_request_log(event: str, **kwargs: Any) -> None:
     if mode not in ("debug", "info"):
         return
 
-    limit = _HARD_BODY_LIMIT if mode == "debug" else min(
-        _HARD_BODY_LIMIT, max(1, int(getattr(tracer.config, "preview_max_chars", 1200) or 1200))
+    limit = (
+        _HARD_BODY_LIMIT
+        if mode == "debug"
+        else min(
+            _HARD_BODY_LIMIT, max(1, int(getattr(tracer.config, "preview_max_chars", 1200) or 1200))
+        )
     )
     attributes = _base_attributes(kwargs)
     attributes["api_event"] = event
@@ -171,9 +196,13 @@ def emit_api_request_log(event: str, **kwargs: Any) -> None:
     span = kwargs.get("_otel_span")
     if span is None and kwargs.get("task_id"):
         span = tracer.spans.get_span(f"api:{kwargs['task_id']}")
-    context = use_span(span, end_on_exit=False) if hasattr(span, "get_span_context") else nullcontext()
+    context = (
+        use_span(span, end_on_exit=False) if hasattr(span, "get_span_context") else nullcontext()
+    )
     with context:
         _emit_body_log(
-            message, attributes, "request_body" if event == "request" else "response_body",
+            message,
+            attributes,
+            "request_body" if event == "request" else "response_body",
             logging.DEBUG if mode == "debug" else logging.INFO,
         )

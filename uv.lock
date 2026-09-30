@@ -642,12 +642,13 @@ wheels = [
 
 [[package]]
 name = "hermes-otel"
-version = "1.14.0"
+version = "1.18.1"
 source = { editable = "." }
 dependencies = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
+    { name = "pyyaml" },
 ]
 
 [package.optional-dependencies]
@@ -694,6 +695,7 @@ requires-dist = [
     { name = "psutil", marker = "extra == 'host-metrics'" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'" },
+    { name = "pyyaml", specifier = ">=6,<7" },
     { name = "pyyaml", marker = "extra == 'dev'" },
     { name = "pyyaml", marker = "extra == 'yaml'" },
     { name = "requests", marker = "extra == 'e2e'" },

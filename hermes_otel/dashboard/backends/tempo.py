@@ -1,5 +1,11 @@
 """Tempo / LGTM adapter.
 
+Traces come from Tempo. For ``type: lgtm`` (and any Tempo entry that names
+them) metrics come from the stack's Prometheus and logs from its Loki, via
+the ``_prometheus`` / ``_loki`` helpers (#194): ``prometheus_url`` and
+``loki_url`` default to ports 9090 and 3100 on the Tempo host, which is the
+``grafana/otel-lgtm`` layout.
+
 Tempo is the reference backend — the card + detail response shapes the
 rest of the plugin consumes were copied from Tempo's search + trace
 JSON. Everything else translates *to* these shapes.
@@ -13,13 +19,14 @@ through; ``select()`` is appended only when they haven't added one.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 from urllib import parse as _urlparse
 
-from . import register
+from . import _loki, _prometheus, register
 from .base import (
     BackendAdapter,
     HTTPException,
+    LogFilter,
     StructuredFilter,
     http_get_json,
     rewrite_host_for_docker,
@@ -29,6 +36,10 @@ from .base import (
 # images. Override per deployment by adding ``query_port`` to the
 # backend entry in config.yaml.
 _DEFAULT_TEMPO_QUERY_PORT = 3200
+# The otel-lgtm image's Prometheus and Loki ports, used when the entry does
+# not name ``prometheus_url`` / ``loki_url`` explicitly.
+_DEFAULT_PROMETHEUS_PORT = 9090
+_DEFAULT_LOKI_PORT = 3100
 
 _CARD_SELECT_ATTRS = (
     ".llm.model_name",
@@ -50,9 +61,62 @@ _CARD_SELECT_ATTRS = (
 )
 
 
+def _dedupe_spans(data: Any) -> Any:
+    """Drop repeated spans (same span id) from an OTLP-JSON trace.
+
+    Two entries that both end in one Tempo (a ``tempo`` entry next to an
+    ``lgtm`` gateway that forwards to the same Tempo) store every span twice
+    until compaction merges them, and the waterfall would show each span
+    doubled. The first copy wins.
+    """
+    if not isinstance(data, dict):
+        return data
+    seen: set = set()
+    for batch in data.get("batches") or []:
+        for scope in batch.get("scopeSpans") or []:
+            kept = []
+            for sp in scope.get("spans") or []:
+                sid = sp.get("spanId")
+                if sid and sid in seen:
+                    continue
+                if sid:
+                    seen.add(sid)
+                kept.append(sp)
+            scope["spans"] = kept
+    return data
+
+
+def _re_esc(text: str) -> str:
+    """Escape ``text`` for a TraceQL regex inside a double-quoted string."""
+    out = []
+    for ch in text:
+        if ch in ".^$*+?()[]{}|\\":
+            out.append("\\\\" + ch)
+        elif ch == '"':
+            out.append('\\"')
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def _esc(s: str) -> str:
     """Quote a string for safe inclusion in a TraceQL string literal."""
     return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+_DISABLED = ("off", "none", "disabled", "false")
+
+
+def _sibling_url(explicit: Any, is_stack: bool, scheme: str, host: str, port: int) -> Optional[str]:
+    """An explicit URL wins, ``off`` disables the signal, and an ``lgtm`` entry
+    otherwise defaults to the stack port on the Tempo host."""
+    if explicit is False or (isinstance(explicit, str) and explicit.strip().lower() in _DISABLED):
+        return None
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip().rstrip("/")
+    if is_stack:
+        return f"{scheme}://{host}:{port}"
+    return None
 
 
 @register
@@ -68,12 +132,70 @@ class TempoAdapter(BackendAdapter):
         host = parsed.hostname or "localhost"
         scheme = parsed.scheme or "http"
         port = cfg.get("query_port") or _DEFAULT_TEMPO_QUERY_PORT
-        self.query_url = f"{scheme}://{rewrite_host_for_docker(host)}:{port}"
+        host = rewrite_host_for_docker(host)
+        self.query_url = f"{scheme}://{host}:{port}"
+        # Metrics and logs: on for ``lgtm`` (the stack ships Prometheus + Loki
+        # next to Tempo) and for any entry that points at them explicitly.
+        is_stack = cfg.get("type") == "lgtm"
+        self.prometheus_url = _sibling_url(
+            cfg.get("prometheus_url"), is_stack, scheme, host, _DEFAULT_PROMETHEUS_PORT
+        )
+        self.loki_url = _sibling_url(
+            cfg.get("loki_url"), is_stack, scheme, host, _DEFAULT_LOKI_PORT
+        )
+        self.supports_metrics = self.prometheus_url is not None
+        self.supports_logs = self.loki_url is not None
+        self.metrics_match = cfg.get("metrics_match") or None
+        self.loki_selector = cfg.get("loki_selector") or _loki.DEFAULT_SELECTOR
 
     def status(self) -> Dict[str, Any]:
         base = super().status()
         base["query_url"] = self.query_url
+        if self.prometheus_url:
+            base["prometheus_url"] = self.prometheus_url
+        if self.loki_url:
+            base["loki_url"] = self.loki_url
         return base
+
+    # ── metrics via Prometheus (#194) ─────────────────────────────────
+
+    def metric_names(self, start_s: int, end_s: int) -> List[Dict[str, Any]]:
+        return _prometheus.metric_names(self._prometheus(), start_s, end_s, self.metrics_match)
+
+    def metrics_query(
+        self,
+        name: str,
+        start_s: int,
+        end_s: int,
+        bucket_s: int,
+        group_by: Optional[str] = None,
+        agg: str = "sum",
+    ) -> Dict[str, Any]:
+        return _prometheus.metrics_query(
+            self._prometheus(), name, start_s, end_s, bucket_s, group_by=group_by, agg=agg
+        )
+
+    # ── logs via Loki (#194) ──────────────────────────────────────────
+
+    def logs_search(
+        self, f: LogFilter, start_s: int, end_s: int, limit: int
+    ) -> List[Dict[str, Any]]:
+        return _loki.logs_search(self._loki(), f, start_s, end_s, limit, self.loki_selector)
+
+    def loggers(self, start_s: int, end_s: int) -> List[Dict[str, Any]]:
+        return _loki.loggers(self._loki(), start_s, end_s, self.loki_selector)
+
+    def _prometheus(self) -> str:
+        if not self.prometheus_url:
+            raise HTTPException(
+                status_code=503, detail="This backend has no prometheus_url configured"
+            )
+        return self.prometheus_url
+
+    def _loki(self) -> str:
+        if not self.loki_url:
+            raise HTTPException(status_code=503, detail="This backend has no loki_url configured")
+        return self.loki_url
 
     def _build_traceql(self, f: StructuredFilter) -> str:
         """Compose the effective TraceQL query.
@@ -98,6 +220,12 @@ class TempoAdapter(BackendAdapter):
                 predicates.append("status = ok")
             for k, v in f.attr_equals.items():
                 predicates.append(f'.{k} = "{_esc(str(v))}"')
+            if f.free_text:
+                # Any span of the trace whose captured input or output
+                # mentions the text; regex-escaped so a marker with dots or
+                # brackets matches literally.
+                pat = ".*" + _re_esc(f.free_text) + ".*"
+                predicates.append(f'(span.input.value =~ "{pat}" || span.output.value =~ "{pat}")')
             base = "{ " + " && ".join(predicates) + " }" if predicates else "{}"
 
         if "select(" in base:
@@ -135,7 +263,10 @@ class TempoAdapter(BackendAdapter):
         # whose *child* is an api span. When the user asked for roots
         # only, drop traces where none of the matched spans is the
         # trace root.
-        if f.roots_only and isinstance(result, dict):
+        # A free-text search is a content search: the text usually sits on an
+        # api/llm span, not the root, so the trace is kept whenever any span
+        # matched.
+        if f.roots_only and not f.free_text and isinstance(result, dict):
             filtered = []
             for t in result.get("traces") or []:
                 root_name = (t.get("rootTraceName") or "").strip()
@@ -172,4 +303,4 @@ class TempoAdapter(BackendAdapter):
 
     def get_trace(self, trace_id: str) -> Dict[str, Any]:
         url = f"{self.query_url}/api/traces/{trace_id}"
-        return http_get_json(url, timeout=20.0)
+        return _dedupe_spans(http_get_json(url, timeout=20.0))

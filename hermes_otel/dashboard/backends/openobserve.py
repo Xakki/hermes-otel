@@ -20,11 +20,13 @@ from .base import (
     StructuredFilter,
     bucketize,
     counter_increases,
+    http_get_json,
     http_post_json,
     otlp_attrs_from_dict,
     otlp_status,
     resolve_env_or_literal,
     rewrite_host_for_docker,
+    strictly_older,
 )
 
 _DEFAULT_OO_PORT = 5080
@@ -149,6 +151,9 @@ _KNOWN_ATTRIBUTES = (
     "hermes.tool.gpu.utilization.avg",
     "hermes.tool.gpu.utilization.peak",
     "hermes.content.input_chars",
+    "hermes.cost.source",
+    "hermes.cost.status",
+    "hermes.cost.usage",
     "hermes.content.output_chars",
     "hermes.preview.input.original_chars",
     "hermes.preview.input.truncated",
@@ -300,6 +305,38 @@ class OpenObserveAdapter(BackendAdapter):
 
     # ── Query construction ───────────────────────────────────────────
 
+    _TEXT_COLUMNS = (
+        "gen_ai_input_messages",
+        "gen_ai_output_messages",
+        "input_value",
+        "output_value",
+        "llm_input",
+        "llm_output_content",
+        "tool_name",
+        "operation_name",
+        "status_message",
+    )
+
+    def _text_columns(self) -> List[str]:
+        """The free-text search columns present in the traces stream's schema.
+
+        Fetched once per adapter instance; when the schema cannot be read the
+        two GenAI message columns are assumed (they exist on every api span).
+        """
+        cached = getattr(self, "_text_cols", None)
+        if cached:
+            return cached
+        cols: List[str] = []
+        try:
+            url = f"{self.query_url}/api/{self.org}/streams/{self.stream}/schema?type=traces"
+            data = http_get_json(url, headers=self._headers(), timeout=10.0)
+            names = {f.get("name") for f in (data or {}).get("schema") or []}
+            cols = [c for c in self._TEXT_COLUMNS if c in names]
+        except Exception:
+            cols = []
+        self._text_cols = cols or ["gen_ai_input_messages", "gen_ai_output_messages"]
+        return self._text_cols
+
     def _build_where(self, f: StructuredFilter) -> str:
         clauses: List[str] = []
         if f.service:
@@ -318,7 +355,13 @@ class OpenObserveAdapter(BackendAdapter):
         for k, v in f.attr_equals.items():
             clauses.append(f"{_oo_col(k)} = '{_sql_escape(str(v))}'")
         if f.free_text:
-            clauses.append(f"llm_input LIKE '%{_sql_escape(f.free_text)}%'")
+            # OpenObserve rejects a query naming a column the stream has not
+            # seen (400 "unknown field"), so OR over the text columns that
+            # exist: the GenAI message lists carry prompts and outputs, the
+            # rest tool and status text.
+            cols = self._text_columns()
+            like = f"LIKE '%{_sql_escape(f.free_text)}%'"
+            clauses.append("(" + " OR ".join(f"{c} {like}" for c in cols) + ")")
 
         raw = (f.raw or "").strip()
         if raw:
@@ -577,11 +620,15 @@ class OpenObserveAdapter(BackendAdapter):
         if f.trace_id:
             where.append(f"trace_id = '{_sql_escape(f.trace_id)}'")
         if f.session:
-            where.append(f"session_id = '{_sql_escape(f.session)}'")
+            # The exporter's ``hermes.session_id`` attribute; OpenObserve flattens
+            # dots to underscores.
+            where.append(f"hermes_session_id = '{_sql_escape(f.session)}'")
         if f.logger:
             where.append(f"instrumentation_library_name = '{_sql_escape(f.logger)}'")
         if f.text:
             where.append(f"body LIKE '%{_sql_escape(f.text)}%'")
+        if f.before_ns:
+            where.append(f"_timestamp < {int(f.before_ns) // 1000}")  # µs column
         sql = f'SELECT * FROM "{self._log_stream()}"'
         if where:
             sql += " WHERE " + " AND ".join(where)
@@ -615,7 +662,7 @@ class OpenObserveAdapter(BackendAdapter):
             )
             if len(out) >= limit:
                 break
-        return out
+        return strictly_older(out, f)
 
     def loggers(self, start_s: int, end_s: int) -> List[Dict[str, Any]]:
         rows = self._search(

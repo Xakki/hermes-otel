@@ -43,6 +43,7 @@ from .request_logs import emit_api_request_log
 from .session import _start_session_span
 from .usage import (
     _USAGE_FIELDS,
+    _estimate_cost,
     _genai_metric_dims,
     _normalize_usage,
     _record_genai_token_usage,
@@ -120,7 +121,11 @@ def on_pre_llm_call(
     else:
         attributes.update(_llm_input_attributes(tracer, user_message))
     span = tracer.start_span(
-        name=f"llm.{model}", key=key, kind="llm", attributes=attributes, session_id=session_id,
+        name=f"llm.{model}",
+        key=key,
+        kind="llm",
+        attributes=attributes,
+        session_id=session_id,
     )
     tracer.spans.push_parent(span, session_id=session_id)
     debug_log(f"  LLM span started: key={key}")
@@ -253,7 +258,11 @@ def on_pre_api_request(
         if system_prompt:
             attributes["gen_ai.system_instructions"] = redact_export_text(system_prompt)
     span = tracer.start_span(
-        name=f"api.{model}", key=key, kind="llm", attributes=attributes, session_id=session_id,
+        name=f"api.{model}",
+        key=key,
+        kind="llm",
+        attributes=attributes,
+        session_id=session_id,
     )
     tracer.spans.push_parent(span, session_id=session_id)
     tracer.record_metric(
@@ -262,8 +271,14 @@ def on_pre_api_request(
         {**_metric_model_labels(model, provider), **identity_labels, "api_mode": api_mode},
     )
     emit_api_request_log(
-        "request", task_id=task_id, session_id=session_id, provider=provider, model=model,
-        api_mode=api_mode, api_call_count=api_call_count, **kwargs,
+        "request",
+        task_id=task_id,
+        session_id=session_id,
+        provider=provider,
+        model=model,
+        api_mode=api_mode,
+        api_call_count=api_call_count,
+        **kwargs,
     )
     debug_log(f"  API span started: key={key}")
 
@@ -321,7 +336,10 @@ def on_post_api_request(
                 ps.response_model = truncate_string(response_model, 200)
         _record_usage_metrics(tracer, totals, model_labels)
         _record_prompt_cache_metrics(
-            tracer, totals, usage.get("available_fields"), {**model_labels, "api_mode": api_mode},
+            tracer,
+            totals,
+            usage.get("available_fields"),
+            {**model_labels, "api_mode": api_mode},
         )
         _record_genai_token_usage(
             tracer,
@@ -329,12 +347,22 @@ def on_post_api_request(
             totals,
             {**_genai_metric_dims(model, provider, response_model), **identity_labels},
         )
-        cost = usage.get("cost")
-        if cost:
-            try:
-                tracer.record_metric("cost_usage", float(cost), model_labels)
-            except (ValueError, TypeError):
-                pass
+        # Cost: Hermes's own estimate for this call (#252). An unknown price
+        # or a subscription-included route carries a status but no amount, so
+        # a missing price never reads as $0.
+        cost = _estimate_cost(model, provider, base_url, usage)
+        if cost is not None:
+            attributes["hermes.cost.status"] = cost["status"]
+            if cost["source"]:
+                attributes["hermes.cost.source"] = cost["source"]
+            if cost["usd"] is not None:
+                attributes["hermes.cost.usage"] = cost["usd"]
+                tracer.record_metric(
+                    "cost_usage", cost["usd"], {**model_labels, "cost_status": cost["status"]}
+                )
+            if session_id:
+                tracer.sessions.get_or_create(session_id).add_cost(cost["status"], cost["usd"])
+
         tracer.record_metric("model_usage", 1, model_labels)
     if api_duration:
         attributes["llm.response.duration_ms"] = round(api_duration * 1000, 1)
@@ -379,8 +407,15 @@ def on_post_api_request(
             attributes["hermes.content.output_chars"] = len(attributes["output.value"] or "")
     tracer.spans.pop_parent(session_id=session_id)
     emit_api_request_log(
-        "response", task_id=task_id, session_id=session_id, provider=provider, model=model,
-        api_mode=api_mode, api_call_count=api_call_count, finish_reason=finish_reason, **kwargs,
+        "response",
+        task_id=task_id,
+        session_id=session_id,
+        provider=provider,
+        model=model,
+        api_mode=api_mode,
+        api_call_count=api_call_count,
+        finish_reason=finish_reason,
+        **kwargs,
     )
     tracer.end_span(key, attributes=attributes, status="ok")
     debug_log(f"  API span ended: status=ok, tokens={usage.get('total_tokens', 0) if usage else 0}")
@@ -454,15 +489,19 @@ def on_api_request_error(
         identity.update(_model_attributes(model, provider))
         identity.update(identity_labels)
         span = tracer.start_span(
-            name=f"api.{model}" if model else "api.error", key=fallback_key, kind="llm",
-            attributes=identity, session_id=session_id,
+            name=f"api.{model}" if model else "api.error",
+            key=fallback_key,
+            kind="llm",
+            attributes=identity,
+            session_id=session_id,
         )
         key = fallback_key
         created_fallback = True
     add_event = getattr(span, "add_event", None) if span is not None else None
     if callable(add_event):
         event_attrs: Dict[str, Any] = {
-            "exception.type": error_type or "error", "exception.escaped": True,
+            "exception.type": error_type or "error",
+            "exception.escaped": True,
         }
         if error_message:
             event_attrs["exception.message"] = error_message
@@ -475,19 +514,29 @@ def on_api_request_error(
     if key is None:
         return
     emit_api_request_log(
-        "error", **{
-            **kwargs, "task_id": task_id, "session_id": session_id,
-            "provider": provider, "model": model,
-            "api_mode": kwargs.get("api_mode"), "retry_count": retry_count,
-            "status_code": sc, "status_class": status_class,
-            "retryable": is_retryable, "max_retries": mr,
+        "error",
+        **{
+            **kwargs,
+            "task_id": task_id,
+            "session_id": session_id,
+            "provider": provider,
+            "model": model,
+            "api_mode": kwargs.get("api_mode"),
+            "retry_count": retry_count,
+            "status_code": sc,
+            "status_class": status_class,
+            "retryable": is_retryable,
+            "max_retries": mr,
             "error_type": error_type,
             "_otel_span": span,
         },
     )
     tracer.end_span(
-        key, attributes=attributes, status="error",
-        error_message=error_message or redact_export_text(reason or error_type or "api request failed"),
+        key,
+        attributes=attributes,
+        status="error",
+        error_message=error_message
+        or redact_export_text(reason or error_type or "api request failed"),
     )
     model_labels = {**_metric_model_labels(model, provider), **identity_labels}
     metric_attrs: Dict[str, Any] = {
@@ -495,10 +544,12 @@ def on_api_request_error(
         "retryable": "unknown" if is_retryable is None else str(is_retryable).lower(),
         **model_labels,
     }
+    metric_attrs["error_type"] = error_type or "unknown"
     tracer.record_metric("api_error_count", 1, metric_attrs)
     if is_retryable:
         tracer.record_metric("retry_count", 1, dict(model_labels))
     if api_duration:
         duration_dims = {**_genai_metric_dims(model, provider), **identity_labels}
+        duration_dims["error.type"] = error_type or "unknown"
         tracer.record_metric("gen_ai.client.operation.duration", api_duration, duration_dims)
     debug_log(f"  API error span ended: key={key}, error.type={error_type}, class={status_class}")

@@ -35,7 +35,7 @@ The field table below is generated from `HermesOtelConfig` by `scripts/gen_confi
 | `span_batch_max_export_batch_size` | int \| null | `null` | Max spans per OTLP POST; `null` = 512, or 64 when `content_capture` is `full` |
 | `span_batch_export_timeout_ms` | int | `30000` | Per-export HTTP timeout |
 | `force_flush_on_session_end` | bool | `true` | Flush every backend's span queue at the end of each turn, from a background thread (500 ms per backend, coalesced) |
-| `force_flush_wait_ms` | int | `500` | How long the turn waits for that background flush before returning to Hermes; `0` = do not wait |
+| `force_flush_wait_ms` | int | `1500` | How long the turn waits for that background flush (spans, then metrics and logs on a second thread) before returning to Hermes; a one-shot run exits right after, so this bounds what it exports; `0` = do not wait |
 | `capture_conversation_history` | bool | `false` | Attach the full message JSON to `llm.*` spans |
 | `conversation_history_max_chars` | int | `20000` | JSON cap when conversation capture is on |
 | `level` | string \| null | *(unset)* | Unified request/log policy: `debug` full content + DEBUG logs; `info` clipped content + INFO logs; `notice` no request/response content + WARNING logs. Overrides legacy capture/log-level settings when set. |
@@ -48,6 +48,9 @@ The field table below is generated from `HermesOtelConfig` by `scripts/gen_confi
 | `log_attach_logger` | string \| null | *(unset)* | Logger to attach to; `null` = root, `hermes_otel` = the plugin only |
 | `metrics_enabled` | bool | `false` | Export metrics only when top-level YAML `metrics.enabled` is `true`; defaults off |
 | `emit_genai_metrics` | bool | `true` | Also emit the OTel GenAI spec metrics (`gen_ai.client.*`, `gen_ai.agent.*`) |
+| `metrics_temporality` | string \| null | *(unset)* | Metric temporality for OTLP export: `cumulative` (Prometheus family) or `delta` (Datadog, New Relic, Logfire); unset = SDK default; a backend entry's own value wins |
+| `metrics_histogram` | string | `"explicit"` | Histogram aggregation: `explicit` (spec bucket boundaries) or `exponential` (base-2, for backends that accept it) |
+| `metrics_label_limit` | int | `100` | Distinct values a metric label such as `model` may take per process before the rest fold into `other` (0 = no cap) |
 | `skill_spans` | bool | `true` | Open a `skill.<name>` span on each successful skill load, closed at turn end |
 | `discovery_prompt` | bool | `false` | Register a system-prompt section advertising `hermes_otel:observability` (changes what the model sees every turn; opt-in) |
 | `dashboard_live` | bool | `true` | Keep recent spans/metrics/logs in `$HERMES_HOME/hermes_otel_live.db` for the dashboard's Live mode |
@@ -72,8 +75,10 @@ Shared fields (all optional unless noted):
 | `type` | string | **Required.** One of: `phoenix`, `langfuse`, `signoz`, `jaeger`, `tempo`, `otlp`, `lgtm`, `uptrace`, `openobserve`, `parseable`, `honeycomb`, `weave`. (LangSmith is env-var only — `LANGSMITH_TRACING=true`; it is not an OTLP backend.) |
 | `name` | string | Friendly name shown in logs (default: `type`) |
 | `endpoint` | string | Full OTLP traces endpoint URL. **Required** for every type except `langfuse` (built from `base_url`), `honeycomb` (built from `region`) and `weave` (built from `base_url`) |
+| `ui_url` | string | Where the backend's web UI is, for the dashboard's Settings tab to link its card to. Optional: without it the tab derives the link from `endpoint` for the types whose UI is served on the OTLP origin (Phoenix, Langfuse, OpenObserve, Uptrace, Parseable), from `query_port` for Jaeger and SigNoz, and from a port-less endpoint host for the rest; it never guesses a port |
 | `traces` | bool | Override trace-export default (`true`). Set `false` for dashboard/query-only backends that should not receive span exports. `trace` is accepted as an alias. |
 | `metrics` | bool | Override metrics-export default for this backend |
+| `metrics_temporality` | string | `cumulative` or `delta` for this backend's metric reader; overrides the top-level default and the type preset (`signoz`, `uptrace` → `delta`) |
 | `logs` | bool | Override logs-export default (on for `signoz`, `otlp`, `lgtm`, `uptrace`, `openobserve`, `parseable`, `honeycomb`; off elsewhere) |
 | `headers` | map | Per-backend HTTP headers (merged onto top-level `headers`) |
 
@@ -105,6 +110,8 @@ Basic Auth header is constructed automatically from public + secret keys.
 | `endpoint` | string | OTLP endpoint (self-host: `http://localhost:4328/v1/traces`; cloud: `https://ingest.<region>.signoz.cloud:443/v1/traces`) |
 | `ingestion_key` | string | SigNoz Cloud ingestion key (inline; discouraged) |
 | `ingestion_key_env` | string | Env var name holding the ingestion key |
+| `query_port` | int | Dashboard read path: the SigNoz UI/API port (default `3301`; `443` behind an HTTPS ingress) |
+| `api_key` / `api_key_env` | string | Dashboard read path: a SigNoz API key, sent as `SIGNOZ-API-KEY` (current SigNoz issues them from a service account). Ingestion never needs it |
 
 When an ingestion key is set, the plugin adds the `signoz-ingestion-key` header.
 
@@ -119,6 +126,8 @@ When an ingestion key is set, the plugin adds the `signoz-ingestion-key` header.
 | Field | Type | Description |
 |---|---|---|
 | `endpoint` | string | **Required.** Traces only (metrics/logs off); use `type: lgtm` for the all-in-one Grafana container |
+| `query_port` | int | Dashboard read path: Tempo's query API port (default `3200`) |
+| `prometheus_url` / `loki_url` | string | Optional. Naming them gives a Tempo entry the same dashboard metrics/logs as `lgtm` |
 
 #### `otlp`
 
@@ -139,6 +148,11 @@ Alias over `otlp` with a dedicated display name and all signals on by default. S
 | `endpoint` | string | **Required.** OTLP traces endpoint — `http://localhost:4318/v1/traces` for the bundled `docker-compose/lgtm.yaml` |
 | `metrics` | bool | Default: `true` |
 | `logs` | bool | Default: `true` |
+| `query_port` | int | Dashboard read path: Tempo's query API port (default `3200`) |
+| `prometheus_url` | string | Dashboard metrics. Default: port `9090` on the Tempo host (the otel-lgtm layout); `off` disables |
+| `loki_url` | string | Dashboard logs. Default: port `3100` on the Tempo host; `off` disables (e.g. a Loki without OTLP) |
+| `metrics_match` | string | Optional Prometheus series selector for the instrument list, e.g. `{__name__=~"hermes_.*"}` on a shared Prometheus |
+| `loki_selector` | string | Optional LogQL stream selector the log filters are applied to (default `{service_name=~".+"}`) |
 
 Use `type: lgtm` (not `type: tempo`) when pointing at the `grafana/otel-lgtm` container — `tempo` is traces-only and would disable the logs/metrics fan-out.
 
@@ -149,6 +163,9 @@ Use `type: lgtm` (not `type: tempo`) when pointing at the `grafana/otel-lgtm` co
 | `endpoint` | string | **Required.** OTLP traces endpoint (self-host: `http://localhost:14318/v1/traces`). Also via `OTEL_UPTRACE_ENDPOINT` |
 | `dsn` | string | Uptrace DSN, sent as the `uptrace-dsn` header on every export (inline; discouraged) |
 | `dsn_env` | string | Env var name holding the DSN (falls back to `OTEL_UPTRACE_DSN` / `UPTRACE_DSN`) |
+| `query_port` | int | Dashboard read path: the Uptrace UI/API port (default `14318`; `443` behind an HTTPS ingress) |
+| `user_token` / `user_token_env` | string | Dashboard read path: an Uptrace **user** token (Settings → API tokens); falls back to `UPTRACE_USER_TOKEN`. The DSN's project token only ingests |
+| `project_id` | int | Dashboard read path: the Uptrace project to query (default `1`) |
 
 All three signals on by default. See [Uptrace](/backends/uptrace).
 

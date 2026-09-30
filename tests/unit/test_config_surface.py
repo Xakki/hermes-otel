@@ -29,10 +29,16 @@ class TestEnvOverrides:
     @pytest.mark.parametrize("name,kind", _scalar_fields())
     def test_every_scalar_field_is_env_overridable(self, name, kind, monkeypatch, tmp_path):
         raw, expected = _SAMPLE[kind]
+        if name == "level":
+            raw, expected = "info", "info"
         if name == "host_metrics_gpu":
             raw, expected = "nvidia", "nvidia"
         if name == "log_level":
             raw, expected = "debug", "DEBUG"
+        if name == "metrics_temporality":
+            raw, expected = "delta", "delta"
+        if name == "metrics_histogram":
+            raw, expected = "exponential", "exponential"
         if name == "content_capture":
             raw, expected = "preview", "preview"
         monkeypatch.setenv(f"HERMES_OTEL_{name.upper()}", raw)
@@ -70,10 +76,16 @@ class TestYamlCoercion:
     def test_every_scalar_field_loads_from_yaml(self, name, kind, tmp_path):
         pytest.importorskip("yaml")
         raw, expected = _SAMPLE[kind]
+        if name == "level":
+            raw, expected = "info", "info"
         if name == "host_metrics_gpu":
             raw, expected = "amd", "amd"
         if name == "log_level":
             raw, expected = "warning", "WARNING"
+        if name == "metrics_temporality":
+            raw, expected = "delta", "delta"
+        if name == "metrics_histogram":
+            raw, expected = "exponential", "exponential"
         if name == "content_capture":
             raw, expected = "preview", "preview"
         path = tmp_path / "hermes_otel.yaml"
@@ -105,7 +117,7 @@ class TestGeneratedDocs:
             (REPO_ROOT / "hermes_otel" / f).read_text(encoding="utf-8")
             for f in ("backends.py", "langsmith_backend.py", "live_store.py", "plugin_config.py")
         )
-        names = set(re.findall(r'"([A-Z][A-Z0-9_]{5,})"', src))
+        names = set(re.findall(r'"(HERMES_[A-Z0-9_]+)"', src))
         names |= {"HERMES_OTEL_CONFIG", "HERMES_HOME", "HERMES_OTEL_DEBUG"}
         names -= {
             n for n in names if n.startswith("HERMES_OTEL_") and n[12:].lower() in field_kinds()

@@ -78,6 +78,7 @@ const sidebars: SidebarsConfig = {
         'development/contributing',
         'development/pr-workflow',
         'development/testing',
+        'development/turn-batch',
         'development/releasing',
         'development/debug-logging',
       ],

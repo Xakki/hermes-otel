@@ -150,7 +150,13 @@ def trace_totals(spans: Iterable[Dict[str, Any]]) -> Dict[str, Optional[float]]:
                 seen = True
         return total if seen else None
 
-    return {"tokens": pick(_TOKEN_KEYS), "cost": pick(_COST_KEYS)}
+    # A root with a cost status but no amount (unknown, included or partial
+    # pricing) has no total; never fall back to a subtotal (#252).
+    root_attrs = (root.get("attributes") or {}) if root is not None else {}
+    no_cost_total = (
+        "hermes.cost.status" in root_attrs and _num(_first(root_attrs, _COST_KEYS)) is None
+    )
+    return {"tokens": pick(_TOKEN_KEYS), "cost": None if no_cost_total else pick(_COST_KEYS)}
 
 
 def summarize_trace(spans: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -788,6 +794,7 @@ class LiveStore:
         start_ns: Optional[int] = None,
         end_ns: Optional[int] = None,
         limit: int = 300,
+        before_ns: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         self.flush()
         where = ["kind='log'"]
@@ -813,6 +820,10 @@ class LiveStore:
         if end_ns:
             where.append("ts <= ?")
             args.append(int(end_ns))
+        if before_ns:
+            # Keyset paging: the page after the one that ended at ``before_ns``.
+            where.append("ts < ?")
+            args.append(int(before_ns))
         try:
             rows = (
                 self._conn()
@@ -846,6 +857,33 @@ class LiveStore:
 # path), so they share data without sharing memory.
 _LIVE_STORE: Optional[LiveStore] = None
 _LIVE_LOCK = threading.Lock()
+# Read-side stores by file, for a dashboard that serves several profiles from
+# one process (#70): each profile has its own ``hermes_otel_live.db``.
+_STORES_BY_PATH: Dict[str, LiveStore] = {}
+
+
+def get_live_store_for_home(create: bool = True) -> Optional[LiveStore]:
+    """The live store of the Hermes home in force for the caller.
+
+    In the dashboard, Hermes resolves the home per request (``?profile=``), so
+    the Live source must open that profile's file rather than the one the
+    process opened first. The process singleton is reused when it already
+    points at the same file; other files get one reader each, kept for the
+    life of the process. ``None`` when the file cannot be opened.
+    """
+    path = os.environ.get("HERMES_OTEL_LIVE_DB") or _default_db_path()
+    current = _LIVE_STORE
+    if current is not None and str(getattr(current, "db_path", "")) == path:
+        return current
+    with _LIVE_LOCK:
+        store = _STORES_BY_PATH.get(path)
+        if store is None and create:
+            try:
+                store = LiveStore(db_path=path)
+            except Exception:  # pragma: no cover
+                return None
+            _STORES_BY_PATH[path] = store
+    return store
 
 
 def get_live_store(

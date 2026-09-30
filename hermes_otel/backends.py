@@ -21,12 +21,13 @@ type to ``_ENV_PRIORITY``.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import os
 import urllib.parse
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
-from .plugin_config import BackendConfig
+from .plugin_config import BackendConfig, normalize_temporality
 
 # Backend types whose collectors do not accept OTLP metrics. Pure traces.
 # Phoenix answers 405 on /v1/metrics and /v1/logs (arizephoenix/phoenix:latest
@@ -103,6 +104,9 @@ class _ResolvedBackend:
     supports_metrics: bool = True
     supports_logs: bool = False
     resource_attributes: Optional[Dict[str, str]] = None
+    # ``cumulative`` / ``delta`` for this backend's metric reader; ``None`` =
+    # the top-level ``metrics_temporality`` or the SDK default (#233).
+    metrics_temporality: Optional[str] = None
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────
@@ -598,6 +602,33 @@ _RESOLVERS: Dict[str, Callable[[BackendConfig], _ResolvedBackend]] = {
 # ── Public API ─────────────────────────────────────────────────────────────
 
 
+KNOWN_TYPES = frozenset(_RESOLVERS)
+
+
+def display_name(backend_type: str) -> str:
+    """The human name of a backend type (``signoz`` → ``SigNoz``)."""
+    t = (backend_type or "").strip().lower()
+    return _DISPLAY_NAMES.get(t, t.capitalize() or "OTLP")
+
+
+def signal_support(backend_type: str) -> Dict[str, bool]:
+    """Which OTLP signals a backend type accepts when the entry sets no override.
+
+    Mirrors :func:`_traces_for`, :func:`_metrics_for` and :func:`_logs_for`:
+    every type takes traces; the ``_TRACES_ONLY`` types refuse metrics; only the
+    ``_LOGS_CAPABLE`` types take logs. An explicit ``traces`` / ``metrics`` /
+    ``logs`` on the entry still wins over this table, which is what the
+    Settings tab uses to tell "off because unsupported" from "off by choice".
+    """
+    t = (backend_type or "").strip().lower()
+    return {"traces": True, "metrics": t not in _TRACES_ONLY, "logs": t in _LOGS_CAPABLE}
+
+
+def preset_temporality(backend_type: str) -> Optional[str]:
+    """The metric temporality a type's docs ask for, if any (``_TEMPORALITY_PRESETS``)."""
+    return _TEMPORALITY_PRESETS.get((backend_type or "").strip().lower())
+
+
 def resolve(bc: BackendConfig) -> _ResolvedBackend:
     """Resolve a declared ``BackendConfig`` into a ready-to-wire backend.
 
@@ -608,7 +639,24 @@ def resolve(bc: BackendConfig) -> _ResolvedBackend:
     resolver = _RESOLVERS.get(t)
     if resolver is None:
         raise ValueError(f"unknown backend type {bc.type!r}")
-    return resolver(bc)
+    rb = resolver(bc)
+    temporality = normalize_temporality(
+        bc.metrics_temporality, where=f"backends[{bc.name or t}].metrics_temporality"
+    ) or _TEMPORALITY_PRESETS.get(t)
+    if temporality and rb.metrics_temporality != temporality:
+        rb = dataclasses.replace(rb, metrics_temporality=temporality)
+    return rb
+
+
+# Backend types whose docs ask for delta temporality (#233): SigNoz
+# "recommends delta for Counter, Async Counter, and Histogram"; Uptrace
+# "Prefer delta metrics temporality". Prometheus-family backends (LGTM,
+# OpenObserve) and Honeycomb take the SDK default. An explicit
+# ``metrics_temporality`` on the entry always wins over the preset.
+_TEMPORALITY_PRESETS: Dict[str, str] = {
+    "signoz": "delta",
+    "uptrace": "delta",
+}
 
 
 def resolve_from_env() -> Optional[_ResolvedBackend]:

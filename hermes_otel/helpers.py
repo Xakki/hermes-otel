@@ -25,15 +25,49 @@ _FALLBACK_TOKEN_RE = re.compile(
 )
 _AUTH_SCHEME_VALUE_RE = re.compile(r"(?i)\b(Bearer|Basic)\s+([^\s\"']+)")
 _SENSITIVE_EXPORT_KEYS = {
-    "authorization", "proxyauthorization", "authorizationtoken", "cookie", "cookies", "setcookie",
-    "apikey", "xapikey", "xauthtoken", "apisecret", "accesskey", "accesskeys",
-    "accesskeyid", "oauthtoken", "oauthaccesstoken",
-    "oauthrefreshtoken", "accesstoken", "refreshtoken", "idtoken", "sessiontoken",
-    "bearertoken", "clientsecret", "secretaccesskey", "password", "passwd", "secret",
-    "secretkey", "privatekey", "credentials", "passwords", "secrets",
-    "privatekeys", "secretkeys", "apikeys", "apitokens", "accesstokens",
-    "refreshtokens", "authtokens", "oauthtokens", "bearertokens",
-    "sessiontokens", "idtokens", "clientsecrets",
+    "authorization",
+    "proxyauthorization",
+    "authorizationtoken",
+    "cookie",
+    "cookies",
+    "setcookie",
+    "apikey",
+    "xapikey",
+    "xauthtoken",
+    "apisecret",
+    "accesskey",
+    "accesskeys",
+    "accesskeyid",
+    "oauthtoken",
+    "oauthaccesstoken",
+    "oauthrefreshtoken",
+    "accesstoken",
+    "refreshtoken",
+    "idtoken",
+    "sessiontoken",
+    "bearertoken",
+    "clientsecret",
+    "secretaccesskey",
+    "password",
+    "passwd",
+    "secret",
+    "secretkey",
+    "privatekey",
+    "credentials",
+    "passwords",
+    "secrets",
+    "privatekeys",
+    "secretkeys",
+    "apikeys",
+    "apitokens",
+    "accesstokens",
+    "refreshtokens",
+    "authtokens",
+    "oauthtokens",
+    "bearertokens",
+    "sessiontokens",
+    "idtokens",
+    "clientsecrets",
 }
 
 
@@ -70,17 +104,33 @@ def sanitize_export_value(value: Any, *, _seen: Optional[set] = None, _depth: in
             raw_key = str(key)
             normalized = re.sub(r"[^a-z0-9]", "", raw_key.lower())
             safe_key = redact_export_text(raw_key)
-            secret_key = normalized in _SENSITIVE_EXPORT_KEYS or normalized.endswith((
-                "apikey", "apikeys", "accesskey", "accesskeys", "accesskeyid",
-                "token", "auth", "secret", "secrets",
-                "secretkey", "secretkeys", "privatekeys", "password", "passwords",
-                "passwd", "credential", "credentials",
-            ))
+            secret_key = normalized in _SENSITIVE_EXPORT_KEYS or normalized.endswith(
+                (
+                    "apikey",
+                    "apikeys",
+                    "accesskey",
+                    "accesskeys",
+                    "accesskeyid",
+                    "token",
+                    "auth",
+                    "secret",
+                    "secrets",
+                    "secretkey",
+                    "secretkeys",
+                    "privatekeys",
+                    "password",
+                    "passwords",
+                    "passwd",
+                    "credential",
+                    "credentials",
+                )
+            )
             secret_tokens = normalized.endswith("tokens") and not (
                 item is None or type(item) in (int, float)
             )
             out[safe_key] = (
-                "[REDACTED]" if secret_key or secret_tokens
+                "[REDACTED]"
+                if secret_key or secret_tokens
                 else sanitize_export_value(item, _seen=seen, _depth=_depth + 1)
             )
         seen.remove(marker)

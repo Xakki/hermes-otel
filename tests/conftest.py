@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import List, Tuple
 
@@ -173,11 +174,15 @@ def inmemory_otel_with_metrics():
     from opentelemetry.sdk.resources import Resource
 
     exporters, plugin, trace_provider = _build_inmemory_plugin(n_exporters=1)
+    plugin.config = replace(plugin.config, metrics_enabled=True)
 
     metric_reader = InMemoryMetricReader()
+    from hermes_otel.tracer import metric_views
+
     meter_provider = MeterProvider(
         resource=Resource.create({"service.name": "hermes-otel-test"}),
         metric_readers=[metric_reader],
+        views=metric_views(),
     )
     plugin._meter = meter_provider.get_meter("hermes-otel-test")
     plugin._meter_provider = meter_provider

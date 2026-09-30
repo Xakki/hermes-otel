@@ -1,5 +1,54 @@
 # Changelog
 
+## [1.18.1](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.18.0...hermes-otel-v1.18.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* price API calls with Hermes's own cost estimate; declare PyYAML ([#253](https://github.com/briancaffey/hermes-otel/issues/253)) ([7a1d684](https://github.com/briancaffey/hermes-otel/commit/7a1d6846fb8e46e605f1115a7e304aafdd6addbb)), closes [#251](https://github.com/briancaffey/hermes-otel/issues/251) [#252](https://github.com/briancaffey/hermes-otel/issues/252)
+
+## [1.18.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.17.1...hermes-otel-v1.18.0) (2026-09-27)
+
+
+### Features
+
+* **dashboard:** structured span views: conversations by role, markdown, tool calls, key/value JSON, with a structured/raw switch ([#249](https://github.com/briancaffey/hermes-otel/issues/249)) ([f55e9d2](https://github.com/briancaffey/hermes-otel/commit/f55e9d249092a1065b370e3dbe45159528184fc8))
+
+## [1.17.1](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.17.0...hermes-otel-v1.17.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* **logs:** stamp exported log records with the active span's trace context; turn-batch tests; adapter fixes ([#247](https://github.com/briancaffey/hermes-otel/issues/247)) ([78e3f3d](https://github.com/briancaffey/hermes-otel/commit/78e3f3d1118fc761b693636d37e2a706cae51a4b))
+
+## [1.17.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.16.0...hermes-otel-v1.17.0) (2026-09-26)
+
+
+### Features
+
+* **dashboard:** metrics and logs adapters for SigNoz, Uptrace and LGTM, keyset-paged logs ([#243](https://github.com/briancaffey/hermes-otel/issues/243)) ([f4a138b](https://github.com/briancaffey/hermes-otel/commit/f4a138b497393375d8b414e29c4ea0dd8e8412f2))
+
+## [1.16.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.15.1...hermes-otel-v1.16.0) (2026-09-25)
+
+
+### Features
+
+* **dashboard:** backend cards link to the backend UI and separate type support from export state ([#241](https://github.com/briancaffey/hermes-otel/issues/241)) ([10dda25](https://github.com/briancaffey/hermes-otel/commit/10dda257683cdcca2d206b0cd6db6fc1c2daaa98))
+
+## [1.15.1](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.15.0...hermes-otel-v1.15.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **dashboard:** widen the metrics range select so "last 1h · 4 buckets" is not truncated ([#236](https://github.com/briancaffey/hermes-otel/issues/236)) ([f3e3a75](https://github.com/briancaffey/hermes-otel/commit/f3e3a752ea7346009c28ff0661c5082b82824837))
+
+## [1.15.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.14.0...hermes-otel-v1.15.0) (2026-09-24)
+
+
+### Features
+
+* **metrics:** spec bucket boundaries, per-backend temporality, seconds histograms, label allow-list and cap ([#234](https://github.com/briancaffey/hermes-otel/issues/234)) ([6822eeb](https://github.com/briancaffey/hermes-otel/commit/6822eeb5d74c46ab713d2f376214846dfd5ea399)), closes [#233](https://github.com/briancaffey/hermes-otel/issues/233)
+
 ## [1.14.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.13.0...hermes-otel-v1.14.0) (2026-09-23)
 
 

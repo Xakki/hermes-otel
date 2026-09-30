@@ -107,14 +107,36 @@ def os_environ_backends():
 def _turn(mod, session_id: str) -> None:
     mod.hooks.on_session_start(session_id=session_id, model="m", platform="cli")
     mod.hooks.on_pre_api_request(
-        session_id=session_id, model="m", request_id=f"r-{session_id}", request={"messages": []}
+        task_id=f"r-{session_id}",
+        session_id=session_id,
+        platform="cli",
+        model="m",
+        provider="test",
+        base_url="",
+        api_mode="chat",
+        api_call_count=1,
+        message_count=1,
+        tool_count=0,
+        approx_input_tokens=10,
+        request_char_count=10,
+        max_tokens=10,
     )
     mod.hooks.on_post_api_request(
+        task_id=f"r-{session_id}",
         session_id=session_id,
+        platform="cli",
         model="m",
-        request_id=f"r-{session_id}",
+        provider="test",
+        base_url="",
+        api_mode="chat",
+        api_call_count=1,
+        api_duration=0.1,
+        finish_reason="stop",
+        message_count=1,
+        response_model="m",
         usage={"prompt_tokens": 10, "completion_tokens": 2},
-        response={},
+        assistant_content_chars=0,
+        assistant_tool_call_count=0,
     )
     mod.hooks.on_session_end(
         session_id=session_id, completed=True, interrupted=False, model="m", platform="cli"
@@ -129,7 +151,9 @@ def test_two_profiles_in_one_process(fake_hermes):
         for profile, module_name in zip(("alpha", "beta"), names):
             with scope(profile) as home:
                 # per-profile config, as a user would write it
-                (home / "hermes_otel.yaml").write_text(f"project_name: proj-{profile}\n")
+                (home / "hermes_otel.yaml").write_text(
+                    f"project_name: proj-{profile}\nmetrics:\n  enabled: true\n"
+                )
                 mod = _load_copy(module_name)
                 mod.register(FakeCtx())
                 copies[profile] = mod
