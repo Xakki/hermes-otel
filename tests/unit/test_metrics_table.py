@@ -23,6 +23,7 @@ EXPECTED_KEYS = {
     "tool_duration",
     "message_count",
     "model_usage",
+    "api_request_count",
     "skill_inferred",
     "subagent_count",
     "subagent_duration",
@@ -69,7 +70,7 @@ class TestTable:
 def plugin():
     """A plugin with a fake meter so every instrument is a MagicMock."""
     p = HermesOTelPlugin()
-    p.config = HermesOtelConfig()
+    p.config = HermesOtelConfig(metrics_enabled=True)
     p._meter = MagicMock()
     p._meter.create_counter.side_effect = lambda name, **kw: MagicMock(name=name)
     p._meter.create_histogram.side_effect = lambda name, **kw: MagicMock(name=name)
@@ -95,7 +96,7 @@ class TestCreation:
 
     def test_a_failing_instrument_does_not_take_the_others_down(self):
         p = HermesOTelPlugin()
-        p.config = HermesOtelConfig()
+        p.config = HermesOtelConfig(metrics_enabled=True)
         p._meter = MagicMock()
 
         def counter(name, **kw):
@@ -153,7 +154,7 @@ class TestRecording:
             inst.record.assert_not_called()
 
     def test_genai_gate_applies_once_in_record_metric(self, plugin):
-        plugin.config = HermesOtelConfig(emit_genai_metrics=False)
+        plugin.config = HermesOtelConfig(metrics_enabled=True, emit_genai_metrics=False)
         plugin.record_metric("gen_ai.client.token.usage", 5, {})
         plugin.record_metric("gen_ai.agent.token.usage", 5, {})
         plugin.record_metric("gen_ai.client.operation.duration", 0.5, {})

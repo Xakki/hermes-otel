@@ -144,6 +144,7 @@ def configure_default_handler() -> None:
         if not isinstance(h, logging.NullHandler):
             return
     handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(logging.INFO)
     handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(handler)
     if logger.level == logging.NOTSET:

@@ -112,9 +112,16 @@ Deliberate: the debug log is meant for troubleshooting, not routine operation. I
 
 ## Metrics labels are curated
 
-The plugin deliberately does not put user IDs, session IDs, tool arg values, or similar high-cardinality values on metrics. Labels are restricted to low-cardinality values (model, provider, tool name, outcome, finish reason) to keep Prometheus-style TSDBs from blowing up.
+The plugin deliberately omits per-request IDs, session IDs, user IDs, tool
+arguments, and prompt content from metric labels. Alongside model/provider and
+other curated dimensions, API request metrics carry the selected credential
+pool entry's stable `credential_id` and verbatim `account_name`. That adds one
+series dimension per pool entry, not per call; large credential pools still
+increase Prometheus cardinality, so budget and retain accordingly. The label
+may contain an email address or other user-supplied name.
 
-If you need high-cardinality breakdowns, use traces (where every attribute is fine), not metrics.
+Use logs and traces for request-level correlation (`api_request_id`), not
+metric labels.
 
 ## Host metrics are a sampler, not an accountant
 

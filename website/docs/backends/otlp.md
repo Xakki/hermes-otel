@@ -8,7 +8,7 @@ description: "Send Hermes traces to any OTLP/HTTP-compatible collector — Honey
 
 If your backend isn't on the list but it accepts **OTLP over HTTP**, the generic `otlp` type has you covered. Point at an endpoint, set any auth headers, and go.
 
-**Signals:** depends on the collector (traces always; metrics if supported).
+**Signals:** traces, logs and metrics are individually selectable per backend; metrics additionally require the global `metrics.enabled: true` opt-in.
 
 ## Typical use cases
 
@@ -21,14 +21,17 @@ If your backend isn't on the list but it accepts **OTLP over HTTP**, the generic
 Via `config.yaml`:
 
 ```yaml
+metrics:
+  enabled: true
 backends:
   - type: otlp
     name: my-collector           # Friendly name shown in logs
     endpoint: http://collector:4318/v1/traces
     headers:
-      X-Auth: secret
+      X-Auth: ${COLLECTOR_AUTH}
       X-Tenant: acme
-    metrics: true                # Default true — set false for traces-only collectors
+    metrics: true                # Backend allows metrics; global opt-in is still required
+    logs: true                   # Collector must accept /v1/logs
 ```
 
 The `name` is purely for log output ("`[hermes-otel] ✓ my-collector connected`") — it doesn't affect the spans themselves.
@@ -90,9 +93,9 @@ backends:
     endpoint: http://otel-collector.internal:4318/v1/traces
 ```
 
-### Metrics-only at a separate endpoint
+### Logs and metrics without traces
 
-If your collector splits traces and metrics across different paths, the plugin derives the metrics endpoint by replacing `/v1/traces` with `/v1/metrics`. If that doesn't match your setup, open an issue — we can add a `metrics_endpoint:` override.
+Set `traces: false` on the backend entry; logs and globally enabled metrics still export. The plugin derives `/v1/metrics` and `/v1/logs` by replacing `/v1/traces`. This fits an existing Collector forwarding OTLP/gRPC logs to Graylog and Remote Write metrics to Prometheus: [full example](/backends/graylog-prometheus). If those derived paths do not match your receiver, the generic backend needs a separate endpoint override.
 
 ## Env var auth
 
@@ -129,6 +132,7 @@ The plugin emits **both** `gen_ai.*` and OpenInference `llm.*` on every span —
 
 **"Traces show up; metrics don't"**
 
+- Set `metrics.enabled: true` globally in the plugin YAML; `metrics: true` in a backend entry alone does not turn metrics on.
 - Not every backend accepts OTLP metrics. Set `metrics: false` on the backend entry to silence the metrics exporter.
 - If your metrics endpoint isn't `/v1/metrics` derived from the trace endpoint, open an issue.
 

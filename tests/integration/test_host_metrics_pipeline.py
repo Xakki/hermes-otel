@@ -34,7 +34,9 @@ def _sample(at=1.0, proc=(0.25, 0.05), sys=(0.5, 0.1), gpus=()):
 
 
 def _enable(plugin, **overrides):
-    plugin.config = HermesOtelConfig(host_metrics=True, host_metrics_gpu="off", **overrides)
+    plugin.config = HermesOtelConfig(
+        metrics_enabled=True, host_metrics=True, host_metrics_gpu="off", **overrides
+    )
     plugin._create_host_metric_instruments()
     return plugin._host_metrics
 
@@ -118,7 +120,10 @@ class TestLifecycle:
     def test_start_runs_thread_when_available(self, inmemory_otel_with_metrics):
         _exporter, _reader, plugin = inmemory_otel_with_metrics
         plugin.config = HermesOtelConfig(
-            host_metrics=True, host_metrics_gpu="off", host_metrics_interval_ms=50
+            metrics_enabled=True,
+            host_metrics=True,
+            host_metrics_gpu="off",
+            host_metrics_interval_ms=50,
         )
         plugin._start_host_metrics()
         try:

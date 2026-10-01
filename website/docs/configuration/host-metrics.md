@@ -21,6 +21,8 @@ core.
 
 ```yaml
 # hermes_otel.yaml
+metrics:
+  enabled: true              # global metrics opt-in; required for the sampler
 host_metrics: true
 host_metrics_gpu: auto          # auto | amd | nvidia | off
 host_metrics_interval_ms: 1000  # sampling cadence; 100–250 for fine-grained tool windows
@@ -29,6 +31,7 @@ host_metrics_interval_ms: 1000  # sampling cadence; 100–250 for fine-grained t
 Or via env vars:
 
 ```bash
+export HERMES_OTEL_METRICS_ENABLED=true
 export HERMES_OTEL_HOST_METRICS=true
 export HERMES_OTEL_HOST_METRICS_GPU=auto
 export HERMES_OTEL_HOST_METRICS_INTERVAL_MS=1000

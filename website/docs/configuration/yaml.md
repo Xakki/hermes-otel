@@ -68,8 +68,7 @@ preview_max_chars: 1200
 capture_previews: true
 
 # When true, the llm.* span's input.value becomes the entire conversation
-# the model saw (as JSON). api.* spans don't carry message-level detail,
-# so this is the way to see what the model actually had in context.
+# the model saw (as JSON), beyond the model-facing content on api.* spans.
 capture_conversation_history: false
 
 # Safety cap on the JSON'd conversation — clipped with "..." if bigger.
@@ -81,11 +80,16 @@ See [Conversation capture](/configuration/conversation-capture) for a worked exa
 ## Logs (opt-in)
 
 ```yaml
+# Unified policy (recommended): debug = full request/response bodies + DEBUG+;
+# info = previews + INFO+; notice = only Hermes WARNING/ERROR/CRITICAL.
+# Off by default. Overrides the legacy capture_logs/log_level/content_capture.
+level: info
+
 # Attach an OTel LoggingHandler to Python's logging so stdlib logger.info(...)
 # calls ship to any log-capable backend (SigNoz, LGTM, Uptrace, OpenObserve, Parseable,
 # or any OTLP collector). Every
 # record gets the active span's trace_id/span_id stamped on it automatically.
-# Off by default because attaching to root is invasive.
+# Legacy switch when level is unset; off by default.
 # Env: HERMES_OTEL_CAPTURE_LOGS
 capture_logs: false
 
@@ -93,8 +97,8 @@ capture_logs: false
 # Env: HERMES_OTEL_LOG_LEVEL
 log_level: INFO
 
-# Which Python logger to attach to. null = root (everything). "hermes_otel"
-# or "hermes" narrows the firehose.
+# Which Python logger to attach to. null = root with a Hermes-only source
+# filter (not every library). "hermes_otel" narrows to the plugin only.
 # Env: HERMES_OTEL_LOG_ATTACH_LOGGER
 log_attach_logger: null
 ```
@@ -104,14 +108,21 @@ See [OTel logs](/configuration/logs) for the full story, including the loop-avoi
 ## Metrics
 
 ```yaml
+# Global opt-in. Backend metrics: true does not enable metrics on its own;
+# when false, no metric instruments/readers or local metric records are used.
+# Env: HERMES_OTEL_METRICS_ENABLED. Default: false.
+metrics:
+  enabled: true
+
 # Emit OTel GenAI semantic-convention metrics (gen_ai.client.*, gen_ai.agent.*)
 # alongside the custom hermes.* metrics, so generic OTel-GenAI dashboards and
-# alerts work without per-user wiring. Set false for hermes.* only.
+# alerts work without per-user wiring. Set false for hermes.* only, provided
+# metrics.enabled is true.
 # Env: HERMES_OTEL_EMIT_GENAI_METRICS. Default: true.
 emit_genai_metrics: true
 ```
 
-See the [Metrics reference](/reference/metrics#otel-genai-semantic-convention-metrics) for the full instrument list, units, and labels.
+See the [Metrics reference](/reference/metrics#otel-genai-semantic-convention-metrics) for the full instrument list, units, and labels, or [Graylog + Prometheus via Collector](/backends/graylog-prometheus) for a logs/metrics-only route.
 
 ## Skills
 

@@ -36,10 +36,13 @@ hermes-otel speaks plain **OTLP/HTTP**, so any OTLP-compatible backend should wo
 → [Langfuse](/backends/langfuse) — polished UI for LLM traces, free cloud tier, robust self-host.
 
 **"I want traces *and* the token/tool/cost metrics dashboard"**
-→ [SigNoz](/backends/signoz), [LGTM](/backends/lgtm) or [OpenObserve](/backends/openobserve) — they accept OTLP metrics as well as traces (Phoenix does not).
+→ [SigNoz](/backends/signoz), [LGTM](/backends/lgtm) or [OpenObserve](/backends/openobserve) — they accept OTLP metrics as well as traces (Phoenix does not). Set `metrics.enabled: true` in YAML to opt in.
 
 **"I want all three signals — traces, metrics, AND logs — in Grafana, in one container"**
-→ [Grafana LGTM](/backends/lgtm) — `grafana/otel-lgtm` bundles Grafana + Tempo + Loki + Mimir + a collector. Pair with `capture_logs: true` and you get [trace-id-correlated logs](/configuration/logs) out of the box.
+→ [Grafana LGTM](/backends/lgtm) — `grafana/otel-lgtm` bundles Grafana + Tempo + Loki + Mimir + a collector. Set `metrics.enabled: true` and `level: info` for [trace-id-correlated logs](/configuration/logs).
+
+**"I already have a Collector forwarding to Graylog and Prometheus"**
+→ [Graylog + Prometheus via Collector](/backends/graylog-prometheus) — one OTLP/HTTP input, with logs and metrics routed to the existing destinations.
 
 **"I'm already on LangChain / LangSmith"**
 → [LangSmith](/backends/langsmith) — free personal tier, zero extra infra.
@@ -67,11 +70,13 @@ hermes-otel speaks plain **OTLP/HTTP**, so any OTLP-compatible backend should wo
 
 ## Signal support
 
-Backends differ in which OTel signals they accept. The plugin auto-skips signals a backend can't take — you don't need to configure anything.
+Backends differ in which OTel signals they accept. The plugin auto-skips signals
+a backend can't take. Metrics still require the global `metrics.enabled: true`
+opt-in; logs require `level` or the legacy `capture_logs` switch.
 
 | Backend | Traces | Metrics | Logs |
 |---|---|---|---|
-| Phoenix | ✅ | ✅ | ❌ |
+| Phoenix | ✅ | ❌ | ❌ |
 | Langfuse | ✅ | ❌ | ❌ |
 | LangSmith | ✅ (via HTTP Run API, not OTLP) | ❌ | ❌ |
 | SigNoz | ✅ | ✅ | ✅ |

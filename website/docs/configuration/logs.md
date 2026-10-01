@@ -6,28 +6,34 @@ description: "Ship Python logger.info(...) calls to Loki or any OTLP logs receiv
 
 # OTel logs
 
-Opt-in pipeline that captures Python `logging` records and ships them to any log-capable backend (Loki via the [LGTM stack](/backends/lgtm), SigNoz, or any OTLP collector) as the OTel logs signal. Each record is automatically stamped with the active span's `trace_id` and `span_id`, which is what makes the "jump from this log line to the span that emitted it" workflow in Grafana / SigNoz work.
+The plugin can export structured API request/response events plus Python `logging` records to any log-capable backend (Loki via the [LGTM stack](/backends/lgtm), SigNoz, or an OTLP collector). API events carry `api_request_id`, `credential_id`, and `account_name` when a credential-pool entry was selected. OTLP log records also carry trace/span correlation when the active context provides it.
 
-**Off by default.** Attaching a handler to Python's root logger is invasive — it exports records from every library hermes-agent imports, not just the plugin. Turn it on deliberately.
+Without the unified `level` setting, Python-log capture keeps its legacy `capture_logs` default (`false`). When capture is enabled, records are filtered to Hermes-owned logger namespaces; third-party libraries and HTTP exporter internals are excluded even when the handler is attached to the root logger. Request/response bodies are emitted only for `level: debug` or `level: info`.
 
 ## The switch
 
 ```yaml
 # config.yaml
-capture_logs: true
-log_level: INFO
-log_attach_logger: null   # null = root logger (default); set to scope capture
+level: info               # debug | info | notice
+log_attach_logger: null   # root with a Hermes-only source filter
 ```
 
 Or via env vars:
 
 ```bash
-export HERMES_OTEL_CAPTURE_LOGS=true
-export HERMES_OTEL_LOG_LEVEL=INFO
+export HERMES_OTEL_LEVEL=info
 export HERMES_OTEL_LOG_ATTACH_LOGGER=hermes_otel   # optional scope
 ```
 
-The plugin will attach an OTel `LoggingHandler` to the target logger and fan records out to every backend whose `supports_logs` is true (see [Which backends accept logs](#which-backends-accept-logs)).
+Setting `level` enables log capture and selects the Python logger threshold: `debug` → DEBUG, `info` → INFO, `notice` → WARNING. It also controls request/response body capture and overrides the legacy `capture_logs`, `log_level`, and `content_capture` settings. Logs are sent only to configured backends whose `supports_logs` is true (see [Which backends accept logs](#which-backends-accept-logs)); the in-process live store follows the same threshold.
+
+| `level` | API request/response event | Python log threshold | Span content |
+|---|---|---|---|
+| `debug` | Full serialized request and response, each hard-capped at 128,000 characters; large bodies split into ordered 8,192-byte log parts | DEBUG | Full |
+| `info` | Serialized previews capped by `preview_max_chars` (1,200 by default), with original length and truncation flags | INFO | Preview |
+| `notice` | No request/response body events | WARNING and above | Off |
+
+For `debug`, current Hermes supplies a separate, header-stripped `request_options` view so tool schemas and request options are not first cut by the ordinary API observer's 8,000-character string / 50,000-character payload limits. It is independently bounded to 128,000 characters; when exceeded, the request event sets `request_truncated: true` and includes a bounded options preview. With an older Hermes host that does not supply `request_options`, the plugin marks the debug request as truncated instead of claiming full coverage. Known credential fields, authorization/cookie headers, and token-like strings are redacted before logs or content attributes reach an exporter or the live store. Do not use `debug` unless full prompt/response telemetry is appropriate for the configured destination.
 
 ## What correlation looks like
 
@@ -65,15 +71,15 @@ Hermes' loggers write from the agent's own threads, where the plugin's spans are
 
 ### `capture_logs`
 
-Master switch. `false` → pipeline disabled, no handler installed, no change to Python logging. `true` → handler attached, records flow to every log-capable backend.
+Legacy master switch. When `level` is unset, `false` disables Python-log capture and `true` attaches the handler. If `level` is set, it takes precedence and enables capture.
 
 ### `log_level`
 
-When the target logger sits above this level, the plugin lowers it so records reach the handler (a process-wide effect on the root logger) and restores the previous level when the tracer shuts down or re-initializes.
+Legacy handler threshold used only when `level` is unset. When the target logger sits above this level, the plugin lowers it so eligible Hermes records reach the handler and restores the previous level when the tracer shuts down or re-initializes.
 
 Minimum severity the handler accepts — `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Case-insensitive. Numeric values (e.g. `"20"`) also accepted. Defaults to `INFO`.
 
-Records below this level never reach the OTel pipeline. Python's logger-level filtering still applies first (if the root logger is at WARNING, DEBUG records are never even created); the handler level is an additional cap on top.
+Records below this level never reach the OTel pipeline. The plugin lowers the attached logger's threshold when needed and restores it on shutdown; an explicitly configured child logger may still suppress DEBUG records before they propagate.
 
 ### `log_attach_logger`
 
@@ -81,12 +87,12 @@ Which Python logger to attach the handler to.
 
 | Value | Scope |
 |---|---|
-| `null` (default) | **Root logger** — captures hermes-agent + plugin + every imported library |
-| `"hermes"` | Only hermes-agent's own logs (and child loggers) |
+| `null` (default) | **Root logger** — a source filter keeps Hermes-owned namespaces and the plugin |
+| `"hermes"` | That logger subtree, still subject to the Hermes source filter |
 | `"hermes_otel"` | Only the plugin's logs |
 | any other name | That logger's subtree only |
 
-Start broad (root), narrow if the signal-to-noise ratio gets bad.
+Use root for Hermes logs plus the plugin; use `hermes_otel` for plugin-only diagnostics. Other library namespaces remain excluded.
 
 ## Which backends accept logs?
 
@@ -136,9 +142,9 @@ If the banner is **absent** after setting `capture_logs: true`, check:
 
 ## Not suppressed by privacy mode
 
-[Privacy mode](/configuration/privacy) (`capture_previews: false`) suppresses **span** previews (user messages, tool args/results) but does **not** touch logs. The log body is whatever the application passed to `logger.info(...)` — if that includes sensitive content, it flows unless the application redacts it first.
+[Privacy mode](/configuration/privacy) (`capture_previews: false`) suppresses **span** previews (user messages, tool args/results) but does **not** disable Python log capture. Known credentials and token-like strings are redacted on export; arbitrary sensitive user text is not automatically classified.
 
-This is deliberate: privacy mode reasons about plugin-captured attributes, not about what host-app code chooses to log. If your app logs user messages at INFO and you also want those suppressed, either scope capture with `log_attach_logger` to exclude the chatty logger, or filter at the application's logging layer.
+This is deliberate: privacy mode reasons about plugin-captured attributes, not about what host-app code chooses to log. For content-free export choose `level: notice`; for other modes, exclude a chatty logger at the application's logging layer. `log_attach_logger: hermes_otel` excludes Hermes' own log records as well as third-party records.
 
 ## Interaction with other signals
 

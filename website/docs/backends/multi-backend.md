@@ -70,12 +70,16 @@ Each backend runs in **its own worker thread with its own bounded queue**:
 ## Per-backend signal overrides
 
 By default, every backend receives trace exports. Backends that don't accept
-OTLP metrics (`langfuse`, `jaeger`, `tempo`) get metrics-export
+OTLP metrics (`phoenix`, `langfuse`, `jaeger`, `tempo`) get metrics-export
 auto-disabled, and logs export is enabled only for log-capable backends.
+The global `metrics.enabled: true` opt-in is also required; a backend's
+`metrics: true` flag alone does not start metric readers.
 Use `traces: true|false`, `metrics: true|false`, or `logs: true|false` to
 override a signal per backend:
 
 ```yaml
+metrics:
+  enabled: true
 backends:
   - type: otlp
     name: collector

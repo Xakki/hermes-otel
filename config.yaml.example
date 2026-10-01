@@ -76,6 +76,14 @@
 # Also settable via HERMES_OTEL_CONTENT_CAPTURE.
 # content_capture: "full"
 
+# Unified request/log policy (overrides content_capture, capture_logs, and
+# log_level when set):
+#   debug  full request/response bodies and DEBUG+ Hermes logs (128,000-character cap)
+#   info   clipped request/response previews and INFO+ Hermes logs
+#   notice no request/response bodies; WARNING+ Hermes logs only
+# Known authorization/cookie fields and token-like strings are redacted.
+# level: info
+
 # Pre-1.11 spellings, still honoured and kept consistent with content_capture:
 # capture_previews: false is `off`; capture_full_prompts / capture_full_responses
 # true is `full` (set one of them false to keep that side as previews).
@@ -93,8 +101,7 @@
 # capture_sender_id: false
 
 # Put the entire conversation_history the model is about to see on the
-# llm.* span's input.value. The api.* spans don't carry message-level
-# detail, so flipping this on is the easiest way to see what the model saw.
+# llm.* span's input.value, beyond the model-facing request on api.* spans.
 # Output is JSON (input.mime_type=application/json) — Phoenix pretty-prints it.
 # Respects `capture_previews` above.
 # capture_conversation_history: false
@@ -105,13 +112,11 @@
 
 # ── Logs (opt-in) ─────────────────────────────────────────────────────────────
 #
-# Attaches an OTel LoggingHandler to Python's logging so stdlib logger.info()
-# calls ship to any log-capable backend (SigNoz, generic OTLP → Loki/LGTM).
-# Each log record is automatically stamped with the active span's trace_id
-# and span_id, so Grafana's "logs for this span" drill-down works.
+# Attaches an OTel LoggingHandler to Python logging, filtered to Hermes namespaces.
+# calls ship to configured log-capable backends. Root capture is filtered to
+# Hermes-owned logger namespaces; third-party and exporter logs are excluded.
 #
-# Off by default because attaching to the root logger is invasive — it
-# exports logs from every library hermes-agent imports, not just the plugin.
+# Legacy settings, used only when `level` is unset.
 # Also settable via HERMES_OTEL_CAPTURE_LOGS / HERMES_OTEL_LOG_LEVEL /
 # HERMES_OTEL_LOG_ATTACH_LOGGER.
 # capture_logs: false
@@ -119,12 +124,17 @@
 # Minimum level the handler accepts (DEBUG, INFO, WARNING, ERROR, CRITICAL).
 # log_level: INFO
 
-# Which logger to attach to. Null/unset = root logger (captures everything).
-# Set to e.g. "hermes_otel" to capture only plugin logs; "hermes" for
-# hermes-agent's own logs; any logger name to scope further.
+# Which logger to attach to. Null/unset = root with a Hermes-only source
+# filter. Set to "hermes_otel" to scope to plugin logs.
 # log_attach_logger: null
 
 # ── OTel GenAI semantic-convention metrics ────────────────────────────────────
+#
+# Metrics are entirely opt-in. A configured metrics-capable backend is not
+# enough; enable this global gate and the backend's `metrics: true` signal.
+# metrics:
+#   enabled: true
+# Also settable via HERMES_OTEL_METRICS_ENABLED.
 #
 # In addition to the custom hermes.* metrics, the plugin emits spec-named
 # instruments so generic OpenTelemetry GenAI dashboards/alerts light up with
@@ -132,8 +142,9 @@
 #   gen_ai.client.token.usage      Histogram {token}  (gen_ai.token.type input/output)
 #   gen_ai.client.operation.duration  Histogram s     (SECONDS, per spec)
 #   gen_ai.agent.token.usage       Histogram {token}  (per-turn/session rollup)
-# Dimensions stay low-cardinality (operation, provider, model — never per-call
-# IDs). Set false to emit only the hermes.* metrics.
+# Metrics include one credential_id/account_name label pair per selected pool
+# entry, but never per-call request or session IDs. Budget for pool cardinality.
+# Set false to emit only the hermes.* metrics.
 # Also settable via HERMES_OTEL_EMIT_GENAI_METRICS.
 # emit_genai_metrics: true
 #
@@ -349,6 +360,24 @@
 #       X-Tenant: acme
 #     metrics: true
 #     logs: true       # override default (on for otlp/signoz/lgtm/uptrace/openobserve/parseable/honeycomb)
+
+# ── Graylog + Prometheus via an existing Collector ───────────────────────────
+#
+# Hermes sends OTLP/HTTP to the Collector; its logs pipeline exports OTLP/gRPC
+# to Graylog and its metrics pipeline exports Prometheus Remote Write. Do not
+# route traces to a Collector that only has a debug exporter for that signal.
+# See website/docs/backends/graylog-prometheus.md before enabling this route.
+#
+# level: info
+# metrics:
+#   enabled: true
+# dashboard_live: false
+# backends:
+#   - type: otlp
+#     endpoint: http://collector.internal:4318/v1/traces
+#     traces: false
+#     metrics: true
+#     logs: true
 
 # ── LGTM quickstart ──────────────────────────────────────────────────────────
 #

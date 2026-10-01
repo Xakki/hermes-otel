@@ -31,7 +31,7 @@ def live_plugin(tmp_path):
     plugin.tracer = provider.get_tracer("live-test")
     plugin._initialized = True
     plugin._live_active = True
-    plugin.config = HermesOtelConfig(dashboard_live=True)
+    plugin.config = HermesOtelConfig(dashboard_live=True, metrics_enabled=True)
 
     prev = tracer_mod._tracer
     tracer_mod._tracer = plugin

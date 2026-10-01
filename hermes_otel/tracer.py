@@ -34,7 +34,12 @@ from .debug_utils import (
     logger,
     remove_sdk_log_forwarding,
 )
-from .helpers import derive_signal_endpoint, package_version
+from .helpers import (
+    derive_signal_endpoint,
+    package_version,
+    redact_export_text,
+    sanitize_export_value,
+)
 from .hermes_home import resolve_hermes_home, resolve_profile_name
 from .plugin_config import (
     BackendConfig,
@@ -300,6 +305,7 @@ _B_TOOL_MS = (1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000
 _B_WAIT_MS = (100, 500, 1000, 5000, 10000, 30000, 60000, 300000, 600000)
 _B_RUN_MS = (1000, 5000, 10000, 30000, 60000, 120000, 300000, 600000, 1800000)
 _MODEL_LABELS = ("model", "provider")
+_API_IDENTITY_LABELS = ("credential_id", "account_name")
 _GENAI_LABELS = (
     "gen_ai.operation.name",
     "gen_ai.provider.name",
@@ -341,7 +347,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "{token}",
         "Tokens consumed by type",
         "int",
-        labels=_MODEL_LABELS + ("token_type",),
+        labels=_MODEL_LABELS + _API_IDENTITY_LABELS + ("token_type",),
     ),
     "prompt_cache_tokens": InstrumentSpec(
         "hermes.prompt_cache.tokens",
@@ -349,7 +355,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "{token}",
         "Prompt tokens by cache result",
         "int",
-        labels=_MODEL_LABELS + ("api_mode", "cache_result"),
+        labels=_MODEL_LABELS + _API_IDENTITY_LABELS + ("api_mode", "cache_result"),
     ),
     "prompt_cache_observations": InstrumentSpec(
         "hermes.prompt_cache.observations",
@@ -357,7 +363,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "{request}",
         "Requests with provider-reported prompt-cache usage",
         "one",
-        labels=_MODEL_LABELS + ("api_mode", "cache_result"),
+        labels=_MODEL_LABELS + _API_IDENTITY_LABELS + ("api_mode", "cache_result"),
     ),
     "cost_usage": InstrumentSpec(
         "hermes.cost.usage",
@@ -365,7 +371,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "USD",
         "USD cost per API call, as priced by Hermes (actual or estimated)",
         "float",
-        labels=_MODEL_LABELS + ("cost_status",),
+        labels=_MODEL_LABELS + _API_IDENTITY_LABELS + ("cost_status",),
     ),
     "tool_duration": InstrumentSpec(
         "hermes.tool.duration",
@@ -391,7 +397,15 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "{message}",
         "Messages per model and provider",
         "one",
-        labels=_MODEL_LABELS,
+        labels=_MODEL_LABELS + _API_IDENTITY_LABELS,
+    ),
+    "api_request_count": InstrumentSpec(
+        "hermes.api.request.count",
+        "counter",
+        "{request}",
+        "Provider API request attempts",
+        "one",
+        labels=_MODEL_LABELS + _API_IDENTITY_LABELS + ("api_mode",),
     ),
     "skill_inferred": InstrumentSpec(
         "hermes.skill.inferred",
@@ -425,7 +439,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "{request}",
         "Failed provider API requests by error type / status class",
         "one",
-        labels=("error_type", "status_class", "retryable") + _MODEL_LABELS,
+        labels=("error_type", "status_class", "retryable") + _MODEL_LABELS + _API_IDENTITY_LABELS,
     ),
     "retry_count": InstrumentSpec(
         "hermes.retry.count",
@@ -433,7 +447,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "{attempt}",
         "Provider API retry attempts",
         "int",
-        labels=_MODEL_LABELS,
+        labels=_MODEL_LABELS + _API_IDENTITY_LABELS,
     ),
     "approval_count": InstrumentSpec(
         "hermes.approval.count",
@@ -494,7 +508,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "record",
         genai=True,
         boundaries=_B_TOKENS,
-        labels=("gen_ai.token.type",) + _GENAI_LABELS,
+        labels=("gen_ai.token.type",) + _GENAI_LABELS + _API_IDENTITY_LABELS,
     ),
     "gen_ai.client.operation.duration": InstrumentSpec(
         "gen_ai.client.operation.duration",
@@ -504,7 +518,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "record",
         genai=True,
         boundaries=_B_OP_SECONDS,
-        labels=_GENAI_LABELS + ("error.type",),
+        labels=_GENAI_LABELS + _API_IDENTITY_LABELS + ("error.type",),
     ),
     "gen_ai.agent.token.usage": InstrumentSpec(
         "gen_ai.agent.token.usage",
@@ -611,6 +625,8 @@ _CAPPED_LABELS = frozenset(
         "role",
         "child_status",
         "error_type",
+        "credential_id",
+        "account_name",
     }
 )
 
@@ -714,12 +730,33 @@ class _LiveLogHandler(logging.Handler):
                     session_id, trace_id = hint
             self._store.add_log(
                 {
-                    "level": record.levelname,
-                    "logger": record.name,
-                    "body": record.getMessage(),
-                    "time_unix_nano": int(record.created * 1e9),
-                    "trace_id": trace_id,
-                    "session_id": session_id,
+                    **{
+                        "level": record.levelname,
+                        "logger": record.name,
+                        "body": redact_export_text(record.getMessage()),
+                        "time_unix_nano": int(record.created * 1e9),
+                        "trace_id": trace_id,
+                        "session_id": session_id,
+                    },
+                    **{
+                        key: sanitize_export_value(getattr(record, key))
+                        for key in (
+                            "api_event",
+                            "hermes_api_event",
+                            "api_request_id",
+                            "credential_id",
+                            "account_name",
+                            "provider",
+                            "model",
+                            "request_body",
+                            "request_original_chars",
+                            "request_truncated",
+                            "response_body",
+                            "response_original_chars",
+                            "response_truncated",
+                        )
+                        if getattr(record, key, None) is not None
+                    },
                 }
             )
         except Exception:  # pragma: no cover — logging must never raise
@@ -1183,16 +1220,11 @@ class HermesOTelPlugin:
                         try:
                             from . import log_handler as _lh
 
-                            # Floor the live tail at INFO so the dashboard isn't
-                            # flooded by Hermes' DEBUG firehose (platform probes,
-                            # kanban notifier, etc.) — those evict useful lines
-                            # from the bounded buffer. OTLP export keeps its own
-                            # (possibly DEBUG) level via the separate handler.
-                            lvl = max(_lh.resolve_level(self.config.log_level), logging.INFO)
+                            lvl = _lh.resolve_level(self.config.log_level)
                             target = logging.getLogger(self.config.log_attach_logger or None)
                             h = _LiveLogHandler(store)
                             h.setLevel(lvl)
-                            # Filter the chattiest config/probe loggers regardless.
+                            h.addFilter(_lh._HermesSourceFilter())
                             h.addFilter(_LiveLogNoiseFilter())
                             target.addHandler(h)
                             self._live_log_handler = h
@@ -1226,7 +1258,7 @@ class HermesOTelPlugin:
                         logger.error(f"[hermes-otel] ✗ {b.display_name} traces init failed: {e}")
                         continue
 
-                if b.supports_metrics:
+                if self.config.metrics_enabled and b.supports_metrics:
                     metrics_endpoint = self._derive_metrics_endpoint(b.endpoint)
                     try:
                         metric_hdrs = self._merge_headers(b.metrics_headers or b.headers)
@@ -1256,9 +1288,18 @@ class HermesOTelPlugin:
                     + (" (traces only)" if b.supports_traces and not b.supports_metrics else "")
                 )
 
-            # Proceed when *either* an OTLP backend or the live store is active.
-            # (Live-only = the zero-config dashboard with no external collector.)
-            if not self._span_processors and not self._live_active:
+            # Logs and metrics can be the only exported signals (for example,
+            # a Graylog/Prometheus Collector with traces explicitly disabled).
+            # Do not reject that pipeline merely because it has no span writer.
+            log_backend_active = self.config.capture_logs and any(
+                backend.supports_logs for backend in backends
+            )
+            if (
+                not self._span_processors
+                and not self._live_active
+                and not metric_readers
+                and not log_backend_active
+            ):
                 return False
 
             # Back-compat singular aliases — first entry wins.
@@ -1345,7 +1386,7 @@ class HermesOTelPlugin:
 
     def _ensure_host_sampler(self) -> Optional[Any]:
         """Create (but do not start) the sampler when ``config.host_metrics`` is on."""
-        if not self.config.host_metrics:
+        if not self.config.metrics_enabled or not self.config.host_metrics:
             return None
         if self._host_metrics is None:
             from .host_metrics import HostMetricsSampler
@@ -1580,13 +1621,18 @@ class HermesOTelPlugin:
         all (the zero-config path). GenAI-convention instruments are gated by
         ``emit_genai_metrics`` here, once, rather than at every call site.
         """
+        if not self.config.metrics_enabled:
+            return
         spec = _INSTRUMENTS.get(name)
         if spec is not None and spec.genai and not self.config.emit_genai_metrics:
             return
         otlp_name = spec.name if spec is not None else name
         # ``profile`` is a bounded label (one value per plugin instance), so
         # a backend can split every series by agent (#70).
-        attributes = {"profile": self.profile_name, **(attributes or {})}
+        try:
+            attributes = sanitize_export_value({"profile": self.profile_name, **(attributes or {})})
+        except Exception:
+            return
         attributes = self._bound_labels(attributes)
         if self._live_active:
             try:
@@ -1643,6 +1689,11 @@ class HermesOTelPlugin:
         """
         if not self._initialized:
             return INVALID_SPAN
+        try:
+            name = redact_export_text(name)
+            attributes = sanitize_export_value(attributes) if attributes else attributes
+        except Exception:
+            return INVALID_SPAN
 
         if session_id:
             self._session_keys.setdefault(session_id, set()).add(key)
@@ -1689,13 +1740,25 @@ class HermesOTelPlugin:
             debug_log(f"start_span: {name} (key={key}, kind={kind_value})")
             return span
         except Exception as e:
-            debug_log(f"Error starting span '{name}': {e}")
+            try:
+                detail = redact_export_text(e)
+            except Exception:
+                detail = "[REDACTION_ERROR]"
+            debug_log(f"Error starting span '{name}': {type(e).__name__}: {detail}")
             return INVALID_SPAN
 
     def end_span(
         self, key: str, attributes: dict = None, status: str = None, error_message: str = None
     ):
         """End a tracked span by its key."""
+        try:
+            attributes = sanitize_export_value(attributes) if attributes else attributes
+        except Exception:
+            attributes = {}
+        try:
+            error_message = redact_export_text(error_message) if error_message else error_message
+        except Exception:
+            error_message = "[REDACTION_ERROR]"
         try:
             # LangSmith mode — HTTP
             if self._langsmith:
@@ -1721,7 +1784,11 @@ class HermesOTelPlugin:
                     self._session_keys.pop(sid, None)
             debug_log(f"end_span: key={key}")
         except Exception as e:
-            debug_log(f"Error ending span (key={key}): {e}")
+            try:
+                detail = redact_export_text(e)
+            except Exception:
+                detail = "[REDACTION_ERROR]"
+            debug_log(f"Error ending span (key={key}): {type(e).__name__}: {detail}")
 
     # ── Turn registry (orphan sweep) ─────────────────────────────────────
 

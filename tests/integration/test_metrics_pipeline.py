@@ -390,7 +390,7 @@ class TestGenAISpecMetrics:
 
     def test_flag_disables_spec_metrics_only(self, inmemory_otel_with_metrics):
         _, metric_reader, plugin = inmemory_otel_with_metrics
-        plugin.config = HermesOtelConfig(emit_genai_metrics=False)
+        plugin.config = HermesOtelConfig(metrics_enabled=True, emit_genai_metrics=False)
 
         _api_call()
 

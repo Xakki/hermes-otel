@@ -156,6 +156,28 @@ class TestLabels:
         (point,) = _points(reader, "hermes.session.count")
         assert dict(point.attributes) == {"platform": "cli", "profile": plugin.profile_name}
 
+    def test_api_identity_passes_view_with_cardinality_cap(self, inmemory_otel_with_metrics):
+        _, reader, plugin = inmemory_otel_with_metrics
+        plugin.config = dataclasses.replace(plugin.config, metrics_label_limit=1)
+        plugin._label_values = {}
+        for suffix in ("a", "b"):
+            plugin.record_metric(
+                "api_request_count",
+                1,
+                {
+                    "model": "same-model",
+                    "provider": "provider",
+                    "api_mode": "chat",
+                    "credential_id": f"pool-{suffix}",
+                    "account_name": f"account-{suffix}",
+                    "api_request_id": f"request-{suffix}",
+                },
+            )
+        attrs = [dict(point.attributes) for point in _points(reader, "hermes.api.request.count")]
+        assert {a["credential_id"] for a in attrs} == {"pool-a", "other"}
+        assert {a["account_name"] for a in attrs} == {"account-a", "other"}
+        assert all(a["profile"] == plugin.profile_name and "api_request_id" not in a for a in attrs)
+
     def test_label_cap_folds_extra_values_into_other(self, inmemory_otel_with_metrics):
         _, reader, plugin = inmemory_otel_with_metrics
         plugin.config = dataclasses.replace(plugin.config, metrics_label_limit=2)
@@ -325,6 +347,7 @@ class TestTemporality:
             "hermes_otel.live_store._default_db_path", lambda: str(tmp_path / "l.db")
         )
         cfg = HermesOtelConfig(
+            metrics_enabled=True,
             backends=[
                 BackendConfig(
                     type="signoz",
