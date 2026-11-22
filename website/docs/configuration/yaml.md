@@ -334,11 +334,9 @@ discovery_prompt: false
 ## Live store and host metrics
 
 ```yaml
-# Keep recent spans, metrics and logs in $HERMES_HOME/hermes_otel_live.db
-# (override the path with HERMES_OTEL_LIVE_DB) for the dashboard's Live mode.
-# Env: HERMES_OTEL_DASHBOARD_LIVE. Default: true.
 dashboard_live: true
-dashboard_live_max_spans: 1000        # rows kept per kind (spans, metrics, logs)
+dashboard_live_storage: memory       # disk opts in to $HERMES_HOME/hermes_otel_live.db
+dashboard_live_max_spans: 1000        # total rows in memory; per-kind cap on disk
 dashboard_live_retention_hours: 168   # older rows are dropped; 0 = row cap only
 
 # CPU / GPU sampling. See /configuration/host-metrics.
@@ -346,6 +344,8 @@ host_metrics: false
 host_metrics_gpu: auto                # auto | amd | nvidia | off
 host_metrics_interval_ms: 1000        # floor 50
 ```
+
+Separate dashboard and CLI processes cannot query the default memory buffer. Use `disk` or a configured backend; `HERMES_OTEL_LIVE_DB` explicitly selects a disk path and `--db` overrides it for a CLI query. Restart recording processes to apply changes to mode or limits. See [The live store](/dashboard#the-live-store) for row limits and overrides.
 
 ## Lifecycle / cleanup
 

@@ -502,7 +502,7 @@ class TestApiLeftovers:
     def test_stale_live_store_readers_are_evicted(self, tmp_path, monkeypatch):
         from hermes_otel import live_store_registry as ls
 
-        monkeypatch.setattr(ls, "_LIVE_STORE", None)
+        ls.close_live_stores()
         monkeypatch.setattr(ls, "_STORES_BY_PATH", {})
         monkeypatch.setattr(ls, "MAX_READERS", 2)
         paths = [str(tmp_path / f"p{i}" / "hermes_otel_live.db") for i in range(4)]

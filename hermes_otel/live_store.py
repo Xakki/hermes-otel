@@ -1,9 +1,4 @@
-"""Shared, bounded telemetry store for the zero-config dashboard.
-
-The plugin's hooks run in the **gateway** process; the dashboard is served by a
-**separate** ``hermes dashboard`` process. They don't share memory, so the live
-store is backed by a small **SQLite** file (WAL mode) that both processes open:
-the gateway writes recent spans / metrics / logs, the dashboard reads them.
+"""Bounded telemetry in SQLite: process-local memory by default, or a WAL file.
 
 Design (schema v2, #184):
 - One append-only ``events`` table: ``seq`` (autoincrement = the cursor shared
@@ -12,10 +7,9 @@ Design (schema v2, #184):
   session id, name, status, start/end, level, logger, metric name, value) so
   the dashboard can filter, group and bucket in SQL instead of shipping the
   whole buffer to the browser.
-- Bounded two ways: each kind is trimmed to its last ``max_rows`` rows, and
-  rows older than ``retention_hours`` are dropped (both cheap, periodic).
-- WAL + ``busy_timeout`` so concurrent cross-process read/write is safe.
-- Thread-local connections: Hermes dispatches hooks across executor threads.
+- Memory mode has one cap across all kinds; disk mode retains per-kind caps.
+- One locked connection per store, independent of executor thread lifetime.
+- Disk uses WAL + ``busy_timeout`` for independent readers and writers.
 - The cursor-based API (``add_*`` / ``spans(since)`` / ``cursor()``) is
   unchanged from v1; the query API (``query_traces`` and friends) is new.
 - Schema versions (``PRAGMA user_version``): v1 (plugin < 1.9) was a JSON
@@ -34,8 +28,9 @@ import os
 import sqlite3
 import threading
 import time
+from collections import deque
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, TypeVar
+from typing import Any, Callable, Deque, Dict, Iterable, List, Optional, Sequence, Tuple, TypeVar
 
 from . import semconv as _sc
 from .buckets import bucketize
@@ -46,6 +41,8 @@ from .severity import python_level
 T = TypeVar("T")
 
 LIVE_DB_FILENAME = "hermes_otel_live.db"
+MEMORY_DB = ":memory:"
+DEFAULT_MAX_ROWS = 1000
 SCHEMA_VERSION = 3  # v3 (#266): log rows carry OTel severity spelling, span_id, attributes
 # Rows a failed commit may hold back for the next attempt (#291); beyond this
 # the oldest are dropped so a backend that stays locked cannot grow memory.
@@ -94,35 +91,31 @@ def default_db_path_for(home: Path) -> str:
 
 
 def _default_db_path() -> str:
-    """``$HERMES_HOME/hermes_otel_live.db`` (override with ``HERMES_OTEL_LIVE_DB``).
-
-    Both the gateway and the dashboard process resolve the same ``HERMES_HOME``,
-    so they share the file. It used to live next to this module inside the
-    plugin directory, which ``hermes plugins install`` wipes on every upgrade
-    and which is read-only for site-packages installs (#100). The test suite
-    monkeypatches this function to a temp dir, so tests must not call it to
-    check the default: use :func:`default_db_path_for`.
-    """
+    """Default path when disk storage is explicitly selected."""
     from .plugin_config import hermes_home
 
     return default_db_path_for(hermes_home())
 
 
 class LiveStore:
-    """Bounded, cross-process telemetry store backed by SQLite (WAL)."""
+    """A bounded SQLite buffer with a connection owned by the store."""
 
     def __init__(
         self,
         db_path: Optional[str] = None,
-        max_rows: int = 4000,
+        max_rows: Optional[int] = None,
         retention_hours: float = 168.0,
     ) -> None:
-        self.db_path = db_path or _default_db_path()
-        self.max_rows = max(10, int(max_rows))
+        self.db_path = db_path or MEMORY_DB
+        self.in_memory = self.db_path == MEMORY_DB
+        if max_rows is None:
+            max_rows = DEFAULT_MAX_ROWS if self.in_memory else 4000
+        if type(max_rows) is not int or not 0 < max_rows <= 2**63 - 1:
+            raise ValueError("max_rows must be a positive SQLite integer")
+        self.max_rows = max_rows
         self.retention_ns = int(max(0.0, float(retention_hours)) * 3600 * 1e9)
-        self._local = threading.local()
-        self._conns: list = []  # (owner thread, connection) still open, for close()
-        self._conns_lock = threading.Lock()
+        self._connection: Optional[sqlite3.Connection] = None
+        self._db_lock = threading.Lock()
         self._writes = 0
         # Writes are buffered and committed in one transaction by a daemon
         # thread every ``flush_interval_s`` or ``batch_rows`` rows (#91), so a
@@ -130,9 +123,12 @@ class LiveStore:
         # reads its own writes; another process sees them within the interval.
         self.flush_interval_s = 0.25
         self.batch_rows = 64
-        self._pending: List[tuple] = []
+        self._pending_limit = (
+            min(MAX_PENDING_ROWS, max_rows) if self.in_memory else MAX_PENDING_ROWS
+        )
+        self._pending: Deque[tuple] = deque(maxlen=self._pending_limit)
         self._pending_lock = threading.Lock()
-        self._flush_lock = threading.Lock()
+
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._writer: Optional[threading.Thread] = None
@@ -146,51 +142,44 @@ class LiveStore:
 
     # ── connection / schema ───────────────────────────────────────────────
     def close(self) -> None:
-        """Flush pending rows, stop the writer and close every connection (idempotent)."""
-        self._stop.set()
-        self._wake.set()
-        writer = self._writer
-        if writer is not None and writer.is_alive() and writer is not threading.current_thread():
-            writer.join(timeout=2.0)
-        self._writer = None
-        self.flush()
-        with self._conns_lock:
-            conns, self._conns = self._conns, []
-        for _owner, c in conns:
-            try:
-                c.close()
-            except Exception:  # pragma: no cover: never raise on shutdown
-                pass
-        self._local.conn = None
+        """Stop accepting rows, drain the last disk batch, and release the connection."""
+        with self._db_lock:
+            with self._pending_lock:
+                if self._stop.is_set():
+                    return
+                self._stop.set()
+                writer, self._writer = self._writer, None
+            self._wake.set()
+            if not self.in_memory:
+                self._flush_pending()
+            with self._pending_lock:
+                self._pending.clear()
+            if self._connection is not None:
+                self._connection.close()
+                self._connection = None
+        if writer is not None and writer is not threading.current_thread():
+            writer.join()
 
     def _conn(self) -> sqlite3.Connection:
-        c = getattr(self._local, "conn", None)
-        if c is None:
-            c = sqlite3.connect(self.db_path, timeout=5.0, check_same_thread=False)
-            _restrict_to_owner(self.db_path)  # before WAL: sidecars inherit this mode
-            c.execute("PRAGMA journal_mode=WAL")
-            c.execute("PRAGMA busy_timeout=3000")
-            c.execute("PRAGMA synchronous=NORMAL")
-            self._local.conn = c
-            me = threading.current_thread()
-            with self._conns_lock:
-                # A thread-local connection outlives its thread (sqlite3
-                # connections can't be weakref'd, and _conns keeps them
-                # alive). Close the ones whose owner thread has exited, or a
-                # gateway serving reads/writes from transient worker threads
-                # leaks 2 fds (db + wal) per thread until it crosses
-                # FD_SETSIZE and select() callers in the process break.
-                live = []
-                for owner, conn in self._conns:
-                    if owner.is_alive() or owner is me:
-                        live.append((owner, conn))
-                    else:
-                        try:
-                            conn.close()
-                        except Exception:  # pragma: no cover
-                            pass
-                live.append((me, c))
-                self._conns = live
+        """Borrow the connection while holding ``_db_lock`` (or before publication)."""
+        if self._connection is not None:
+            return self._connection
+        c = sqlite3.connect(self.db_path, timeout=3.0, check_same_thread=False)
+        try:
+            if self.in_memory:
+                c.execute("PRAGMA temp_store=MEMORY")
+            else:
+                _restrict_to_owner(self.db_path)  # WAL sidecars inherit this mode
+                c.execute("PRAGMA journal_mode=WAL")
+                c.execute("PRAGMA synchronous=NORMAL")
+            with c:
+                c.execute("BEGIN IMMEDIATE")
+                self._init_schema(c)
+        except BaseException:
+            c.close()
+            raise
+        self._connection = c
+        self.open_error = None
         return c
 
     # Indexed columns added since v2, in the order they were introduced; an
@@ -212,59 +201,57 @@ class LiveStore:
 
     def _init_db(self) -> None:
         try:
-            c = self._conn()
-            version = int(c.execute("PRAGMA user_version").fetchone()[0])
-            has_table = bool(
-                c.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'"
-                ).fetchone()
-            )
-            if has_table:
-                existing = {r[1] for r in c.execute("PRAGMA table_info(events)").fetchall()}
-                if version < 2 or "trace_id" not in existing:
-                    # v1 layout (JSON blob only, plugin < 1.9). The buffer is
-                    # recent activity, not a record; start over with the
-                    # indexed layout.
-                    c.execute("DROP TABLE events")
-                    c.execute("DELETE FROM sqlite_sequence WHERE name='events'")
-                    has_table = False
-                else:
-                    # v2 → v3 in place: same layout, newer JSON shape for log
-                    # rows; add any column a later version introduced so an
-                    # older gateway can keep writing the file we read (#291).
-                    for col, typ in self._COLUMNS:
-                        if col not in existing:
-                            c.execute(f"ALTER TABLE events ADD COLUMN {col} {typ}")
-            c.execute(
-                "CREATE TABLE IF NOT EXISTS events ("
-                "  seq  INTEGER PRIMARY KEY AUTOINCREMENT,"
-                "  kind TEXT NOT NULL,"
-                "  ts   INTEGER NOT NULL,"
-                "  data TEXT NOT NULL,"
-                "  trace_id TEXT, span_id TEXT, parent_span_id TEXT, session_id TEXT,"
-                "  name TEXT, status TEXT, start_ns INTEGER, end_ns INTEGER,"
-                "  duration_ms REAL, level INTEGER, logger TEXT, value REAL)"
-            )
-            for ix, cols in (
-                ("ix_events_kind_seq", "kind, seq"),
-                ("ix_events_kind_trace", "kind, trace_id"),
-                ("ix_events_kind_session", "kind, session_id"),
-                ("ix_events_kind_start", "kind, start_ns"),
-                ("ix_events_kind_name_ts", "kind, name, ts"),
-                ("ix_events_kind_ts", "kind, ts"),
-            ):
-                c.execute(f"CREATE INDEX IF NOT EXISTS {ix} ON events({cols})")
-            if version < SCHEMA_VERSION:
-                # Never re-stamp a file a newer plugin wrote (a downgrade):
-                # it stays readable and the newer plugin finds it intact.
-                c.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
-            # One trim per open, so a store nobody writes 64 rows to at a
-            # time (one-shot runs) is still bounded by cap and age (#291).
-            self._trim(c, ("span", "metric", "log"))
-            c.commit()
+            self._conn()
         except Exception as e:  # never break the agent; say why instead
             self.open_error = f"{type(e).__name__}: {e}"
             self._log_error(f"live store: cannot open {self.db_path}: {self.open_error}")
+
+    def _init_schema(self, c: sqlite3.Connection) -> None:
+        version = int(c.execute("PRAGMA user_version").fetchone()[0])
+        has_table = bool(
+            c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'").fetchone()
+        )
+        if has_table:
+            existing = {r[1] for r in c.execute("PRAGMA table_info(events)").fetchall()}
+            if version < 2 or "trace_id" not in existing:
+                # v1 layout (JSON blob only, plugin < 1.9). The buffer is
+                # recent activity, not a record; start over with the
+                # indexed layout.
+                c.execute("DROP TABLE events")
+                c.execute("DELETE FROM sqlite_sequence WHERE name='events'")
+            else:
+                # v2 → v3 in place: same layout, newer JSON shape for log
+                # rows; add any column a later version introduced so an
+                # older gateway can keep writing the file we read (#291).
+                for col, typ in self._COLUMNS:
+                    if col not in existing:
+                        c.execute(f"ALTER TABLE events ADD COLUMN {col} {typ}")
+        c.execute(
+            "CREATE TABLE IF NOT EXISTS events ("
+            "  seq  INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  kind TEXT NOT NULL,"
+            "  ts   INTEGER NOT NULL,"
+            "  data TEXT NOT NULL,"
+            "  trace_id TEXT, span_id TEXT, parent_span_id TEXT, session_id TEXT,"
+            "  name TEXT, status TEXT, start_ns INTEGER, end_ns INTEGER,"
+            "  duration_ms REAL, level INTEGER, logger TEXT, value REAL)"
+        )
+        for ix, cols in (
+            ("ix_events_kind_seq", "kind, seq"),
+            ("ix_events_kind_trace", "kind, trace_id"),
+            ("ix_events_kind_session", "kind, session_id"),
+            ("ix_events_kind_start", "kind, start_ns"),
+            ("ix_events_kind_name_ts", "kind, name, ts"),
+            ("ix_events_kind_ts", "kind, ts"),
+        ):
+            c.execute(f"CREATE INDEX IF NOT EXISTS {ix} ON events({cols})")
+        if version < SCHEMA_VERSION:
+            # Never re-stamp a file a newer plugin wrote (a downgrade):
+            # it stays readable and the newer plugin finds it intact.
+            c.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        # One trim per open, so a store nobody writes 64 rows to at a
+        # time (one-shot runs) is still bounded by cap and age (#291).
+        self._trim(c, ("span", "metric", "log"))
 
     def _log_error(self, msg: str) -> None:
         """One debug-log line per 30 s at most; never raises."""
@@ -280,7 +267,16 @@ class LiveStore:
             pass
 
     def _trim(self, c: sqlite3.Connection, kinds: Iterable[str]) -> None:
-        """Enforce the per-kind row cap, the host-sample cap and the age limit."""
+        """Enforce the global memory cap or legacy disk caps and the age limit."""
+        if self.in_memory:
+            if self.retention_ns:
+                c.execute("DELETE FROM events WHERE ts < ?", (time.time_ns() - self.retention_ns,))
+            c.execute(
+                "DELETE FROM events WHERE seq <= ("
+                "SELECT seq FROM events ORDER BY seq DESC LIMIT 1 OFFSET ?)",
+                (self.max_rows,),
+            )
+            return
         for kind in kinds:
             if kind == "metric":
                 c.execute(
@@ -322,20 +318,19 @@ class LiveStore:
         except Exception:  # pragma: no cover
             return
         with self._pending_lock:
+            if self._stop.is_set():
+                return
             self._pending.append(row)
-            n = len(self._pending)
-        self._ensure_writer()
-        if n >= self.batch_rows:
-            self._wake.set()
+            self._ensure_writer()
+            if len(self._pending) >= self.batch_rows:
+                self._wake.set()
 
     def _ensure_writer(self) -> None:
-        if self._writer is not None and self._writer.is_alive():
-            return
-        if self._stop.is_set():
+        if self._writer is not None:
             return
         t = threading.Thread(target=self._writer_loop, name="hermes-otel-live-store", daemon=True)
-        self._writer = t
         t.start()
+        self._writer = t
 
     def _writer_loop(self) -> None:
         while not self._stop.is_set():
@@ -350,14 +345,16 @@ class LiveStore:
         waits for a batch the writer is committing, then commits the rest, so
         the read that follows sees every row queued before it.
         """
-        written = 0
-        with self._flush_lock:
-            with self._pending_lock:
-                rows, self._pending = self._pending, []
-            if not rows:
-                return 0
-            try:
-                c = self._conn()
+        with self._db_lock:
+            return 0 if self._stop.is_set() else self._flush_pending()
+
+    def _flush_pending(self) -> int:
+        with self._pending_lock:
+            rows, self._pending = self._pending, deque(maxlen=self._pending_limit)
+        if not rows:
+            return 0
+        try:
+            with self._conn() as c:
                 kinds = set()
                 for kind, ts, data, names, values in rows:
                     cols = ["kind", "ts", "data"] + list(names)
@@ -366,35 +363,25 @@ class LiveStore:
                         [kind, ts, data] + list(values),
                     )
                     kinds.add(kind)
-                    written += 1
-                before, self._writes = self._writes, self._writes + written
-                # Trim every 64 writes (and once per open, see _init_db): per
-                # kind, so a chatty logger cannot evict every span (#100), and
-                # by age (#184).
-                if before // 64 != self._writes // 64:
+                after = self._writes + len(rows)
+                if self.in_memory or self._writes // 64 != after // 64:
                     self._trim(c, kinds)
-                c.commit()
-                self.last_write_error = None
-            except Exception as e:
-                # The batch is NOT lost: put it back at the front, bounded, so
-                # a lock held by another process or a transient disk error
-                # costs a delay rather than a turn (#291). SQLite rolled the
-                # partial transaction back when the statement failed.
-                try:
-                    c.rollback()
-                except Exception:  # pragma: no cover
-                    pass
-                written = 0
-                self.last_write_error = f"{type(e).__name__}: {e}"
-                with self._pending_lock:
-                    self._pending = (rows + self._pending)[-MAX_PENDING_ROWS:]
-                    held = len(self._pending)
-                self._log_error(
-                    f"live store: commit to {self.db_path} failed ({self.last_write_error}); "
-                    f"{held} rows held for the next attempt"
-                )
-                self._wake.set()
-        return written
+            self._writes = after
+            self.last_write_error = None
+            return len(rows)
+        except Exception as e:
+            # The transaction rolled back. Retry on the next tick; prefer
+            # newer rows if the failed batch plus new arrivals exceed the cap.
+            self.last_write_error = f"{type(e).__name__}: {e}"
+            with self._pending_lock:
+                rows.extend(self._pending)
+                self._pending = rows
+                held = len(rows)
+            self._log_error(
+                f"live store: commit to {self.db_path} failed ({self.last_write_error}); "
+                f"{held} rows held for the next attempt"
+            )
+            return 0
 
     def add_span(self, span: Dict[str, Any]) -> None:
         attrs = span.get("attributes") or {}
@@ -444,20 +431,23 @@ class LiveStore:
 
     # ── readers ───────────────────────────────────────────────────────────
     def _read(self, default: T, fn: Callable[[sqlite3.Connection], T]) -> T:
-        """Flush, then run ``fn`` on this thread's connection; ``default`` on failure.
+        """Flush, then run ``fn`` on the owned connection; ``default`` on failure.
 
         The one guard every reader goes through (#518): a corrupt or locked
         file answers "no telemetry" to the caller and says why in the debug
         log (rate-limited by :meth:`_log_error`), instead of ten silent copies.
         """
-        self.flush()
-        try:
-            return fn(self._conn())
-        except Exception as e:
-            self._log_error(
-                f"live store: read from {self.db_path} failed ({type(e).__name__}: {e})"
-            )
-            return default
+        with self._db_lock:
+            if self._stop.is_set():
+                return default
+            self._flush_pending()
+            try:
+                return fn(self._conn())
+            except Exception as e:
+                self._log_error(
+                    f"live store: read from {self.db_path} failed ({type(e).__name__}: {e})"
+                )
+                return default
 
     # ── cursor readers (dashboard API, unchanged since v1) ────────────────
     @staticmethod
@@ -519,15 +509,17 @@ class LiveStore:
         return out
 
     def clear(self) -> None:
-        with self._pending_lock:
-            self._pending.clear()
-        try:
-            c = self._conn()
-            c.execute("DELETE FROM events")
-            c.execute("DELETE FROM sqlite_sequence WHERE name='events'")
-            c.commit()
-        except Exception:  # pragma: no cover
-            pass
+        with self._db_lock:
+            if self._stop.is_set():
+                return
+            with self._pending_lock:
+                self._pending.clear()
+            try:
+                with self._conn() as c:
+                    c.execute("DELETE FROM events")
+                    c.execute("DELETE FROM sqlite_sequence WHERE name='events'")
+            except sqlite3.Error:  # pragma: no cover
+                pass
 
     # ── query API (server-side filtering, #184) ───────────────────────────
     def _span_where(

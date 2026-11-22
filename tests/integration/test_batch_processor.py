@@ -86,10 +86,7 @@ def real_init_plugin(tmp_path_factory):
         plugin.pipeline.span_processors[0].shutdown()
     except Exception:
         pass
-    store = registry._LIVE_STORE
-    if store is not None:
-        store.close()
-        registry._LIVE_STORE = None
+    registry.close_live_stores()
     mp.undo()
 
 

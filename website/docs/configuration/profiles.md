@@ -25,7 +25,7 @@ The plugin reads its configuration from the home of the profile it runs in, in t
 
 - Put a `hermes_otel.yaml` (or the `OTEL_*` variables in `.env`) in each profile's home. A profile without either exports nothing and keeps only its live store.
 - Give each profile its own `project_name` when they share a backend, so Phoenix or Langfuse show one project per agent. The `hermes.profile` attribute (below) separates them even when they share one.
-- The [live store](/dashboard#the-live-store), the debug log and the plugin's `config.yaml` all live under that profile's home: `<home>/hermes_otel_live.db`, `<home>/plugins/hermes_otel/debug.log`.
+- The [live store](/dashboard#the-live-store) is private to the recording process and profile by default. Opt-in disk mode uses `<home>/hermes_otel_live.db`; assign a distinct path per profile if you set `HERMES_OTEL_LIVE_DB`. The debug log and plugin config use the profile's home too.
 
 The [skill's terminal tool](/skill) reads the same home. `otel.py status` prints the home and profile it resolved, and `--db` points it at another profile's store.
 

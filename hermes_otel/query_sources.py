@@ -21,8 +21,10 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from . import semconv as _sc
 from .coerce import optional_number
-from .live_store import LiveStore, _default_db_path
+from .live_store import MEMORY_DB, LiveStore
+from .live_store_registry import DISABLED_REASON, MEMORY_ONLY_REASON, configured_db_path
 from .live_summary import span_kind
+from .plugin_config import load_config_with_sources
 from .severity import python_level
 
 
@@ -265,14 +267,28 @@ class BackendSource:
         return self.adapter.logs_search(lf, start_s, end_s, f.limit)
 
 
-def open_live_store(db_path: Optional[str]) -> LiveStore:
-    path = db_path or _default_db_path()
+def live_db_target(db_path: Optional[str]) -> Optional[str]:
+    """An explicit --db is independent of the active profile's storage mode."""
+    if db_path:
+        return db_path
+    return configured_db_path(load_config_with_sources(warn=False)[0])
+
+
+def require_live_db_path(db_path: Optional[str]) -> str:
+    path = live_db_target(db_path)
+    if path is None or path == MEMORY_DB:
+        reason = DISABLED_REASON if path is None else MEMORY_ONLY_REASON
+        raise CliError(f"{reason} For an existing file use --db <path>.")
     if not Path(path).exists():
         raise CliError(
             f"no live store at {path}. Run one Hermes turn with the plugin enabled, or set "
             "HERMES_OTEL_LIVE_DB / --db to the file (dashboard_live must be true)."
         )
-    return LiveStore(db_path=path)
+    return path
+
+
+def open_live_store(db_path: Optional[str]) -> LiveStore:
+    return LiveStore(db_path=require_live_db_path(db_path))
 
 
 def resolve_source(args: argparse.Namespace) -> Any:

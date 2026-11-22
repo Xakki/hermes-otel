@@ -391,12 +391,8 @@ if _OTEL_AVAILABLE:
                 pass
 
         def shutdown(self) -> None:
-            try:
-                from .live_store_registry import release_live_store
-
-                release_live_store(self._store)
-            except Exception:  # pragma: no cover
-                pass
+            # The pipeline may be rebuilt without unloading its profile.
+            self.force_flush()
 
         def force_flush(self, timeout_millis: int = 30000) -> bool:
             try:
@@ -604,6 +600,7 @@ class Pipeline:
     logger_provider: Any = None
     log_processors: List[Any] = field(default_factory=list)
     live_active: bool = False
+    live_store: Any = None
     # Reachability probe (#481): the thread and its results, filled shortly
     # after init; [] until then or when the probe is off.
     probe_thread: Any = None
@@ -789,20 +786,15 @@ def build_pipeline(
     if config.common_attributes:
         provider.add_span_processor(CommonAttributesProcessor(config.common_attributes))
 
-    # In-process live store for the zero-config dashboard. Added ahead of
-    # the OTLP processors; it renders the agent's activity even with no OTLP
-    # backend configured — install the plugin, open the tab, see traces.
+    # Capture the profile's store before hooks dispatch onto worker threads.
     if config.dashboard_live and _LiveSpanProcessor is not None:
         from .live_store_registry import get_live_store
 
-        store = get_live_store(
-            create=True,
-            max_rows=config.dashboard_live_max_spans,
-            retention_hours=config.dashboard_live_retention_hours,
-        )
+        store = get_live_store(create=True, config=config)
         if store is not None:
             _attach(_LiveSpanProcessor(store, config.omitted_attributes()))
             pipeline.live_active = True
+            pipeline.live_store = store
             # The live Logs tab is wired in init_logs_pipeline (same provider
             # as the OTLP exporters, #265).
 
@@ -982,8 +974,8 @@ def init_logs_pipeline(
         content_mode=content_mode(config),
         preview_chars=config.preview_max_chars,
     )
-    live_store = None
-    if pipeline.live_active:
+    live_store = pipeline.live_store
+    if pipeline.live_active and live_store is None:
         try:
             from .live_store_registry import get_live_store
 

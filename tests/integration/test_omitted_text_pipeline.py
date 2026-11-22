@@ -89,7 +89,7 @@ def _run_turn(tmp_path, monkeypatch, dashboard_live=True, **overrides):
         pipeline_mod, "PeriodicExportingMetricReader", lambda exporter, **kw: InMemoryMetricReader()
     )
     monkeypatch.setattr("hermes_otel.live_store._default_db_path", lambda: str(tmp_path / "l.db"))
-    monkeypatch.setattr(ls, "_LIVE_STORE", None)
+    ls.close_live_stores()
 
     path = tmp_path / "hermes_otel.yaml"
     overrides["dashboard_live"] = dashboard_live
@@ -172,9 +172,7 @@ def _run_turn(tmp_path, monkeypatch, dashboard_live=True, **overrides):
             cls.exported = []  # hold no span past the test
         tracer_mod._tracer = prev
         plugin.shutdown()
-        if ls._LIVE_STORE is not None:
-            ls._LIVE_STORE.close()
-        ls._LIVE_STORE = None
+        ls.close_live_stores()
 
 
 def _span_text(span) -> str:

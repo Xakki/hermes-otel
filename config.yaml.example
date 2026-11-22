@@ -359,19 +359,18 @@
 
 # ── Live dashboard (local store) ──────────────────────────────────────────────
 #
-# The built-in dashboard tab has a "Live" mode that renders your agent's recent
-# spans + metrics + logs from a small SQLite file the plugin keeps at
-# $HERMES_HOME/hermes_otel_live.db (override: HERMES_OTEL_LIVE_DB) — so the
-# dashboard works the instant you install the plugin, with NO external backend,
-# and the gateway and dashboard processes share it. Each kind (spans, metrics,
-# logs) keeps its last dashboard_live_max_spans rows, and rows older than
-# dashboard_live_retention_hours are dropped too (0 = only the row cap). It is
-# a recent-activity buffer, not a record: configure a backend for history.
-# Set dashboard_live: false to disable it entirely (the dashboard then needs a
-# configured backend to show anything). Also settable via
-# HERMES_OTEL_DASHBOARD_LIVE / HERMES_OTEL_DASHBOARD_LIVE_MAX_SPANS /
-# HERMES_OTEL_DASHBOARD_LIVE_RETENTION_HOURS.
+# `memory` (default) keeps one SQLite buffer per recording process and profile,
+# without SQLite files. `disk` persists to $HERMES_HOME/hermes_otel_live.db so
+# separate dashboard and CLI processes can query it. HERMES_OTEL_LIVE_DB, when
+# set, explicitly selects a disk file. CLI --db names a file for that command;
+# --source <backend> queries a configured backend instead.
+# Restart recording processes after changing storage or limits. Memory mode
+# keeps 1000 total spans/metrics/logs by default; disk keeps the historical cap
+# per kind (with a separate cap for host samples). These are row, not byte/RSS,
+# limits. A retention of 0 disables age trimming. Set dashboard_live: false to
+# disable local recording. Each YAML key also has a HERMES_OTEL_* override.
 # dashboard_live: true
+# dashboard_live_storage: memory
 # dashboard_live_max_spans: 1000
 # dashboard_live_retention_hours: 168
 
