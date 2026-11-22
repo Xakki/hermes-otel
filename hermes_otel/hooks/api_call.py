@@ -21,6 +21,7 @@ from ..genai_messages import (
     system_instructions_json,
 )
 from ..helpers import serialize_full
+from ..instruments import API_IDENTITY_LABELS
 from ..semconv import QUERY_SOURCE_MAIN, QUERY_SOURCE_SUBAGENT
 from ._common import as_dict
 from .attributes import (
@@ -224,7 +225,10 @@ def apply_usage(
         tracer,
         "gen_ai.client.token.usage",
         totals,
-        genai_metric_dims(model, provider, response_model),
+        {
+            **genai_metric_dims(model, provider, response_model),
+            **{key: model_labels[key] for key in API_IDENTITY_LABELS if key in model_labels},
+        },
     )
     # Hermes's own estimate for this call. An unknown price or a
     # subscription-included route carries a status but no amount, so a

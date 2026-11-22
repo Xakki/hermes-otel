@@ -298,6 +298,17 @@
   },
   {
    "attributes": {
+    "api_mode": "chat",
+    "model": "gpt-4",
+    "profile": "golden",
+    "provider": "openai"
+   },
+   "name": "hermes.api.request.count",
+   "unit": "{request}",
+   "value": 1
+  },
+  {
+   "attributes": {
     "model": "gpt-4",
     "profile": "golden",
     "provider": "openai"

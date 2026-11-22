@@ -34,6 +34,8 @@ class TestEnvOverrides:
     @pytest.mark.parametrize("name,kind", _scalar_fields())
     def test_every_scalar_field_is_env_overridable(self, name, kind, monkeypatch, tmp_path):
         raw, expected = _SAMPLE[kind]
+        if name == "level":
+            raw, expected = "info", "info"
         if name == "dashboard_live_storage":
             raw, expected = "disk", "disk"
         if name == "host_metrics_gpu":
@@ -96,6 +98,8 @@ class TestYamlCoercion:
     def test_every_scalar_field_loads_from_yaml(self, name, kind, tmp_path):
         pytest.importorskip("yaml")
         raw, expected = _SAMPLE[kind]
+        if name == "level":
+            raw, expected = "info", "info"
         if name == "dashboard_live_storage":
             raw, expected = "disk", "disk"
         if name == "host_metrics_gpu":

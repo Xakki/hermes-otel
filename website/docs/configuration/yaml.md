@@ -141,6 +141,8 @@ capture_error_message: true
 
 ## Logs (opt-in)
 
+Use `level: debug`, `info`, or `notice` with `logs.events.enabled: true` for [provider request events](/configuration/logs#provider-request-events). `level` is only a request-event content ceiling; it neither enables the Python logging bridge nor overrides privacy rules.
+
 ```yaml
 logs:
   # Forward Python logging records (logger.info(...)) to every log-capable
@@ -168,6 +170,13 @@ logs:
 The flat spellings (`capture_logs`, `log_level`, `log_attach_logger`, …) still work. See [Logs and events](/configuration/logs) for every key, the loop guard for HTTP client libraries, and which backends accept logs.
 
 ## Metrics
+
+```yaml
+# Default: true. False disables local metrics, host sampling and OTLP metric export.
+# Env: HERMES_OTEL_METRICS_ENABLED. A backend may still disable metrics for itself.
+metrics:
+  enabled: true
+```
 
 ```yaml
 # Emit OTel GenAI semantic-convention metrics (gen_ai.client.*, gen_ai.agent.*)
@@ -245,6 +254,7 @@ Valid `disable_metrics` entries, one row per instrument (the first column is wha
 | `hermes.tool.duration` | `tool.duration`, `tool_duration` |
 | `hermes.message.count` | `message.count`, `message_count` |
 | `hermes.model.usage` | `model.usage`, `model_usage` |
+| `hermes.api.request.count` | `api.request.count`, `api_request_count` |
 | `hermes.auxiliary.count` | `auxiliary.count`, `auxiliary_count` |
 | `hermes.skill.inferred` | `skill.inferred`, `skill_inferred` |
 | `hermes.subagent.count` | `subagent.count`, `subagent_count` |

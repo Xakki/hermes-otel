@@ -44,6 +44,9 @@ hermes-otel exports plain **OTLP** (OpenTelemetry's wire protocol) over HTTP, or
 
 ## Quick picks
 
+**“I already have a Collector forwarding to Graylog and Prometheus”**
+→ [Graylog + Prometheus via Collector](/backends/graylog-prometheus) — one OTLP input, with logs and metrics routed to the existing destinations.
+
 **"I just want to see a trace, right now, on my laptop"**
 → [Phoenix](/backends/phoenix) — one container, open the UI on port 6006, done. Or the [Aspire Dashboard](/backends/aspire) — one container, all three signals, a GenAI visualizer, and the plugin dashboard reads traces and logs back.
 
@@ -120,6 +123,8 @@ hermes-otel exports plain **OTLP** (OpenTelemetry's wire protocol) over HTTP, or
 → [Multi-backend fan-out](/backends/multi-backend) — same spans, parallel, non-blocking.
 
 ## Signal support
+
+Metrics are globally enabled by default; `metrics.enabled: false` overrides individual backend metric settings. Configure Python logs and structured events separately under [`logs`](/configuration/logs).
 
 Backends differ in which OTel signals they accept. Each backend type turns off, by default, the signals its backend can't take, so you don't need to configure anything. An explicit `traces` / `metrics` / `logs` on the entry still wins.
 

@@ -1,0 +1,1008 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "title": "API requests · last hour",
+      "description": "Provider API attempts, including attempts that later failed. Account labels are absent when no credential-pool entry was selected.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(hermes_api_request_count_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[1h])) or vector(0)",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "API failures · last hour",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(hermes_api_error_count_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[1h])) or vector(0)",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Failure fraction · last hour",
+      "description": "Failed provider attempts divided by all provider attempts. Empty periods are not a 100% success guarantee.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(increase(hermes_api_error_count_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[1h])) or vector(0)) / clamp_min(sum(increase(hermes_api_request_count_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[1h])), 1)",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "p95 provider latency",
+      "description": "Histogram of completed or failed LLM client operations; only emitted when emit_genai_metrics is true.",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gen_ai_client_operation_duration_seconds_bucket{gen_ai_provider_name=~\"${provider:regex}\",gen_ai_request_model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__rate_interval])))",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Request rate by account / provider / model",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (provider, model, account_name, credential_id) (rate(hermes_api_request_count_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__rate_interval]))",
+          "legendFormat": "{{account_name}} · {{credential_id}} · {{provider}}/{{model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Errors by status class / retryability",
+      "description": "Only bounded labels, never raw provider error text or request IDs.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status_class, retryable) (rate(hermes_api_error_count_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__rate_interval]))",
+          "legendFormat": "{{status_class}} · retryable={{retryable}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Token throughput by account / type",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (account_name, token_type) (rate(hermes_token_usage_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__rate_interval]))",
+          "legendFormat": "{{account_name}} · {{token_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Prompt-cache hit fraction",
+      "description": "Only requests with provider-reported cache accounting contribute.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(hermes_prompt_cache_tokens_total{cache_result=\"hit\",provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__rate_interval])) / clamp_min(sum(rate(hermes_prompt_cache_tokens_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__rate_interval])), 1e-9)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Requests by selected account · dashboard range",
+      "description": "A missing account_name means Hermes did not identify a selected credential-pool entry. Search a specific request in Graylog by api_request_id.",
+      "type": "table",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (provider, model, credential_id, account_name) (increase(hermes_api_request_count_total{provider=~\"${provider:regex}\",model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__range]))",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 10,
+      "title": "Completed messages and provider calls",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (provider, model) (increase(hermes_message_count_total{job=\"hermes-agent\",profile=\"default\"}[$__range]))",
+          "legendFormat": "messages · {{provider}}/{{model}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (provider, model) (increase(hermes_model_usage_total{job=\"hermes-agent\",profile=\"default\"}[$__range]))",
+          "legendFormat": "provider calls · {{provider}}/{{model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "Counts over the selected dashboard range; model usage records completed API calls."
+    },
+    {
+      "id": 11,
+      "title": "Prompt-cache observations",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (cache_result) (increase(hermes_prompt_cache_observations_total{job=\"hermes-agent\",profile=\"default\"}[$__range]))",
+          "legendFormat": "{{cache_result}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "Only requests where the provider reported cache accounting."
+    },
+    {
+      "id": 12,
+      "title": "Sessions started by platform",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 39
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (platform) (increase(hermes_session_count_total{job=\"hermes-agent\",profile=\"default\"}[$__range]))",
+          "legendFormat": "{{platform}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "Session counter increase over the dashboard range."
+    },
+    {
+      "id": 13,
+      "title": "Session duration · p95 and mean",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 39
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, platform) (increase(hermes_session_duration_seconds_bucket{job=\"hermes-agent\",profile=\"default\"}[$__range])))",
+          "legendFormat": "{{platform}} p95"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (platform) (increase(hermes_session_duration_seconds_sum{job=\"hermes-agent\",profile=\"default\"}[$__range])) / clamp_min(sum by (platform) (increase(hermes_session_duration_seconds_count{job=\"hermes-agent\",profile=\"default\"}[$__range])), 1e-9)",
+          "legendFormat": "{{platform}} avg"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "From finalized sessions; empty until a session ends in the selected range."
+    },
+    {
+      "id": 14,
+      "title": "Turns per session · p95 and mean",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 47
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, platform) (increase(hermes_session_turns_bucket{job=\"hermes-agent\",profile=\"default\"}[$__range])))",
+          "legendFormat": "{{platform}} p95"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (platform) (increase(hermes_session_turns_sum{job=\"hermes-agent\",profile=\"default\"}[$__range])) / clamp_min(sum by (platform) (increase(hermes_session_turns_count{job=\"hermes-agent\",profile=\"default\"}[$__range])), 1e-9)",
+          "legendFormat": "{{platform}} avg"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "Histogram recorded when a session is finalized."
+    },
+    {
+      "id": 15,
+      "title": "Tool latency by tool · p95 and mean",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 47
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, tool_name) (increase(hermes_tool_duration_milliseconds_bucket{job=\"hermes-agent\",profile=\"default\"}[$__range])))",
+          "legendFormat": "{{tool_name}} p95"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (tool_name) (increase(hermes_tool_duration_milliseconds_sum{job=\"hermes-agent\",profile=\"default\"}[$__range])) / clamp_min(sum by (tool_name) (increase(hermes_tool_duration_milliseconds_count{job=\"hermes-agent\",profile=\"default\"}[$__range])), 1e-9)",
+          "legendFormat": "{{tool_name}} avg"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "Tool execution time; histogram bucket, sum, and count are all represented."
+    },
+    {
+      "id": 16,
+      "title": "Inferred skill hits",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 55
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, sum by (skill_name, source) (increase(hermes_skill_inferred_total{job=\"hermes-agent\",profile=\"default\"}[$__range])))",
+          "legendFormat": "{{skill_name}} · {{source}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "Top 10 skill inference series in the selected dashboard range."
+    },
+    {
+      "id": 17,
+      "title": "Subagent runs by role and status",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 55
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (role, status) (increase(hermes_subagent_count_total{job=\"hermes-agent\",profile=\"default\"}[$__range]))",
+          "legendFormat": "{{role}} · {{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "Completed delegated runs; does not indicate currently running agents."
+    },
+    {
+      "id": 18,
+      "title": "Subagent duration · p95 and mean",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 63
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, role) (increase(hermes_subagent_duration_milliseconds_bucket{job=\"hermes-agent\",profile=\"default\"}[$__range])))",
+          "legendFormat": "{{role}} p95"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (role) (increase(hermes_subagent_duration_milliseconds_sum{job=\"hermes-agent\",profile=\"default\"}[$__range])) / clamp_min(sum by (role) (increase(hermes_subagent_duration_milliseconds_count{job=\"hermes-agent\",profile=\"default\"}[$__range])), 1e-9)",
+          "legendFormat": "{{role}} avg"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "Wall-clock duration of completed subagents."
+    },
+    {
+      "id": 19,
+      "title": "LLM client tokens per operation",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 63
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, gen_ai_token_type) (increase(gen_ai_client_token_usage_bucket{job=\"hermes-agent\",profile=\"default\"}[$__range])))",
+          "legendFormat": "{{gen_ai_token_type}} p95"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (gen_ai_token_type) (increase(gen_ai_client_token_usage_sum{job=\"hermes-agent\",profile=\"default\"}[$__range])) / clamp_min(sum by (gen_ai_token_type) (increase(gen_ai_client_token_usage_count{job=\"hermes-agent\",profile=\"default\"}[$__range])), 1e-9)",
+          "legendFormat": "{{gen_ai_token_type}} avg"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "GenAI client token histogram: p95 and mean by input/output type."
+    },
+    {
+      "id": 20,
+      "title": "Agent tokens per invocation",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 71
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, gen_ai_token_type) (increase(gen_ai_agent_token_usage_bucket{job=\"hermes-agent\",profile=\"default\"}[$__range])))",
+          "legendFormat": "{{gen_ai_token_type}} p95"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (gen_ai_token_type) (increase(gen_ai_agent_token_usage_sum{job=\"hermes-agent\",profile=\"default\"}[$__range])) / clamp_min(sum by (gen_ai_token_type) (increase(gen_ai_agent_token_usage_count{job=\"hermes-agent\",profile=\"default\"}[$__range])), 1e-9)",
+          "legendFormat": "{{gen_ai_token_type}} avg"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "Agent token histogram: p95 and mean by input/output type."
+    },
+    {
+      "id": 21,
+      "title": "Mean provider operation latency",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 71
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (gen_ai_provider_name) (increase(gen_ai_client_operation_duration_seconds_sum{job=\"hermes-agent\",profile=\"default\"}[$__range])) / clamp_min(sum by (gen_ai_provider_name) (increase(gen_ai_client_operation_duration_seconds_count{job=\"hermes-agent\",profile=\"default\"}[$__range])), 1e-9)",
+          "legendFormat": "{{gen_ai_provider_name}} mean"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "Complements the existing p95 latency panel with histogram sum/count."
+    },
+    {
+      "id": 22,
+      "title": "Hermes process CPU utilization",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 79
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "process_cpu_utilization_ratio{job=\"hermes-agent\"}",
+          "legendFormat": "process · {{cpu_mode}} · {{service_instance_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "Per-process normalized CPU ratio; not summed across processes."
+    },
+
+    {
+      "id": 24,
+      "title": "Observed metric families · active series",
+      "description": "Every currently active metric name for job=hermes-agent, including future optional instruments and transport metadata; series count is not a metric value.",
+      "type": "table",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 87
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count by (__name__) ({job=\"hermes-agent\"})",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "hermes",
+    "otel",
+    "graylog",
+    "prometheus",
+    "request-observability"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "provider",
+        "label": "Provider",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "PBFA97CFB590B2093"
+        },
+        "query": "label_values(hermes_api_request_count_total, provider)",
+        "definition": "label_values(hermes_api_request_count_total, provider)",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 2,
+        "sort": 1,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "model",
+        "label": "Model",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "PBFA97CFB590B2093"
+        },
+        "query": "label_values(hermes_api_request_count_total, model)",
+        "definition": "label_values(hermes_api_request_count_total, model)",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 2,
+        "sort": 1,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "account",
+        "label": "Account name",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "PBFA97CFB590B2093"
+        },
+        "query": "label_values(hermes_api_request_count_total, account_name)",
+        "definition": "label_values(hermes_api_request_count_total, account_name)",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 2,
+        "sort": 1,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Hermes · Request Observability",
+  "uid": "hermes-request-observability",
+  "version": 3
+}

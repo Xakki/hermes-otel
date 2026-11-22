@@ -148,6 +148,7 @@ Every scalar or list field of the config file can be overridden by `HERMES_OTEL_
 | `HERMES_OTEL_FORCE_FLUSH_WAIT_MS` | `force_flush_wait_ms` | int | `1500` |
 | `HERMES_OTEL_CAPTURE_CONVERSATION_HISTORY` | `capture_conversation_history` | bool | `false` |
 | `HERMES_OTEL_CONVERSATION_HISTORY_MAX_CHARS` | `conversation_history_max_chars` | int | `20000` |
+| `HERMES_OTEL_LEVEL` | `level` | string | *(unset)* |
 | `HERMES_OTEL_CONTENT_CAPTURE` | `content_capture` | string | `"full"` |
 | `HERMES_OTEL_CAPTURE_FULL_PROMPTS` | `capture_full_prompts` | bool | `true` |
 | `HERMES_OTEL_CAPTURE_FULL_RESPONSES` | `capture_full_responses` | bool | `true` |
@@ -170,6 +171,7 @@ Every scalar or list field of the config file can be overridden by `HERMES_OTEL_
 | `HERMES_OTEL_LOG_EVENTS_CONTENT` | `log_events_content` | string | `"inherit"` |
 | `HERMES_OTEL_EMIT_GENAI_METRICS` | `emit_genai_metrics` | bool | `true` |
 | `HERMES_OTEL_METRICS_TEMPORALITY` | `metrics_temporality` | string | *(unset)* |
+| `HERMES_OTEL_METRICS_ENABLED` | `metrics_enabled` | bool | `true` |
 | `HERMES_OTEL_METRICS_HISTOGRAM` | `metrics_histogram` | string | `"explicit"` |
 | `HERMES_OTEL_METRICS_LABEL_LIMIT` | `metrics_label_limit` | int | `100` |
 | `HERMES_OTEL_METRIC_NAME_COMPAT` | `metric_name_compat` | string | `"off"` |

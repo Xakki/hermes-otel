@@ -27,6 +27,7 @@ EXPECTED_KEYS = {
     "tool_duration",
     "message_count",
     "model_usage",
+    "api_request_count",
     "skill_inferred",
     "subagent_count",
     "auxiliary_count",

@@ -43,6 +43,7 @@ A numeric field's **Bounds** are checked at load (#487). A value outside them, i
 | `force_flush_wait_ms` | int | `1500` | How long the turn waits for that background flush (spans, then metrics and logs on a second thread) before returning to Hermes; a one-shot run exits right after, so this bounds what it exports; `0` = do not wait. Bounds: ≥ 0 |
 | `capture_conversation_history` | bool | `false` | Attach the full message JSON to `llm.*` spans |
 | `conversation_history_max_chars` | int | `20000` | JSON cap when conversation capture is on. Bounds: ≥ 1 |
+| `level` | string \| null | *(unset)* | Maximum request-log content: `debug` permits full, `info` permits previews, `notice` permits no bodies; existing privacy and log rules can only narrow it |
 | `content_capture` | string | `"full"` | `full` (default): complete prompt and response on every `api.*` span · `preview`: clipped previews only · `off`: no content, metadata only; see [Conversation capture](/configuration/conversation-capture) |
 | `capture_full_prompts` | bool | `true` | Deprecated: derived from `content_capture`; `false` keeps prompts as previews in `full` mode |
 | `capture_full_responses` | bool | `true` | Deprecated: derived from `content_capture`; `false` keeps responses as previews in `full` mode |
@@ -66,6 +67,7 @@ A numeric field's **Bounds** are checked at load (#487). A value outside them, i
 | `log_events_content` | string | `"inherit"` | Content on events: `inherit` (follow `content_capture`) / `full` / `preview` / `off`; `logs.events.content` |
 | `emit_genai_metrics` | bool | `true` | Also emit the OTel GenAI spec metrics (`gen_ai.client.*`, `gen_ai.agent.*`) |
 | `metrics_temporality` | string \| null | *(unset)* | Metric temporality for OTLP export: `cumulative` (Prometheus family) or `delta` (Datadog, New Relic, Logfire); unset = SDK default; a backend entry's own value wins |
+| `metrics_enabled` | bool | `true` | Global metrics gate (`metrics.enabled` in YAML); `false` stops both local metrics and backend export without disabling spans or logs |
 | `metrics_histogram` | string | `"explicit"` | Histogram aggregation: `explicit` (spec bucket boundaries) or `exponential` (base-2, for backends that accept it) |
 | `metrics_label_limit` | int | `100` | Distinct values a metric label such as `model` may take per process before the rest fold into `other` (0 = no cap). Bounds: ≥ 0 |
 | `metric_name_compat` | string | `"off"` | `off` · `claude_code` · `both` — export session count, token usage, cost and active time under Claude Code's metric names, units and labels (`claude_code.*`) instead of (`claude_code`) or beside (`both`) the `hermes.*` twins, so dashboards built for Claude Code read Hermes; see [Claude Code dashboards](/guides/claude-code-dashboards) |

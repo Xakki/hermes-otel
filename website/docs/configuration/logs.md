@@ -90,6 +90,18 @@ The events are `hermes.turn.start`, `hermes.turn.end`, `hermes.tool.call`, `herm
 
 In the dashboard's Logs tab an event shows its name as a badge, the **events only** filter (`?events=1`) hides plain log lines, and the **event name** box (`?event=hermes.tool.call`, or a click on a badge) keeps one kind; expanding the line shows its attributes grouped as Event, Hermes, GenAI and so on. The skill CLI (`logs --events-only`, `logs --event <name>`) and the backend adapters see events as log records with an `event_name` field; where a backend keeps no column for the OTLP `event_name` field, the adapter filters on the `event.name` attribute the plugin sets on every event.
 
+### Provider request events
+
+With `logs.events.enabled: true`, set `level` to emit separate `hermes.api.request` and `hermes.api.response` events at INFO. When unset, these two events are off. The same ceiling applies to request/response content on the existing inference details event; `hermes.api.error` keeps its own rules. `level` does not attach the Python logging handler or change its severity threshold.
+
+| `level` | Maximum request/response content |
+|---|---|
+| `debug` | Captured message content, redacted and capped before export; transport options and headers are not copied into these events. |
+| `info` | Redacted previews bounded by `preview_max_chars`. |
+| `notice` | Metadata only; no request or response content. |
+
+The strictest of `level`, `content_capture` and `logs.events.content` applies; a backend can disable events or narrow their content further. Direction-specific full-capture settings and the existing log attribute length limit still apply. When supplied by Hermes, `api_request_id` correlates events for a request and `credential_id` / `account_name` identify the selected pool entry. Account labels may contain personal data; they are not credential tokens. These events can use the same live store as other events (process-local memory by default, opt-in disk for cross-process access), without a second log handler.
+
 ## What correlation looks like
 
 When `logs.capture` is on and hermes-agent code calls:

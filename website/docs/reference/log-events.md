@@ -102,6 +102,40 @@ Emitted from **`kanban_task_claimed / on_kanban_worker_spawned / on_kanban_worke
 | `hermes.kanban.summary` |  |
 | `hermes.kanban.reason` |  |
 
+### `hermes.api.request`
+
+Emitted from **`pre_api_request`**. Severity: INFO. Body: `hermes.api.request`.
+
+| Attribute | Content-gated |
+|---|---|
+| `api_request_id` |  |
+| `credential_id` |  |
+| `account_name` |  |
+| `provider` |  |
+| `model` |  |
+| `api_mode` |  |
+| `api_call_count` |  |
+| `retry_count` |  |
+| `input.value` | yes |
+| `gen_ai.system_instructions` | yes |
+
+### `hermes.api.response`
+
+Emitted from **`post_api_request`**. Severity: INFO. Body: `hermes.api.response`.
+
+| Attribute | Content-gated |
+|---|---|
+| `api_request_id` |  |
+| `credential_id` |  |
+| `account_name` |  |
+| `provider` |  |
+| `model` |  |
+| `api_mode` |  |
+| `api_call_count` |  |
+| `gen_ai.response.finish_reasons` |  |
+| `output.value` | yes |
+| `gen_ai.output.messages` | yes |
+
 ### `hermes.api.error`
 
 Emitted from **`api_request_error`**. Severity: ERROR; WARN when retryable. Body: `api error <error.type> from <provider>`.

@@ -45,6 +45,8 @@ Tool spans carry previews in both `full` and `preview` mode: in `full` mode the 
 
 ## Previews and the truncation markers
 
+The optional request-event `level` caps only [structured request and response log content](/configuration/logs#provider-request-events). It does not change span capture or turn Python logging on. A permissive level cannot override `content_capture: off`.
+
 Outside `api.*` spans, content is a preview: ANSI stripped, whitespace collapsed, clipped at `preview_max_chars` (or the per-category `tool_input_preview_max_chars`, `tool_output_preview_max_chars`, `llm_input_preview_max_chars`, `llm_output_preview_max_chars`). When a preview was clipped the span also carries `hermes.preview.input.truncated: true` and `hermes.preview.input.original_chars` (or `output`), so a short-looking value is distinguishable from a clipped one.
 
 ## The turn on the `llm.*` span

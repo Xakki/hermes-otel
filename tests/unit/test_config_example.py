@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = REPO_ROOT / "config.yaml.example"
 
 # Top-level keys that are not dataclass fields but are real config.
-_TOP_LEVEL_BLOCKS = {"logs"}
+_TOP_LEVEL_BLOCKS = {"logs", "metrics"}
 
 
 def _example_top_level_keys() -> set:
@@ -39,6 +39,8 @@ def _documented_fields() -> set:
     top = _example_top_level_keys()
     leaves = _example_block_leaves()
     via_block = {flat for flat, path in LOGS_FLAT_TO_BLOCK.items() if path[-1] in leaves}
+    if "metrics" in top and "enabled" in leaves:
+        via_block.add("metrics_enabled")
     return top | via_block
 
 

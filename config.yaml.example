@@ -105,6 +105,12 @@
 # Also settable via HERMES_OTEL_CONTENT_CAPTURE.
 # content_capture: "full"
 
+# Limit request-log content without widening content_capture or logs rules:
+#   debug  permits bounded full bodies where otherwise allowed
+#   info   permits clipped previews where otherwise allowed
+#   notice no request/response bodies
+# level: info
+
 # Pre-1.11 spellings, still honoured and kept consistent with content_capture:
 # capture_previews: false is `off`; capture_full_prompts / capture_full_responses
 # true is `full` (set one of them false to keep that side as previews).
@@ -140,8 +146,7 @@
 # capture_error_message: true
 
 # Put the entire conversation_history the model is about to see on the
-# llm.* span's input.value. The api.* spans don't carry message-level
-# detail, so flipping this on is the easiest way to see what the model saw.
+# llm.* span's input.value, beyond the model-facing request on api.* spans.
 # Output is JSON (input.mime_type=application/json) — Phoenix pretty-prints it.
 # Mostly redundant with content_capture: full, which already puts the complete
 # request on every api.* span. Nothing is attached when content_capture is off.
@@ -207,14 +212,20 @@
 
 # ── OTel GenAI semantic-convention metrics ────────────────────────────────────
 #
+# Metrics are enabled by default. Use `false` to disable metrics everywhere,
+# including the local store. A backend's own signal setting can still opt out.
+# metrics:
+#   enabled: true
+# Also settable via HERMES_OTEL_METRICS_ENABLED.
+#
 # In addition to the custom hermes.* metrics, the plugin emits spec-named
 # instruments so generic OpenTelemetry GenAI dashboards/alerts light up with
 # no per-user wiring:
 #   gen_ai.client.token.usage      Histogram {token}  (gen_ai.token.type input/output)
 #   gen_ai.client.operation.duration  Histogram s     (SECONDS, per spec)
 #   gen_ai.agent.token.usage       Histogram {token}  (per-turn/session rollup)
-# Dimensions stay low-cardinality (operation, provider, model — never per-call
-# IDs). Set false to emit only the hermes.* metrics.
+# Dimensions stay low-cardinality: never include per-call IDs.
+# Set false to emit only the hermes.* metrics.
 # Also settable via HERMES_OTEL_EMIT_GENAI_METRICS.
 # emit_genai_metrics: true
 #
@@ -278,6 +289,7 @@
 #   hermes.tool.duration                 tool.duration / tool_duration
 #   hermes.message.count                 message.count / message_count
 #   hermes.model.usage                   model.usage / model_usage
+#   hermes.api.request.count             api.request.count / api_request_count
 #   hermes.auxiliary.count               auxiliary.count / auxiliary_count
 #   hermes.skill.inferred                skill.inferred / skill_inferred
 #   hermes.subagent.count                subagent.count / subagent_count
@@ -616,6 +628,23 @@
 #     # client_certificate_file: ~/certs/hermes-client.pem
 #     # client_key_file: ~/certs/hermes-client.key  # both client files for mTLS
 #     # insecure: false                           # TLS; true is plaintext, not skip-verify
+
+# ── Graylog + Prometheus via an existing Collector ───────────────────────────
+#
+# Hermes sends OTLP/HTTP to the Collector; its logs pipeline exports OTLP/gRPC
+# to Graylog and its metrics pipeline exports Prometheus Remote Write. Do not
+# route traces to a Collector that only has a debug exporter for that signal.
+# See website/docs/backends/graylog-prometheus.md before enabling this route.
+#
+# level: info
+# logs: {events: {enabled: true}}
+# dashboard_live: false
+# backends:
+#   - type: otlp
+#     endpoint: http://collector.internal:4318/v1/traces
+#     traces: false
+#     metrics: true
+#     logs: true
 
 # ── LGTM quickstart ──────────────────────────────────────────────────────────
 #

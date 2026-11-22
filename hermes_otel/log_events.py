@@ -28,6 +28,8 @@ TURN_START = _sc.EVENT_TURN_START
 TURN_END = _sc.EVENT_TURN_END
 TOOL_CALL = _sc.EVENT_TOOL_CALL
 APPROVAL_DECISION = _sc.EVENT_APPROVAL_DECISION
+API_REQUEST = _sc.EVENT_API_REQUEST
+API_RESPONSE = _sc.EVENT_API_RESPONSE
 API_ERROR = _sc.EVENT_API_ERROR
 SUBAGENT_START = _sc.EVENT_SUBAGENT_START
 SUBAGENT_STOP = _sc.EVENT_SUBAGENT_STOP
@@ -155,6 +157,40 @@ EVENTS: Dict[str, Dict[str, Any]] = {
             "hermes.kanban.outcome",
             "hermes.kanban.summary",
             "hermes.kanban.reason",
+        ),
+    },
+    API_REQUEST: {
+        "hook": "pre_api_request",
+        "severity": "INFO",
+        "body": API_REQUEST,
+        "attributes": (
+            "api_request_id",
+            "credential_id",
+            "account_name",
+            "provider",
+            "model",
+            "api_mode",
+            "api_call_count",
+            "retry_count",
+            "input.value (content)",
+            "gen_ai.system_instructions (content)",
+        ),
+    },
+    API_RESPONSE: {
+        "hook": "post_api_request",
+        "severity": "INFO",
+        "body": API_RESPONSE,
+        "attributes": (
+            "api_request_id",
+            "credential_id",
+            "account_name",
+            "provider",
+            "model",
+            "api_mode",
+            "api_call_count",
+            "gen_ai.response.finish_reasons",
+            "output.value (content)",
+            "gen_ai.output.messages (content)",
         ),
     },
     "hermes.api.error": {
