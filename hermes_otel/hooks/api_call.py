@@ -134,6 +134,7 @@ def request_attributes(
     message_count: Any,
     approx_input_tokens: Any,
     max_tokens: Any,
+    capture_prompt: bool = True,
 ) -> Dict[str, Any]:
     """The attributes every ``api.<model>`` span starts with: the request's
     size, the session and model identity in both conventions, the GenAI
@@ -152,7 +153,8 @@ def request_attributes(
     if max_tokens:
         attributes["llm.request.max_tokens"] = max_tokens
         attributes["gen_ai.request.max_tokens"] = max_tokens
-    attributes.update(full_prompt_attributes(tracer, payload))
+    if capture_prompt:
+        attributes.update(full_prompt_attributes(tracer, payload))
     return attributes
 
 

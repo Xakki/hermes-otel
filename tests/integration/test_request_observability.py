@@ -1,6 +1,7 @@
 """Request events and counters at the host-hook and live/OTLP boundaries."""
 
 import json
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -72,6 +73,7 @@ def test_host_request_events_obey_capture_and_backend_rules(
         retry_count=0,
         user_message=request,
         request_messages=[{"role": "user", "content": request}],
+        request={"method": "POST", "body": {"messages": [{"role": "user", "content": request}]}},
         request_options={"authorization": "must-not-copy-options"},
     )
     hooks.on_post_api_request(
@@ -161,6 +163,7 @@ def _request_turn(request_messages):
         max_tokens=20,
         user_message="original-only-marker",
         request_messages=request_messages,
+        request={"method": "POST", "body": {"messages": request_messages}},
     )
     hooks.on_post_api_request(
         **identity,
@@ -242,3 +245,80 @@ def test_request_content_boundary_survives_enrichment(tmp_path, monkeypatch, lev
             assert (
                 "provider-reply-marker" in events[log_events.API_RESPONSE]["gen_ai.output.messages"]
             )
+
+
+@pytest.mark.parametrize("capture", ["preview", "full"])
+@pytest.mark.parametrize("shape", ["override", "plain", "truncated", "fallback", "options"])
+def test_request_capture_requires_an_unambiguous_provider_body(
+    tmp_path, monkeypatch, capture, shape
+):
+    # Literal payloads captured from active Hermes dispatch, paired with the
+    # actual OpenAI SDK JSON body (offline MockTransport, no outbound calls).
+    fixture = Path(__file__).with_name("request_hook_chat_payload.json")
+    sample = json.loads(fixture.read_text())["override" if shape == "override" else "plain"]
+    hook = sample["hook"]
+    sent = sample["wire_messages"][-1]["content"]
+    if shape == "override":
+        assert hook["request_messages"][-1]["content"] != sent
+    elif shape == "truncated":
+        hook["request"] = {"_truncated": True, "preview": "UNTRUSTED-PAYLOAD-MARKER"}
+    elif shape == "fallback":
+        hook["request"]["body"].pop("messages")
+    elif shape == "options":
+        hook["request_options"] = {"extra_body": {"messages": []}}
+    store, exporter = _capture_request_logs(
+        tmp_path, monkeypatch, f'level: debug\ncontent_capture: "{capture}"\n'
+    )
+    hooks.on_pre_api_request(**hook)
+    identity = {
+        k: hook[k]
+        for k in (
+            "task_id",
+            "session_id",
+            "api_request_id",
+            "platform",
+            "model",
+            "provider",
+            "base_url",
+            "api_mode",
+            "api_call_count",
+            "message_count",
+        )
+    }
+    hooks.on_post_api_request(
+        **identity,
+        api_duration=0.1,
+        finish_reason="stop",
+        response_model="m",
+        usage={},
+        assistant_content_chars=20,
+        assistant_tool_call_count=0,
+        assistant_message={"content": "provider-reply-marker"},
+    )
+    names = {log_events.API_REQUEST, log_events.API_RESPONSE, log_events.INFERENCE_DETAILS}
+    sinks = _sink_events(store, exporter, names)
+    (api_span,) = [span for span in store.spans() if span["name"] == "api.m"]
+    if shape != "plain":
+        observed = [
+            {
+                key: attrs[key]
+                for key in log_events.CONTENT_ATTRIBUTES
+                if key in attrs and key not in {"output.value", "gen_ai.output.messages"}
+            }
+            for attrs in [
+                api_span["attributes"],
+                *(
+                    events[name]
+                    for events in sinks
+                    for name in (log_events.API_REQUEST, log_events.INFERENCE_DETAILS)
+                ),
+            ]
+        ]
+        assert all(not attrs for attrs in observed), (shape, capture, observed)
+    for events in sinks:
+        assert events[log_events.API_REQUEST]["api_request_id"] == hook["api_request_id"]
+        assert "provider-reply-marker" in json.dumps(events[log_events.API_RESPONSE])
+        if shape == "plain":
+            assert sent in events[log_events.API_REQUEST]["input.value"]
+        assert "TRANSPORT-OPTIONS-MARKER" not in json.dumps(events)
+        assert "ORIGINAL-HISTORY-MARKER" not in json.dumps(events)

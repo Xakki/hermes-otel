@@ -13,6 +13,8 @@ _LEVEL_CONTENT = {"debug": "full", "info": "preview", "notice": "off"}
 _REQUEST_KEYS = ("input.value", "gen_ai.system_instructions")
 _RESPONSE_KEYS = ("gen_ai.output.messages",)
 _HARD_CONTENT_LIMIT = 128_000
+_BODY_CONTENT_KEYS = {"messages", "input", "system", "instructions", "developer"}
+_TRUNCATION_KEYS = {"_truncated", "_truncated_items"}
 
 
 def _mode(cfg) -> Optional[str]:
@@ -59,6 +61,38 @@ def _provider_user_text(payload: HookPayload) -> Optional[str]:
     return None
 
 
+def _no_content_override(view: Any) -> bool:
+    if not isinstance(view, dict) or _TRUNCATION_KEYS.intersection(view):
+        return False
+    extra = view.get("extra_body")
+    return extra is None or (
+        isinstance(extra, dict) and not (_BODY_CONTENT_KEYS | _TRUNCATION_KEYS).intersection(extra)
+    )
+
+
+def has_provider_request_source(payload: HookPayload) -> bool:
+    """Require a complete observer body that corroborates the raw hook list.
+
+    The SDK can merge ``extra_body`` later. The hook may also substitute
+    conversation history for a missing list. Neither is a safe body source.
+    """
+    request = payload.get("request")
+    if not isinstance(request, dict) or _TRUNCATION_KEYS.intersection(request):
+        return False
+    body = request.get("body")
+    if not isinstance(body, dict) or not _no_content_override(body):
+        return False
+    if "request_options" in payload.kwargs and not _no_content_override(
+        payload.get("request_options")
+    ):
+        return False
+    sources = {"messages", "input"}.intersection(body)
+    if len(sources) != 1:
+        return False
+    observed = body[next(iter(sources))]
+    return isinstance(observed, list) and observed == payload.get("request_messages")
+
+
 def emit_request_event(
     tracer,
     *,
@@ -68,6 +102,7 @@ def emit_request_event(
     metadata: Dict[str, Any],
     session_id: Optional[str],
     span: Any,
+    capture_request: bool = True,
 ) -> None:
     """Reuse span content and recognized keys, not raw options or Python log extras."""
     cfg = tracer.config
@@ -76,7 +111,7 @@ def emit_request_event(
         return
     attrs = dict(metadata)
     keys = _RESPONSE_KEYS if response else _REQUEST_KEYS
-    if mode != "off":
+    if mode != "off" and (response or capture_request):
         attrs.update({key: attributes[key] for key in keys if key in attributes})
         if not any(key in attrs for key in keys):
             # Preview-only settings never build full span bodies. Read only

@@ -47,7 +47,7 @@ from .attributes import (
     correlation_attributes,
     request_identity,
 )
-from .request_logs import emit_request_event, request_event_content
+from .request_logs import emit_request_event, has_provider_request_source, request_event_content
 from .session import _start_session_span
 from .usage import genai_metric_dims
 
@@ -312,6 +312,7 @@ def on_pre_api_request(
     payload = HookPayload(kwargs)
     identity = request_identity(kwargs)
     model_labels = _metric_model_labels(model, provider)
+    capture_request = tracer.config.level is None or has_provider_request_source(payload)
     attributes = request_attributes(
         tracer,
         payload,
@@ -321,6 +322,7 @@ def on_pre_api_request(
         message_count=message_count,
         approx_input_tokens=approx_input_tokens,
         max_tokens=max_tokens,
+        capture_prompt=capture_request,
     )
     attributes["llm.api_mode"] = api_mode
     attributes["hermes.query_source"] = _query_source(tracer, session_id)
@@ -351,6 +353,7 @@ def on_pre_api_request(
         },
         session_id=session_id,
         span=span,
+        capture_request=capture_request,
     )
     debug_log(f"  API span started: key={key}")
 

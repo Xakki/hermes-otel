@@ -1,0 +1,130 @@
+{
+  "override": {
+    "hook": {
+      "api_call_count": 1,
+      "api_mode": "chat",
+      "api_request_id": "attempt-wire",
+      "approx_input_tokens": 2,
+      "base_url": "https://chat.invalid/v1",
+      "conversation_history": [
+        {
+          "content": "TOP-LEVEL-SUPERSEDED-MARKER",
+          "role": "user"
+        }
+      ],
+      "max_tokens": 10,
+      "message_count": 1,
+      "middleware_trace": [
+        {
+          "source": "synthetic-middleware"
+        }
+      ],
+      "model": "m",
+      "platform": "cli",
+      "provider": "openai",
+      "request": {
+        "body": {
+          "extra_body": {
+            "custom": "TRANSPORT-OPTIONS-MARKER",
+            "messages": [
+              {
+                "content": "WIRE-SENT-MARKER",
+                "role": "user"
+              }
+            ]
+          },
+          "messages": [
+            {
+              "content": "TOP-LEVEL-SUPERSEDED-MARKER",
+              "role": "user"
+            }
+          ],
+          "model": "m"
+        },
+        "method": "POST"
+      },
+      "request_char_count": 20,
+      "request_messages": [
+        {
+          "content": "TOP-LEVEL-SUPERSEDED-MARKER",
+          "role": "user"
+        }
+      ],
+      "retry_count": 0,
+      "session_id": "session-wire",
+      "started_at": 1,
+      "system_prompt": null,
+      "task_id": "task-wire",
+      "tool_count": 0,
+      "turn_id": "turn-wire",
+      "user_message": "ORIGINAL-HISTORY-MARKER"
+    },
+    "wire_messages": [
+      {
+        "content": "WIRE-SENT-MARKER",
+        "role": "user"
+      }
+    ]
+  },
+  "plain": {
+    "hook": {
+      "api_call_count": 1,
+      "api_mode": "chat",
+      "api_request_id": "attempt-wire",
+      "approx_input_tokens": 2,
+      "base_url": "https://chat.invalid/v1",
+      "conversation_history": [
+        {
+          "content": "TOP-LEVEL-SUPERSEDED-MARKER",
+          "role": "user"
+        }
+      ],
+      "max_tokens": 10,
+      "message_count": 1,
+      "middleware_trace": [
+        {
+          "source": "synthetic-middleware"
+        }
+      ],
+      "model": "m",
+      "platform": "cli",
+      "provider": "openai",
+      "request": {
+        "body": {
+          "extra_body": {
+            "custom": "TRANSPORT-OPTIONS-MARKER"
+          },
+          "messages": [
+            {
+              "content": "WIRE-SENT-MARKER",
+              "role": "user"
+            }
+          ],
+          "model": "m"
+        },
+        "method": "POST"
+      },
+      "request_char_count": 20,
+      "request_messages": [
+        {
+          "content": "WIRE-SENT-MARKER",
+          "role": "user"
+        }
+      ],
+      "retry_count": 0,
+      "session_id": "session-wire",
+      "started_at": 1,
+      "system_prompt": null,
+      "task_id": "task-wire",
+      "tool_count": 0,
+      "turn_id": "turn-wire",
+      "user_message": "ORIGINAL-HISTORY-MARKER"
+    },
+    "wire_messages": [
+      {
+        "content": "WIRE-SENT-MARKER",
+        "role": "user"
+      }
+    ]
+  }
+}
