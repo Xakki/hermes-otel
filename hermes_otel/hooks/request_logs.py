@@ -45,6 +45,20 @@ def request_event_content(tracer, attrs: Dict[str, Any]) -> Dict[str, Any]:
     return EV.apply_content_mode(safe, mode, cfg.preview_max_chars)
 
 
+def _provider_user_text(payload: HookPayload) -> Optional[str]:
+    """Only preview plain text from the last user message sent to the provider."""
+    messages = payload.get("request_messages")
+    if not isinstance(messages, list):
+        return None
+    for message in reversed(messages):
+        if not isinstance(message, dict):
+            return None
+        if message.get("role") == "user":
+            content = message.get("content")
+            return content if isinstance(content, str) and content else None
+    return None
+
+
 def emit_request_event(
     tracer,
     *,
@@ -75,7 +89,7 @@ def emit_request_event(
                     else getattr(message, "content", None)
                 )
             else:
-                text = payload.get("user_message")
+                text = _provider_user_text(payload)
             if isinstance(text, str):
                 key = "output.value" if response else "input.value"
                 attrs[key] = EV.apply_content_mode(

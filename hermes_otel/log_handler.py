@@ -518,7 +518,15 @@ class HermesLogProcessor(LogRecordProcessor):  # type: ignore[misc]
                     attrs.setdefault(PLATFORM_ATTRIBUTE, platform)
             if tier:
                 attrs[ATTRIBUTION_ATTRIBUTE] = tier
+            request_event = view.event_name in (
+                _ev.API_REQUEST,
+                _ev.API_RESPONSE,
+                _ev.INFERENCE_DETAILS,
+            )
             for key, value in self._common.items():
+                # Hook capture policy already removed any disallowed content.
+                if request_event and key in _ev.CONTENT_ATTRIBUTES:
+                    continue
                 attrs.setdefault(key, value)
             # 4. redaction, after enrichment so the added attributes are covered.
             if self._redact:
