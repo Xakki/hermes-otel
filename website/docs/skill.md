@@ -81,7 +81,7 @@ A span in `ERROR` status ends its line with `ERROR: <message>`. When the summary
 
 ## Sources
 
-**The live store** is the default. It is on by default (`dashboard_live`), local, immediate, and holds every span the plugin produced whether or not a backend is configured, bounded by `dashboard_live_max_spans` and `dashboard_live_retention_hours`. It is the same file the [dashboard tab](/dashboard) reads.
+**The live store** records into process-local memory by default. The terminal script runs separately and cannot query that memory or automatically fall back to an older file. Set `dashboard_live_storage: disk` and restart the recorder to persist new telemetry to the file the [dashboard tab](/dashboard) reads, or use `--db <file>` to query an existing file explicitly. If disk mode is configured in YAML, use the Python interpreter with PyYAML that Hermes runs on.
 
 **A configured backend** (`--source phoenix`, or the entry's `name:`) is queried through the same adapters the dashboard uses, so the same backends and capabilities apply: Phoenix, Langfuse, SigNoz, Jaeger, Zipkin, GreptimeDB, ClickStack, the VictoriaMetrics family, Aspire, Gigapipe, Agenta, Tempo, LGTM, Uptrace and OpenObserve for traces; metrics and logs only where the [dashboard's table](/dashboard#which-backends-can-the-tab-query) says so. `sessions` is a live-store view; on a backend use `traces --session`. `status` reports each backend's capabilities.
 

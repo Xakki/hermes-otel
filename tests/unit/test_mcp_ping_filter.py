@@ -163,11 +163,7 @@ class TestInitWiring:
             monkeypatch.delenv(var, raising=False)
         import hermes_otel.live_store_registry as ls
 
-        if ls._LIVE_STORE is not None:
-
-            ls._LIVE_STORE.close()
-
-        ls._LIVE_STORE = None
+        ls.close_live_stores()
         plugin = HermesOTelPlugin(
             config=HermesOtelConfig(dashboard_live=True, suppress_mcp_ping_spans=suppress)
         )
@@ -200,6 +196,4 @@ class TestInitWiring:
                 assert names == ["MCP send ping", "MCP send ping", "MCP send tools/list"]
         finally:
             provider.shutdown()
-            if ls._LIVE_STORE is not None:
-                ls._LIVE_STORE.close()
-            ls._LIVE_STORE = None
+            ls.close_live_stores()

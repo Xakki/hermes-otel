@@ -121,7 +121,8 @@ def _turn(mod, session_id: str) -> None:
     )
 
 
-def test_two_profiles_in_one_process(fake_hermes):
+@pytest.mark.parametrize("storage", ["memory", "disk"])
+def test_two_profiles_in_one_process(fake_hermes, storage):
     root, scope = fake_hermes
     names = ("hermes_plugins.hermes_otel", "hermes_plugins.hermes_otel__home_test")
     copies = {}
@@ -129,7 +130,8 @@ def test_two_profiles_in_one_process(fake_hermes):
         for profile, module_name in zip(("alpha", "beta"), names):
             with scope(profile) as home:
                 # per-profile config, as a user would write it
-                (home / "hermes_otel.yaml").write_text(f"project_name: proj-{profile}\n")
+                disk = "dashboard_live_storage: disk\n" if storage == "disk" else ""
+                (home / "hermes_otel.yaml").write_text(f"project_name: proj-{profile}\n{disk}")
                 mod = _load_copy(module_name)
                 mod.register(FakeCtx())
                 copies[profile] = mod
@@ -153,13 +155,18 @@ def test_two_profiles_in_one_process(fake_hermes):
             home = root / "profiles" / profile
             assert (home / "plugins" / "hermes_otel" / "debug.log").is_file(), profile
             db = home / "hermes_otel_live.db"
-            assert db.is_file(), profile
-            store = LiveStore(db_path=str(db))
-            try:
-                spans = store.spans()
-                metrics = store.metrics()
-            finally:
-                store.close()
+            if storage == "disk":
+                assert db.is_file(), profile
+                store = LiveStore(db_path=str(db))
+                try:
+                    spans, metrics = store.spans(), store.metrics()
+                finally:
+                    store.close()
+            else:
+                assert not db.exists(), profile
+                store = tracers[profile].pipeline.live_store
+                assert store.db_path == ":memory:"
+                spans, metrics = store.spans(), store.metrics()
             root_span = next(s for s in spans if s["name"] == "agent")
             assert root_span["attributes"]["hermes.profile"] == profile
             assert root_span["attributes"]["hermes.session_id"] == f"s-{profile}"
@@ -175,6 +182,7 @@ def test_two_profiles_in_one_process(fake_hermes):
         for mod in copies.values():
             try:
                 mod.tracer.get_tracer().shutdown()
+                mod.live_store_registry.close_live_stores()
             except Exception:
                 pass
         for module_name in names:

@@ -80,9 +80,7 @@ class TestInitPhoenix:
                 assert plugin.is_enabled is True
                 assert plugin.pipeline.live_active is True
             finally:
-                if ls._LIVE_STORE is not None:
-                    ls._LIVE_STORE.close()
-                ls._LIVE_STORE = None  # don't leak the singleton into other tests
+                ls.close_live_stores()  # don't leak the singleton into other tests
 
     def test_all_invalid_backends_fall_back_to_live_only(self, monkeypatch, caplog):
         """Every ``backends:`` entry invalid → live-only like an empty config,
@@ -100,9 +98,7 @@ class TestInitPhoenix:
                 assert plugin.pipeline.live_active is True
             finally:
                 plugin.shutdown()
-                if ls._LIVE_STORE is not None:
-                    ls._LIVE_STORE.close()
-                ls._LIVE_STORE = None
+                ls.close_live_stores()
         messages = [r.getMessage() for r in caplog.records]
         assert any("config.backends had no valid entries" in m for m in messages)
         assert any("live-only mode" in m for m in messages)

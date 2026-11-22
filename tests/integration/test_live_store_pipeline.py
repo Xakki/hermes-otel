@@ -5,10 +5,13 @@ flips ``_live_active`` on — the same shape the zero-config (no-backend) path
 produces in ``_init_otlp_pipeline``.
 """
 
+import sqlite3
+from dataclasses import replace
+from unittest.mock import Mock
+
 import pytest
 
 from hermes_otel import hooks
-from hermes_otel.live_store import LiveStore
 from hermes_otel.live_store_registry import get_live_store
 from hermes_otel.plugin_config import HermesOtelConfig
 
@@ -24,7 +27,7 @@ def live_plugin(tmp_path):
     from hermes_otel.testing import attach_pipeline
     from hermes_otel.tracer import HermesOTelPlugin
 
-    ls._LIVE_STORE = LiveStore(db_path=str(tmp_path / "live.db"))  # fresh tmp store
+    get_live_store(create=True, db_path=str(tmp_path / "live.db"))  # fresh tmp store
     store = get_live_store()
 
     provider = TracerProvider(resource=Resource.create({"service.name": "live-test"}))
@@ -40,37 +43,90 @@ def live_plugin(tmp_path):
         yield store, plugin
     finally:
         tracer_mod._tracer = prev
-        if ls._LIVE_STORE is not None:
-            ls._LIVE_STORE.close()
-        ls._LIVE_STORE = None
+        ls.close_live_stores()
         provider.shutdown()
 
 
+def test_rebuild_flushes_and_keeps_the_same_writer_and_history(tmp_path, monkeypatch):
+    from hermes_otel.tracer import HermesOTelPlugin
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    plugin = HermesOTelPlugin(HermesOtelConfig(dashboard_live=True, host_metrics=False))
+    assert plugin.init()
+    pipeline = plugin.pipeline
+    assert pipeline is not None
+    writer = pipeline.live_store
+    conn = writer._connection
+    writer.flush_interval_s = 3600
+    writer.add_span({"name": "before-rebuild"})
+
+    assert plugin.init() and plugin.pipeline is pipeline
+    plugin.config = replace(plugin.config, preview_max_chars=1800)
+    assert plugin.init()
+    rebuilt = plugin.pipeline
+    assert rebuilt is not None and rebuilt is not pipeline
+    assert rebuilt.live_store is writer is get_live_store()
+    assert writer._connection is conn
+    assert conn.execute("SELECT name FROM events WHERE kind = 'span'").fetchall() == [
+        ("before-rebuild",)
+    ]
+    with rebuilt.tracer.start_as_current_span("after-rebuild"):
+        pass
+    assert {span["name"] for span in writer.spans()} == {"before-rebuild", "after-rebuild"}
+
+
+def test_registered_unload_releases_only_its_profile_and_all_its_targets(tmp_path, monkeypatch):
+    from hermes_otel import register, tracer
+
+    home, other_home = tmp_path / "one", tmp_path / "two"
+    home.mkdir()
+    other_home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    plugin = tracer.HermesOTelPlugin(HermesOtelConfig(dashboard_live=True, host_metrics=False))
+    monkeypatch.setattr(tracer, "_tracer", plugin)
+    ctx = Mock()
+    register(ctx)
+    ctx.on_unload.assert_called_once()
+    unload = ctx.on_unload.call_args.args[0]
+    assert plugin.pipeline is not None
+    writer = plugin.pipeline.live_store
+    writer.add_span({"name": "discard-on-unload"})
+    disk_path = home / "live.db"
+    monkeypatch.setenv("HERMES_OTEL_LIVE_DB", str(disk_path))
+    plugin.config = replace(plugin.config, dashboard_live_storage="disk")
+    assert plugin.init()
+    disk_writer = plugin.pipeline.live_store
+    assert disk_writer is not writer and disk_writer.db_path == str(disk_path)
+    disk_writer.add_span({"name": "persist-on-unload"})
+    connections = (writer._connection, disk_writer._connection)
+
+    monkeypatch.delenv("HERMES_OTEL_LIVE_DB")
+    monkeypatch.setenv("HERMES_HOME", str(other_home))
+    other = get_live_store(create=True)
+    assert other is not None
+    other_conn = other._connection
+    other.add_span({"name": "other-profile"})
+    unload()
+    assert plugin.pipeline is None
+    assert get_live_store() is other and other._connection is other_conn
+    assert [s["name"] for s in other.spans()] == ["other-profile"]
+    for conn in connections:
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            conn.execute("SELECT 1")
+    assert writer.spans() == []
+
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    assert get_live_store() is None
+    plugin.config = replace(plugin.config, dashboard_live_storage="memory")
+    assert plugin.init()
+    fresh = get_live_store()
+    assert fresh is not None and fresh is not writer and fresh.spans() == []
+    reopened = get_live_store(create=True, db_path=str(disk_path))
+    assert reopened is not None and reopened is not disk_writer
+    assert [s["name"] for s in reopened.spans()] == ["persist-on-unload"]
+
+
 class TestLivePipeline:
-    def test_span_processor_shutdown_releases_the_store_for_reload(self, monkeypatch):
-        import hermes_otel.live_store_registry as registry
-        from hermes_otel.pipeline import _LiveSpanProcessor
-
-        class Store:
-            closed = False
-            flushed = False
-
-            def close(self):
-                self.closed = True
-
-            def flush(self):
-                self.flushed = True
-
-        store = Store()
-        monkeypatch.setattr(registry, "_LIVE_STORE", store)
-        monkeypatch.setattr(registry, "_STORES_BY_PATH", {"live.db": store})
-        _LiveSpanProcessor(store).shutdown()
-
-        assert store.closed is True
-        assert store.flushed is False
-        assert registry._LIVE_STORE is None
-        assert registry._STORES_BY_PATH == {}
-
     def test_full_turn_lands_in_store(self, live_plugin):
         store, _ = live_plugin
         hooks.on_session_start(session_id="s1", model="gpt-4", platform="telegram")

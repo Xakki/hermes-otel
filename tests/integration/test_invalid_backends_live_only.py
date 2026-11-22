@@ -31,7 +31,7 @@ def invalid_only_plugin(monkeypatch, tmp_path):
 
     clear_backend_env(monkeypatch)
     monkeypatch.setattr(live_store_mod, "_default_db_path", lambda: str(tmp_path / "live.db"))
-    registry._LIVE_STORE = None
+    registry.close_live_stores()
     config = HermesOtelConfig(
         backends=[
             BackendConfig(type="nope", endpoint="http://localhost:4318/v1/traces"),
@@ -44,9 +44,7 @@ def invalid_only_plugin(monkeypatch, tmp_path):
     with patch("hermes_otel.pipeline.trace.set_tracer_provider"):
         yield plugin
     plugin.shutdown()
-    if registry._LIVE_STORE is not None:
-        registry._LIVE_STORE.close()
-    registry._LIVE_STORE = None
+    registry.close_live_stores()
 
 
 def test_hooks_register_and_the_live_store_fills(invalid_only_plugin):

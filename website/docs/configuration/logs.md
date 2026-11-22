@@ -202,7 +202,7 @@ The first form is `logs.capture` (with `events on` when both switches are set), 
 
 Each of these is something the test suite or a script runs, not a promise:
 
-1. **Local, no backend.** Turn on `logs.capture` (or `logs.events.enabled`), run a turn, then read the live store from the agent's own skill, `python3 ${HERMES_SKILL_DIR}/scripts/otel.py logs --since 1h` (events carry an `event_name` field), or directly:
+1. **Local, no backend.** Turn on `logs.capture` (or `logs.events.enabled`), set `dashboard_live_storage: disk`, restart the recorder, and run a turn. Read the disk store from the agent's skill, `python3 ${HERMES_SKILL_DIR}/scripts/otel.py logs --since 1h` (events carry an `event_name` field), or directly:
 
    ```bash
    sqlite3 "$HERMES_HOME/hermes_otel_live.db" "select level, json_extract(data,'$.event_name'), trace_id, json_extract(data,'$.attributes.\"hermes.log.attribution\"'), substr(json_extract(data,'$.body'),1,60) from events where kind='log' order by ts desc limit 10"

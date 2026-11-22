@@ -142,6 +142,7 @@ def otel_config(project: str, backends_from: Optional[Path]) -> tuple[Dict[str, 
     cfg: Dict[str, Any] = {
         "project_name": project,
         "logs": {"capture": True, "level": "INFO"},
+        "dashboard_live_storage": "disk",  # check.py runs outside the recorders
         # A full run writes a few thousand log rows; the default cap (1000 per
         # kind) would evict the first scenarios' records before check.py reads them.
         "dashboard_live_max_spans": 20000,

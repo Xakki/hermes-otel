@@ -51,6 +51,7 @@ from .instruments import (
     _INSTRUMENTS,
     COMPAT_SESSION_LABEL,
 )
+from .live_store_registry import close_live_writers
 from .pipeline import _OTEL_AVAILABLE, Pipeline, build_pipeline
 from .plugin_config import SHORT_FINGERPRINT_CHARS, HermesOtelConfig, load_config
 from .session_state import PerSession, SessionState
@@ -150,10 +151,9 @@ class HermesOTelPlugin:
         (plugin reload, reconfigure, tests) and ``config`` (plus the explicit
         ``endpoint``) fingerprints the same as the one it was built from, the
         call is a no-op that returns ``is_enabled``; a different fingerprint
-        flushes and shuts the old pipeline down (``shutdown()``: open spans
-        ended, every processor flushed) and builds the new one, logging both
-        short fingerprints. Exporter threads and log handlers never stack up,
-        and an unchanged reload never loses a buffered span to a rebuild.
+        flushes and shuts the old pipeline down and builds the new one,
+        logging both short fingerprints. Exporter threads and log handlers
+        never stack up, and the live writer keeps its history across rebuilds.
         """
         fingerprint = self.config.fingerprint(endpoint=endpoint)
         if self.pipeline is not None:
@@ -166,7 +166,7 @@ class HermesOTelPlugin:
                 f"[hermes-otel] config changed ({previous} → {short}): flushing and "
                 "rebuilding the pipeline"
             )
-            self.shutdown()
+            self._shutdown_pipeline()
         self._label_values = {}
         self._label_cap_logged = set()
         self.hermes_home = resolve_hermes_home()
@@ -200,20 +200,30 @@ class HermesOTelPlugin:
         self._register_atexit_flush()
         if self.config.host_metrics:
             self.host_metrics = HostMetrics(
-                self.config, meter=pipeline.meter, live_active=pipeline.live_active
+                self.config, meter=pipeline.meter, live_store=pipeline.live_store
             )
             self.host_metrics.start()
         return True
 
     def shutdown(self) -> None:
-        """Flush and tear the pipeline down. Idempotent; never raises.
+        """Unload this profile, flushing telemetry and releasing its live writers."""
+        try:
+            self._shutdown_pipeline()
+        finally:
+            with contextlib.suppress(Exception):
+                close_live_writers(self.hermes_home)
+            if self._atexit_registered:
+                atexit.unregister(self.shutdown)
+                self._atexit_registered = False
+
+    def _shutdown_pipeline(self) -> None:
+        """Flush and tear the pipeline down without releasing its live writers.
 
         Ends any still-open spans, force-flushes every processor, stops the
         host-metrics sampler, shuts the pipeline down (its worker threads
         exit, the log handler is detached and the logger level it lowered
         restored), drops all per-session state and forgets the pipeline.
-        ``init()`` may be called again afterwards. Registered with ``atexit``
-        on first init.
+        ``init()`` may be called again afterwards.
         """
         # End whatever is still open first so it reaches the exporters, then
         # flush, then stop the workers.
@@ -485,7 +495,7 @@ class HermesOTelPlugin:
             with contextlib.suppress(Exception):  # never break the hot path
                 from .live_store_registry import get_live_store
 
-                store = get_live_store()
+                store = pipeline.live_store or get_live_store(home=self.hermes_home)
                 if store is not None:
                     store.add_metric(spec.name, value, attributes, time.time_ns())
 
@@ -732,7 +742,8 @@ class HermesOTelPlugin:
         """Register a single atexit hook that flushes and shuts the pipeline down.
 
         Idempotent across multiple init() calls (plugin reload, tests). atexit
-        runs LIFO, so this fires before the SDK's own per-processor hooks.
+        runs LIFO, so this fires before the SDK's own per-processor hooks and
+        the live registry's process-wide cleanup.
         """
         if self._atexit_registered:
             return
