@@ -15,7 +15,7 @@ Since Hermes 0.21 the second part is automatic. `hermes plugins install` and `he
 
 ## What leaves your machine
 
-Span data, including prompts, tool arguments and tool output, goes only to the OTLP backends you configure. By default the content is complete and unclipped (`content_capture: full`); `content_capture: preview` clips it to 1200 characters and `content_capture: "off"` sends none, keeping only the structure ([Privacy mode](/configuration/privacy)). With no backend configured, the plugin keeps a local SQLite store under `$HERMES_HOME` for the dashboard and sends nothing. The catalog entry's description says the same. The only packages installed into the Hermes venv are `opentelemetry-api`, `opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-http`, `opentelemetry-exporter-otlp-proto-grpc` and PyYAML.
+Span data, including prompts, tool arguments and tool output, goes only to the OTLP backends you configure. By default the content is complete and unclipped (`content_capture: full`); `content_capture: preview` clips it to 1200 characters and `content_capture: "off"` sends none, keeping only the structure ([Privacy mode](/configuration/privacy)). With no backend configured, the plugin sends nothing and keeps recent telemetry in process-local SQLite memory by default. Separate dashboard or CLI queries need opt-in [disk storage](/dashboard#the-live-store). The only packages installed into the Hermes venv are `opentelemetry-api`, `opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-http`, `opentelemetry-exporter-otlp-proto-grpc` and PyYAML.
 
 ## From the plugin catalog
 
@@ -76,8 +76,8 @@ hermes plugins enable hermes_otel     # --force reinstall leaves it disabled
 
 :::warning A reinstall replaces the plugin directory
 Both paths swap the whole directory, so **anything you keep inside it is deleted**. Since 1.6.1 the
-plugin keeps nothing there by itself: the durable config is `~/.hermes/hermes_otel.yaml` and the live
-dashboard store is `~/.hermes/hermes_otel_live.db` (override with `HERMES_OTEL_LIVE_DB`). If you
+plugin keeps nothing there by itself: the durable config is `~/.hermes/hermes_otel.yaml` and any
+opt-in disk store defaults to `~/.hermes/hermes_otel_live.db` (override with `HERMES_OTEL_LIVE_DB`). If you
 still have a legacy `config.yaml` inside the plugin directory, move it out:
 
 ```bash
@@ -143,7 +143,7 @@ Differences from a directory install:
   Traces, metrics and logs are unaffected.
 - **A directory install wins.** If `plugins/hermes_otel/` also exists in the Hermes home, Hermes
   loads that copy and ignores the entry point.
-- **Nothing is written next to the code.** The config file, the live store and the debug log all
+- **Nothing is written next to the code.** The config file, optional disk store and debug log
   live under the Hermes home (`$HERMES_HOME`), so site-packages can stay read-only.
 - **Upgrades are a rebuild.** Change the release in the archive URL and rebuild the image.
 

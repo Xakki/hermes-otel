@@ -7,9 +7,8 @@ draws, sessions, window totals, metrics, logs, and raw read-only SQL.
 
 Sources
 -------
-* the **live store** (``$HERMES_HOME/hermes_otel_live.db``), the default: it is
-  on by default, local, and holds every span the plugin produced whether or not
-  a backend is configured;
+* the **live store**, when explicitly configured on disk or selected with
+  ``--db``; the default process-local buffer is not visible to this CLI;
 * any **configured backend** that has a dashboard adapter (``--source
   <name|type>``), through the same adapters the dashboard tab uses.
 
@@ -39,7 +38,8 @@ from typing import Any, Dict, List, Optional, Sequence, TextIO, Tuple
 from . import query_sources
 from . import semconv as _sc
 from .coerce import optional_number
-from .live_store import LiveStore, _default_db_path
+from .live_store import MEMORY_DB, LiveStore
+from .live_store_registry import DISABLED_REASON, MEMORY_ONLY_REASON
 from .live_summary import summarize_trace
 from .query_render import (
     TURN_KINDS,
@@ -103,17 +103,21 @@ def _emit_json(obj: Any, out: TextIO) -> None:
 
 
 def cmd_status(args: argparse.Namespace, out: TextIO) -> int:
-    path = getattr(args, "db", None) or _default_db_path()
+    path = query_sources.live_db_target(getattr(args, "db", None))
     from .hermes_home import resolve_hermes_home, resolve_profile_name
 
+    storage = "disabled" if path is None else "memory" if path == MEMORY_DB else "disk"
+    exists = storage == "disk" and path is not None and Path(path).exists()
     info: Dict[str, Any] = {
         "hermes_home": str(resolve_hermes_home()),
         "profile": resolve_profile_name(),
-        "live_store": {"path": path, "exists": Path(path).exists()},
+        "live_store": {"path": path, "storage": storage, "exists": exists},
         "backends": [],
         "config_file": None,
     }
-    if Path(path).exists():
+    if storage != "disk":
+        info["live_store"]["reason"] = MEMORY_ONLY_REASON if path == MEMORY_DB else DISABLED_REASON
+    if path is not None and exists:
         store = LiveStore(db_path=path)
         try:
             st = store.stats()
@@ -164,19 +168,21 @@ def cmd_status(args: argparse.Namespace, out: TextIO) -> int:
         return 0
     ls = info["live_store"]
     out.write(f"hermes home   {info['hermes_home']}  (profile: {info['profile']})\n")
-    out.write(f"live store    {ls['path']}\n")
+    out.write(f"live store    {ls['path'] or ls['storage']}\n")
     if ls["exists"]:
         out.write(
             f"              {fmt_num(ls['spans'])} spans · {fmt_num(ls['metrics'])} metric points · "
             f"{fmt_num(ls['logs'])} logs · {ls['oldest']} → {ls['newest']} (UTC)\n"
         )
+    elif ls.get("reason"):
+        out.write(f"              {ls['reason']} For an existing file use --db <path>.\n")
     else:
-        out.write("              (missing: no turn recorded yet, or dashboard_live is false)\n")
+        out.write("              (missing: no turn recorded yet)\n")
     out.write(f"config file   {info['config_file'] or '(none found: env vars only)'}\n")
     if info.get("backends_error"):
         out.write(f"backends      unavailable: {info['backends_error']}\n")
     elif not info["backends"]:
-        out.write("backends      none configured (the live store is the only source)\n")
+        out.write("backends      none configured\n")
     else:
         out.write("backends\n")
         for b in info["backends"]:
@@ -674,9 +680,7 @@ def cmd_sql(args: argparse.Namespace, out: TextIO) -> int:
         raise CliError(
             "only SELECT / WITH / EXPLAIN / PRAGMA statements are accepted (the store is opened read-only)"
         )
-    path = getattr(args, "db", None) or _default_db_path()
-    if not Path(path).exists():
-        raise CliError(f"no live store at {path}")
+    path = query_sources.require_live_db_path(getattr(args, "db", None))
     try:
         c = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     except sqlite3.Error as exc:

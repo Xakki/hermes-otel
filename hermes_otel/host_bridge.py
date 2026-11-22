@@ -15,17 +15,17 @@ class HostMetrics:
     """The sampler and its wiring, created (not started) from the config.
 
     The sampler's readings are mirrored into the live store when
-    ``live_active`` (so the built-in dashboard sees them) and read by the
+    a ``live_store`` is provided and read by the
     observable instruments registered on ``meter`` (none without a meter:
     the live-only pipeline). ``start()`` runs the sampler thread after init,
     ``stop()`` ends it at shutdown.
     """
 
-    def __init__(self, config: Any, *, meter: Any = None, live_active: bool = False) -> None:
+    def __init__(self, config: Any, *, meter: Any = None, live_store: Any = None) -> None:
         from .host_metrics import HostMetricsSampler
 
         self.config = config
-        self.live_active = live_active
+        self.live_store = live_store
         self.sampler = HostMetricsSampler(
             interval_ms=config.host_metrics_interval_ms,
             gpu_vendor=config.host_metrics_gpu,
@@ -37,6 +37,10 @@ class HostMetrics:
     @property
     def running(self) -> bool:
         return self.sampler.running
+
+    @property
+    def live_active(self) -> bool:
+        return self.live_store is not None
 
     def start(self) -> None:
         sampler = self.sampler
@@ -69,14 +73,10 @@ class HostMetrics:
 
     def mirror_sample(self, sample: Any) -> None:
         """Push each reading into the live store so the built-in dashboard sees it."""
-        if not self.live_active:
+        store = self.live_store
+        if store is None:
             return
         try:
-            from .live_store_registry import get_live_store
-
-            store = get_live_store()
-            if store is None:
-                return
             ts = sample.wall_ns
             store.add_metric("process.cpu.utilization", sample.process_cpu_total, {}, ts)
             store.add_metric("system.cpu.utilization", sample.system_cpu_total, {}, ts)

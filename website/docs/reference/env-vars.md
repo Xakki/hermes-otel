@@ -181,6 +181,7 @@ Every scalar or list field of the config file can be overridden by `HERMES_OTEL_
 | `HERMES_OTEL_PROBE_BACKENDS` | `probe_backends` | bool | `true` |
 | `HERMES_OTEL_DISCOVERY_PROMPT` | `discovery_prompt` | bool | `false` |
 | `HERMES_OTEL_DASHBOARD_LIVE` | `dashboard_live` | bool | `true` |
+| `HERMES_OTEL_DASHBOARD_LIVE_STORAGE` | `dashboard_live_storage` | string | `"memory"` |
 | `HERMES_OTEL_DASHBOARD_LIVE_MAX_SPANS` | `dashboard_live_max_spans` | int | `1000` |
 | `HERMES_OTEL_DASHBOARD_LIVE_RETENTION_HOURS` | `dashboard_live_retention_hours` | float | `168.0` |
 | `HERMES_OTEL_HOST_METRICS` | `host_metrics` | bool | `false` |
@@ -203,7 +204,7 @@ Every scalar or list field of the config file can be overridden by `HERMES_OTEL_
 |---|---|
 | `HERMES_OTEL_CONFIG` | Explicit path to the config file; highest precedence — see [Where does the config live?](/configuration/overview) |
 | `HERMES_HOME` | Hermes' home (default `~/.hermes`); the plugin resolves `hermes_otel.yaml`, the live store and the debug log under it. Inside a multiplexed gateway each profile's plugin uses that profile's home instead, via Hermes's own resolver ([profiles](/configuration/profiles)) |
-| `HERMES_OTEL_LIVE_DB` | Path of the live dashboard's SQLite store (default `$HERMES_HOME/hermes_otel_live.db`) |
+| `HERMES_OTEL_LIVE_DB` | Explicit path override that selects disk storage when `dashboard_live` is enabled. Without this override, `dashboard_live_storage: disk` uses `$HERMES_HOME/hermes_otel_live.db`; `memory` creates no file. Set distinct paths for distinct profiles. |
 
 ## OpenTelemetry SDK
 

@@ -13,6 +13,9 @@ each configured backend through the plugin's own query CLI), and dump the live
 store's spans, metric names and logs for the batch in a normalised form. Then
 diff the two sides.
 
+The test profile needs ``dashboard_live_storage: disk``: the recorder and the
+checker run in separate processes.
+
 What is compared is the *shape* of the telemetry, not the values a model
 produces: span names, parentage, status, the attribute keys each span carries,
 and the values of the attributes that are stable from run to run (tool names,

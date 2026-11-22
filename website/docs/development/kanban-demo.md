@@ -9,7 +9,8 @@ description: "One command that works four cards on a scratch kanban board and re
 `scripts/kanban_demo/run_demo.py` exercises Hermes' kanban board end to end and reads the telemetry back, so the [kanban spans](/architecture/span-hierarchy#kanban) can be checked against a real dispatcher and real workers without touching your own board.
 
 ```bash
-# a backend running (see the backend pages); the profile's hermes_otel.yaml lists it
+# The profile's hermes_otel.yaml sets dashboard_live_storage: disk.
+# With --jaeger-url the profile also has a configured Jaeger backend.
 uv run --extra dev python scripts/kanban_demo/run_demo.py --profile minimal \
     --jaeger-url http://localhost:16686
 ```

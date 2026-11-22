@@ -1,8 +1,6 @@
 """The live-store routes of the dashboard tab (``/live/*``, #184).
 
-The gateway writes turns into a SQLite file the dashboard opens in its own
-process; these routes read it. ``plugin_api`` includes this router, so the
-URLs are unchanged.
+Only disk mode can share Live data across processes.
 """
 
 from __future__ import annotations
@@ -18,15 +16,7 @@ router = APIRouter()
 
 
 def _get_live_store():
-    """Return the LiveStore for the request's Hermes home, or None.
-
-    The dashboard runs in a SEPARATE process from the gateway: it opens the
-    shared SQLite file itself (``create=True``) and reads what the gateway
-    writes. The store follows the profile of the request (#70): a dashboard
-    serving several profiles reads each one's own file. ``None`` when the
-    plugin's live store (``hermes_otel.live_store_registry``) cannot be
-    imported or the store cannot be created (:func:`_no_store_reason` says which).
-    """
+    """Return the request profile's local writer or configured disk reader."""
     mod = plugin_module("live_store_registry")
     if mod is None:
         return None
@@ -41,6 +31,9 @@ def _no_store_reason() -> Dict[str, Any]:
         return {
             "reason": "the hermes_otel.live_store_registry module could not be imported by the dashboard"
         }
+    reason = mod.live_unavailable_reason()
+    if reason is not None:
+        return {"reason": reason}
     failure = mod.create_error_for_home()
     if failure is None:
         return {"reason": "the live store could not be created"}
@@ -54,9 +47,7 @@ def live_status() -> Dict[str, Any]:
 
     ``live: false`` names the real cause: the ``hermes_otel.live_store_registry``
     module could not be imported, creating the store raised, or the file could
-    not be opened or initialised (``open_error``). An empty but healthy store is ``live: true`` with zero
-    rows; ``dashboard_live: false`` on the gateway shows up as a store that
-    never fills, which the Settings tab reports.
+    could not be opened, or the recording process does not share its store.
     """
     store = _get_live_store()
     if store is None:

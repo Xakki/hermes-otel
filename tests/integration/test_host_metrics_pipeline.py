@@ -153,20 +153,14 @@ class TestLifecycle:
 
 
 class TestLiveStoreMirror:
-    def test_readings_are_mirrored_when_live_store_active(
-        self, inmemory_otel_with_metrics, monkeypatch
-    ):
-        _exporter, _reader, plugin = inmemory_otel_with_metrics
+    def test_readings_are_mirrored_when_live_store_active(self):
         seen = []
 
         class _Store:
             def add_metric(self, name, value, attrs, ts):
                 seen.append((name, value, ts))
 
-        import hermes_otel.live_store_registry as ls
-
-        monkeypatch.setattr(ls, "get_live_store", lambda: _Store())
-        host = HostMetrics(_config(), live_active=True)
+        host = HostMetrics(_config(), live_store=_Store())
         host.mirror_sample(_sample(gpus=[GpuReading(0, 0.75, None, None)]))
         assert seen == [
             ("process.cpu.utilization", 0.3, 1_700_000_000_000_000_000),
@@ -175,7 +169,7 @@ class TestLiveStoreMirror:
         ]
 
     def test_mirror_is_noop_when_live_inactive(self):
-        HostMetrics(_config(), live_active=False).mirror_sample(_sample())  # must not raise
+        HostMetrics(_config()).mirror_sample(_sample())  # must not raise
 
 
 class TestResourceHostName:

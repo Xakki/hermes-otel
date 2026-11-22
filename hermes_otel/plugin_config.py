@@ -680,18 +680,24 @@ class HermesOtelConfig:
         "Spans and metrics",
     )
     # ── Live dashboard (local store) ────────────────────────────────────
-    # $HERMES_HOME/hermes_otel_live.db (or HERMES_OTEL_LIVE_DB): the gateway
-    # and dashboard processes see the same data, with NO external backend.
     dashboard_live: bool = _field(
         True,
-        "Keep recent spans/metrics/logs in `$HERMES_HOME/hermes_otel_live.db` for the dashboard's Live mode",
+        "Keep recent spans, metrics and logs in the local live store",
         "Dashboard",
+    )
+    dashboard_live_storage: str = _field(
+        "memory",
+        "`memory` is process-local; `disk` enables persistent, cross-process Live queries",
+        "Dashboard",
+        choices=("memory", "disk"),
+        normalize=_lower,
     )
     dashboard_live_max_spans: int = _field(
         1000,
-        "Rows kept per kind (spans, metrics, logs) in the live store",
+        "Total live rows in memory mode; rows per kind in disk mode",
         "Dashboard",
-        bounds=(1, None),
+        bounds=(1, 2**63 - 1),
+        strict_positive_int=True,
     )
     dashboard_live_retention_hours: float = _field(
         168.0,
@@ -890,7 +896,7 @@ _ungrouped = {f.metadata["group"] for f in fields(HermesOtelConfig)} - set(GROUP
 if _ungrouped:  # a misspelt group would silently drop its fields from the Settings tab
     raise ValueError(f"HermesOtelConfig groups missing from GROUP_ORDER: {sorted(_ungrouped)}")
 
-_RULE_KEYS = ("choices", "normalize", "aliases", "bool_as")
+_RULE_KEYS = ("choices", "normalize", "aliases", "bool_as", "strict_positive_int")
 # Per field, the keyword rule :func:`_parse_scalar` applies to its yaml or env value.
 FIELD_RULES: Dict[str, Dict[str, Any]] = {
     f.name: {k: f.metadata[k] for k in _RULE_KEYS if k in f.metadata}
@@ -938,6 +944,7 @@ def _parse_scalar(
     normalize: Optional[Callable[[Any], Any]] = None,
     aliases: Optional[Dict[str, str]] = None,
     bool_as: Optional[Tuple[str, str]] = None,
+    strict_positive_int: bool = False,
 ) -> Any:
     """Parse one scalar (a yaml value or an env string) to ``kind``; ``None`` = invalid.
 
@@ -955,6 +962,12 @@ def _parse_scalar(
     if kind in ("int", "float"):
         if isinstance(value, bool):
             return None  # bools are ints in python; reject explicitly
+        if strict_positive_int:
+            try:
+                number = int(str(value).strip())
+            except ValueError:
+                return None
+            return number if 0 < number <= 2**63 - 1 else None
         try:
             number = value if isinstance(value, (int, float)) else float(str(value).strip())
             number = int(number) if kind == "int" else float(number)

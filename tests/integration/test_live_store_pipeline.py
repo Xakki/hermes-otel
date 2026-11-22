@@ -8,7 +8,6 @@ produces in ``_init_otlp_pipeline``.
 import pytest
 
 from hermes_otel import hooks
-from hermes_otel.live_store import LiveStore
 from hermes_otel.live_store_registry import get_live_store
 from hermes_otel.plugin_config import HermesOtelConfig
 
@@ -24,7 +23,7 @@ def live_plugin(tmp_path):
     from hermes_otel.testing import attach_pipeline
     from hermes_otel.tracer import HermesOTelPlugin
 
-    ls._LIVE_STORE = LiveStore(db_path=str(tmp_path / "live.db"))  # fresh tmp store
+    get_live_store(create=True, db_path=str(tmp_path / "live.db"))  # fresh tmp store
     store = get_live_store()
 
     provider = TracerProvider(resource=Resource.create({"service.name": "live-test"}))
@@ -40,9 +39,7 @@ def live_plugin(tmp_path):
         yield store, plugin
     finally:
         tracer_mod._tracer = prev
-        if ls._LIVE_STORE is not None:
-            ls._LIVE_STORE.close()
-        ls._LIVE_STORE = None
+        ls.close_live_stores()
         provider.shutdown()
 
 

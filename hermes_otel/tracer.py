@@ -200,7 +200,7 @@ class HermesOTelPlugin:
         self._register_atexit_flush()
         if self.config.host_metrics:
             self.host_metrics = HostMetrics(
-                self.config, meter=pipeline.meter, live_active=pipeline.live_active
+                self.config, meter=pipeline.meter, live_store=pipeline.live_store
             )
             self.host_metrics.start()
         return True
@@ -485,7 +485,7 @@ class HermesOTelPlugin:
             with contextlib.suppress(Exception):  # never break the hot path
                 from .live_store_registry import get_live_store
 
-                store = get_live_store()
+                store = pipeline.live_store or get_live_store(home=self.hermes_home)
                 if store is not None:
                     store.add_metric(spec.name, value, attributes, time.time_ns())
 

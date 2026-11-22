@@ -16,8 +16,9 @@ This skill is shipped by the **hermes-otel** plugin and registered as
 OpenTelemetry trace: the session, each model call, each API round-trip, each
 tool call, approvals, loaded skills and delegated sub-agents, plus token, cost
 and latency metrics and (optionally) logs. Spans go to the backends you
-configured **and** to a local SQLite live store, so there is always something
-to query, even with no backend at all.
+configured **and** to a local SQLite live store when enabled. The default
+buffer is private to the recording process. To use the terminal tool without
+a backend, set `dashboard_live_storage: disk` and restart the recorder.
 
 > 🪞 Opening this skill emits a `skill.observability` span in the very trace you
 > are about to inspect. Observability, observing itself.
@@ -25,7 +26,8 @@ to query, even with no backend at all.
 ## The tool: `otel.py`
 
 A terminal query tool ships next to this skill. Run it with the `terminal`
-tool; it needs only Python 3 and the standard library for the live store:
+tool. An explicit `--db` only needs Python 3; to read disk mode from YAML or
+query a backend, use the Python interpreter with PyYAML that Hermes runs on:
 
 ```bash
 python3 ${HERMES_SKILL_DIR}/scripts/otel.py <command> [options]
@@ -70,9 +72,11 @@ is `ERROR` ends with `ERROR: <message>`.
 
 ## Recipes
 
-Start with `status` once per conversation so you know the window you have (the
-live store keeps the newest `dashboard_live_max_spans` rows of each kind,
-1000 by default, for at most 168 hours) and which sources exist. Then:
+Start with `status` to see which sources are available. Disk mode keeps the
+newest `dashboard_live_max_spans` rows per kind (1,000 by default) and trims
+by age (`dashboard_live_retention_hours`, 168 by default). Memory mode uses
+the same key as a total row cap across spans, metrics and logs, not a byte
+limit. Then:
 
 | Question | Run |
 |---|---|
@@ -136,9 +140,12 @@ the registration for the user.
 
 ## If a command fails
 
-- `no live store at …`: no turn has been recorded yet, `dashboard_live` is
-  `false`, or the gateway runs with a different `HERMES_HOME`. Pass `--db
-  <path>` to point at the file.
+- In-memory store unavailable: this tool runs separately and cannot read the
+  recorder's memory. Select `disk` and restart the recorder, query with
+  `--source <backend>`, or explicitly open an existing file with `--db <path>`.
+- `no live store at …`: no turn has been persisted yet, or the recorder and
+  CLI are using different homes or disk paths. `HERMES_OTEL_LIVE_DB` explicitly
+  selects a path for disk mode; use a different path for each profile.
 - `backend queries read the config file with pyyaml`: `--source` needs the
   interpreter Hermes runs on. `hermes --version` prints the install directory;
   use its `venv/bin/python` instead of `python3`.
@@ -167,7 +174,8 @@ capture_logs: true
 At startup the log prints one `[hermes-otel] ✓ <Backend> at <endpoint>` line
 per configured backend (and `✓ Multi-backend fan-out active` when there are two
 or more). Knobs that change what this tool can show: `dashboard_live`
-(the live store; on by default), `dashboard_live_max_spans` and
+(the live store; on by default), `dashboard_live_storage` (`memory` or `disk`),
+`dashboard_live_max_spans` and
 `dashboard_live_retention_hours` (how much it keeps), `capture_logs` (logs),
 `content_capture` (`full`, `preview` or `off`: how much of prompts, responses
 and tool I/O is recorded), `skill_spans` (the `skill.<name>` spans),

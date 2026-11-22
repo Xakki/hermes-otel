@@ -10,29 +10,30 @@ Installing the plugin adds an **OTel** tab to the Hermes web dashboard (`hermes 
 
 | Source | What it shows | Needs |
 |---|---|---|
-| **Live** (in-process store) | The most recent turns, spans, metrics and logs the plugin recorded on this machine, within seconds of happening | nothing: on by default |
+| **Live** (local store) | The most recent turns, spans, metrics and logs the plugin recorded on this machine | `dashboard_live_storage: disk` for a separately running dashboard |
 | **Backend** | Historical trace search and trace detail queried from one of your configured backends | a backend whose type has a dashboard adapter |
 
 The plugin's own dashboard code lives in `hermes_otel/dashboard/` (a FastAPI router mounted at `/api/plugins/hermes_otel/` and a pre-built bundle registered as the tab). It is installed with the plugin; there is nothing extra to enable.
 
 ## The live store
 
-The gateway process writes every finished span, every metric point and (when `logs.capture` or `logs.events.enabled` is on) every log record at or above `logs.live_min_level` (default `INFO`, separate from the OTLP `logs.level`) and every event into a small SQLite file, `$HERMES_HOME/hermes_otel_live.db`. Rows are buffered and committed in one transaction by a background thread every 250 ms or 64 rows, so a hook never waits on the disk; the dashboard process, which is separate, reads the same file and sees a row within that interval. A commit that fails (the file locked by another process, a full disk) does not lose the batch: the rows are held, up to 5,000 of them, and committed on the next attempt, with one line in the plugin debug log. The file is created owner-only (`0600`, and an older `0644` file is tightened on open; the `-wal` / `-shm` sidecars inherit the mode) because it holds full prompts, responses and tool I/O. The store is a **bounded buffer of recent activity**, not a record:
+The recording process buffers finished spans, metrics and enabled logs and events in SQLite. By default the buffer is private to that process and profile. It creates no SQLite database or sidecar files, is lost on process exit, and cannot be queried by a separate `hermes dashboard` process or by the standalone `otel.py` CLI. Those clients do not fall back to a leftover disk file.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `dashboard_live` | `true` | Write to the live store at all. Set `false` to disable the Live source. |
-| `dashboard_live_max_spans` | `1000` | Rows kept per kind (spans, metrics, logs); the oldest are dropped. Host samples (`process.cpu.*`, `system.cpu.*`, `hw.*`, recorded several times a second when `host_metrics` is on) have their own cap of 200 rows so they can never evict the turn's token and cost points. |
+| `dashboard_live_storage` | `memory` | Use `disk` to opt into persistent storage at `$HERMES_HOME/hermes_otel_live.db`. |
+| `dashboard_live_max_spans` | `1000` | Positive row cap. In memory this counts **all** spans, metrics and logs together. Disk mode keeps the historical cap per kind and a separate 200-row cap for host samples. |
 | `dashboard_live_retention_hours` | `168` | Rows older than this are dropped as well. `0` keeps rows until the row cap evicts them. |
-| `HERMES_OTEL_LIVE_DB` (env) | `$HERMES_HOME/hermes_otel_live.db` | Where the file lives. Both processes must resolve the same path. |
+| `HERMES_OTEL_LIVE_DB` (env) | unset | Explicit disk file override when local recording is enabled. For disk queries, both processes must use the same file; use a distinct path per profile. |
 
-The caps are enforced every 64 writes by the gateway and once more whenever either process opens the file, with the values of that home's config, so a store fed only by one-shot `hermes -z` runs (fewer than 64 rows each) stays bounded too. With the default cap, 1,000 spans is roughly thirty turns of ten tool calls each; raise `dashboard_live_max_spans` for a busy gateway, or configure a backend for history.
+Memory mode trims at each commit; disk mode trims periodically and on open. Pending writes are bounded and can drop the oldest rows under load or repeated write failures. These limits count rows, not bytes or process RSS. In disk mode SQLite uses WAL, and on Unix the database and its sidecars are restricted to the owner (`0600`).
 
-Every key also has a `HERMES_OTEL_*` environment variable, see [Environment variables](/reference/env-vars). For history beyond the buffer, configure a backend.
+Restart recording processes after changing storage mode or limits. Set the same disk mode or path override for the dashboard and recorder. `HERMES_OTEL_DASHBOARD_LIVE_STORAGE` and other `HERMES_OTEL_*` key overrides take precedence over YAML (see [Environment variables](/reference/env-vars)). Memory mode leaves existing disk telemetry untouched. For history beyond the buffer, configure a backend.
 
 Metrics in the live store carry the same names as the OTLP instruments (`hermes.token.usage`, `gen_ai.client.token.usage`, …), so a name in the Metrics tab's explorer means the same thing for the Live source and for a backend; a Prometheus-style backend shows them as `hermes_token_usage`.
 
-The same store is what the bundled skill's terminal tool reads, so an agent in the chat can list turns, draw a trace tree or total up cost without the dashboard: see [The observability skill](/skill).
+The bundled skill's terminal tool reads the disk store, an explicit `--db` file, or a configured backend: see [The observability skill](/skill).
 
 Rows carry indexed columns (trace id, session id, span name, status, start and end time, log level, logger, metric name) so the tab filters, groups and buckets in SQLite and the browser receives one page of results. The file's schema is versioned (`PRAGMA user_version`): a file written by a plugin release before 1.9 (v1, a JSON blob only) is recreated on first open; a file from 1.9 to 1.18 (v2) has the same layout as the current v3 and is kept and stamped in place, so a dashboard on the current release reads a file an older gateway is still writing; a file stamped by a newer release than the one reading it is opened as is and never re-stamped. A file that cannot be opened at all (corrupt, wrong permissions) is reported by `GET /live/status` as `live: false` with the error, not as an empty store.
 
@@ -141,7 +142,7 @@ All routes are under `/api/plugins/hermes_otel/`. The streaming views poll the c
 
 ## Troubleshooting
 
-**The Live tab says "Live store unavailable".** The dashboard could not import the plugin's `live_store_registry` module, the store could not be created, or the file could not be opened (corrupt, or not readable by the dashboard's user); `GET /live/status` names the reason and the path. An empty Live tab with `live: true` and zero rows means nothing is being written: `dashboard_live` is `false`, or the gateway and the dashboard resolve different `HERMES_HOME` values and therefore different files (compare `path` with the gateway's home).
+**The Live tab says "Live store unavailable".** `GET /live/status` reports whether the recorder uses process-local memory, local recording is disabled, or the configured file could not be opened. For separate processes, select disk mode and restart the recorder, or use a backend source. If disk mode reports `live: true` but zero rows, check that a turn finished and both processes use the same profile and file.
 
 **Backend source says "Not configured".** No entry under `backends:` has a type with an adapter. The message lists the types that do.
 
