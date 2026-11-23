@@ -206,7 +206,8 @@
     "gen_ai.provider.name": "openai",
     "gen_ai.request.model": "gpt-4",
     "gen_ai.response.model": "gpt-4",
-    "profile": "golden"
+    "profile": "golden",
+    "provider": "openai"
    },
    "bucket_counts": "<measured>",
    "count": 2,

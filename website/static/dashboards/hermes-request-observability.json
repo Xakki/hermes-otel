@@ -55,7 +55,7 @@
       "type": "stat",
       "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
       "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(gen_ai_client_operation_duration_seconds_bucket{gen_ai_provider_name=~\"${provider:regex}\",gen_ai_request_model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__rate_interval])))", "instant": true}],
+      "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(gen_ai_client_operation_duration_seconds_bucket{provider=~\"${provider:regex}\",gen_ai_request_model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__rate_interval])))", "instant": true}],
       "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
       "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
     },

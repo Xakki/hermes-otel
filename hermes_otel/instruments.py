@@ -467,7 +467,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "record",
         genai=True,
         boundaries=_B_OP_SECONDS,
-        labels=_GENAI_LABELS + API_IDENTITY_LABELS + ("error.type",),
+        labels=_GENAI_LABELS + API_IDENTITY_LABELS + ("error.type", "provider"),
     ),
     "gen_ai.agent.token.usage": InstrumentSpec(
         "gen_ai.agent.token.usage",

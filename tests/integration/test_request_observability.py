@@ -6,8 +6,11 @@ from unittest.mock import Mock
 
 import pytest
 from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, SimpleLogRecordProcessor
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from hermes_otel import hooks, log_events, tracer
+from hermes_otel.live_store_registry import get_live_store
 from hermes_otel.log_handler import BackendLogFilter, LogRules
 from hermes_otel.plugin_config import load_config
 
@@ -86,7 +89,8 @@ def test_host_request_events_obey_capture_and_backend_rules(
         assistant_tool_call_count=0,
         assistant_message={"content": "assistant-safe " * 20},
     )
-    store = pipeline.live_store
+    store = get_live_store()
+    assert store is not None
     names = {log_events.API_REQUEST, log_events.API_RESPONSE}
     events = {row["event_name"]: row for row in store.logs() if row["event_name"] in names}
     assert events.keys() == names
@@ -139,7 +143,9 @@ def _capture_request_logs(tmp_path, monkeypatch, config):
     pipeline.logger_provider.add_log_record_processor(
         BackendLogFilter(SimpleLogRecordProcessor(exporter), LogRules(events_enabled=True))
     )
-    return pipeline.live_store, exporter
+    store = get_live_store()
+    assert store is not None
+    return store, exporter
 
 
 def _request_turn(request_messages):
@@ -247,13 +253,28 @@ def test_request_content_boundary_survives_enrichment(tmp_path, monkeypatch, lev
             )
 
 
-@pytest.mark.parametrize("capture", ["preview", "full"])
-@pytest.mark.parametrize("shape", ["override", "plain", "truncated", "fallback", "options"])
+@pytest.mark.parametrize(
+    ("shape", "capture"),
+    [
+        (shape, capture)
+        for shape in ("override", "plain", "truncated", "fallback", "options")
+        for capture in ("preview", "full")
+    ]
+    + [("enriched-override", "full"), ("enriched-plain", "full")],
+)
 def test_request_capture_requires_an_unambiguous_provider_body(
     tmp_path, monkeypatch, capture, shape
 ):
     # Literal payloads captured from active Hermes dispatch, paired with the
     # actual OpenAI SDK JSON body (offline MockTransport, no outbound calls).
+    config = f'level: debug\ncontent_capture: "{capture}"\n'
+    enriched = shape.startswith("enriched-")
+    if enriched:
+        shape = shape.removeprefix("enriched-")
+        config += (
+            "common_attributes: {input.value: configured-input-marker, "
+            "output.value: configured-output-marker, release: safe-metadata-marker}\n"
+        )
     fixture = Path(__file__).with_name("request_hook_chat_payload.json")
     sample = json.loads(fixture.read_text())["override" if shape == "override" else "plain"]
     hook = sample["hook"]
@@ -266,9 +287,11 @@ def test_request_capture_requires_an_unambiguous_provider_body(
         hook["request"]["body"].pop("messages")
     elif shape == "options":
         hook["request_options"] = {"extra_body": {"messages": []}}
-    store, exporter = _capture_request_logs(
-        tmp_path, monkeypatch, f'level: debug\ncontent_capture: "{capture}"\n'
-    )
+    store, exporter = _capture_request_logs(tmp_path, monkeypatch, config)
+    span_exporter = InMemorySpanExporter()
+    pipeline = tracer.get_tracer().pipeline
+    assert pipeline is not None
+    pipeline.tracer_provider.add_span_processor(SimpleSpanProcessor(span_exporter))
     hooks.on_pre_api_request(**hook)
     identity = {
         k: hook[k]
@@ -298,6 +321,21 @@ def test_request_capture_requires_an_unambiguous_provider_body(
     names = {log_events.API_REQUEST, log_events.API_RESPONSE, log_events.INFERENCE_DETAILS}
     sinks = _sink_events(store, exporter, names)
     (api_span,) = [span for span in store.spans() if span["name"] == "api.m"]
+    span_attrs = api_span["attributes"]
+    (finished_span,) = [span for span in span_exporter.get_finished_spans() if span.name == "api.m"]
+    exported_span_attrs = dict(finished_span.attributes or {})
+    if enriched:
+        for attrs in (span_attrs, exported_span_attrs):
+            assert attrs["release"] == "safe-metadata-marker"
+            assert "provider-reply-marker" in str(attrs["output.value"])
+        for events in sinks:
+            assert all(attrs["release"] == "safe-metadata-marker" for attrs in events.values())
+            assert "provider-reply-marker" in json.dumps(events[log_events.INFERENCE_DETAILS])
+        if shape == "plain":
+            assert sent in span_attrs["input.value"]
+            assert sent in str(exported_span_attrs["input.value"])
+            for events in sinks:
+                assert sent in events[log_events.INFERENCE_DETAILS]["input.value"]
     if shape != "plain":
         observed = [
             {
@@ -306,7 +344,8 @@ def test_request_capture_requires_an_unambiguous_provider_body(
                 if key in attrs and key not in {"output.value", "gen_ai.output.messages"}
             }
             for attrs in [
-                api_span["attributes"],
+                span_attrs,
+                exported_span_attrs,
                 *(
                     events[name]
                     for events in sinks

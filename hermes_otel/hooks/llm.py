@@ -448,6 +448,7 @@ def on_post_api_request(
         tracer,
         api_duration,
         {**genai_metric_dims(model, provider, response_model), **metric_identity},
+        provider_label=model_labels.get("provider"),
     )
     record_first_chunk(tracer, attributes, payload, _metric_model_labels(model, provider))
     attributes.update(full_response_attributes(tracer, payload, finish_reason))
@@ -638,6 +639,7 @@ def on_api_request_error(
         tracer,
         api_duration,
         {**genai_metric_dims(model, provider), **metric_identity},
+        provider_label=model_labels.get("provider"),
         error_type=error_type or "unknown",
     )
 

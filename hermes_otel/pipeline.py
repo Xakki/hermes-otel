@@ -32,6 +32,7 @@ from .instruments import (
     metric_temporality_map,
     metric_views,
 )
+from .log_events import CONTENT_ATTRIBUTES
 from .otlp_transport import create_exporter
 from .pipeline_env import (
     host_arch,
@@ -446,7 +447,12 @@ if _OTEL_AVAILABLE:
         def on_start(self, span: Any, parent_context: Any = None) -> None:
             try:
                 present = span.attributes or {}
+                is_api_span = span.name.startswith("api.")
                 for key, value in self._attributes.items():
+                    # Missing API content must not be replaced with config values:
+                    # inference events read captured content back from the span.
+                    if is_api_span and key in CONTENT_ATTRIBUTES:
+                        continue
                     if key not in present:
                         span.set_attribute(key, value)
             except Exception:  # pragma: no cover — never break span creation
