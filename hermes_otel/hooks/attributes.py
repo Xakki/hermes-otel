@@ -19,6 +19,8 @@ from ..helpers import (
     package_version,
     truncate_string,
 )
+from ..instruments import API_IDENTITY_LABELS
+from ..redaction import redact_text
 from ..session_state import TurnSummary
 
 _DEFAULT_AGENT_NAME = DEFAULT_SERVICE_NAME
@@ -282,6 +284,15 @@ def _metric_model_labels(model: Any, provider: Any) -> Dict[str, str]:
         # The same spelling as gen_ai.provider.name on the spans (#475).
         labels["provider"] = canonical_provider(provider)[1]
     return labels
+
+
+def request_identity(extra: dict) -> Dict[str, str]:
+    """Read only the host's correlation ID and public pool-entry identity."""
+    return {
+        key: truncate_string(redact_text(value), _ID_MAX)
+        for key in ("api_request_id", *API_IDENTITY_LABELS)
+        if isinstance(value := extra.get(key), str) and value
+    }
 
 
 def _gen_ai_attributes(session_id: Optional[str], operation_name: str) -> Dict[str, str]:

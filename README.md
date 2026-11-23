@@ -107,6 +107,8 @@ backends:
 capture_logs: true
 ```
 
+For structured request and response events, set `logs.events.enabled: true` and `level: info`. The level never widens privacy or backend settings. Metrics are enabled by default; set `metrics.enabled: false` to disable them globally. See [Graylog + Prometheus via Collector](https://briancaffey.github.io/hermes-otel/backends/graylog-prometheus) for a logs-and-metrics route without trace export.
+
 Each Hermes profile has its own install, settings and telemetry; a multiplexed gateway traces every profile it serves under its own name ([profiles](https://briancaffey.github.io/hermes-otel/configuration/profiles)). [`config.yaml.example`](config.yaml.example) in this repository documents every knob; every scalar knob is also a `HERMES_OTEL_*` environment variable. See the [config schema](https://briancaffey.github.io/hermes-otel/reference/config-schema), the [env var reference](https://briancaffey.github.io/hermes-otel/reference/env-vars), and the guides on [privacy](https://briancaffey.github.io/hermes-otel/configuration/privacy), [short-lived credentials](https://briancaffey.github.io/hermes-otel/configuration/short-lived-credentials), [sampling](https://briancaffey.github.io/hermes-otel/configuration/sampling), [logs and events](https://briancaffey.github.io/hermes-otel/configuration/logs) and [host & GPU metrics](https://briancaffey.github.io/hermes-otel/configuration/host-metrics).
 
 Not seeing data? `HERMES_OTEL_DEBUG=true` writes a per-span log — see [debug logging](https://briancaffey.github.io/hermes-otel/development/debug-logging).

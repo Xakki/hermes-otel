@@ -21,6 +21,7 @@ from ..genai_messages import (
     system_instructions_json,
 )
 from ..helpers import serialize_full
+from ..instruments import API_IDENTITY_LABELS
 from ..semconv import QUERY_SOURCE_MAIN, QUERY_SOURCE_SUBAGENT
 from ._common import as_dict
 from .attributes import (
@@ -133,6 +134,7 @@ def request_attributes(
     message_count: Any,
     approx_input_tokens: Any,
     max_tokens: Any,
+    capture_prompt: bool = True,
 ) -> Dict[str, Any]:
     """The attributes every ``api.<model>`` span starts with: the request's
     size, the session and model identity in both conventions, the GenAI
@@ -151,7 +153,8 @@ def request_attributes(
     if max_tokens:
         attributes["llm.request.max_tokens"] = max_tokens
         attributes["gen_ai.request.max_tokens"] = max_tokens
-    attributes.update(full_prompt_attributes(tracer, payload))
+    if capture_prompt:
+        attributes.update(full_prompt_attributes(tracer, payload))
     return attributes
 
 
@@ -224,7 +227,10 @@ def apply_usage(
         tracer,
         "gen_ai.client.token.usage",
         totals,
-        genai_metric_dims(model, provider, response_model),
+        {
+            **genai_metric_dims(model, provider, response_model),
+            **{key: model_labels[key] for key in API_IDENTITY_LABELS if key in model_labels},
+        },
     )
     # Hermes's own estimate for this call. An unknown price or a
     # subscription-included route carries a status but no amount, so a
@@ -342,15 +348,23 @@ def record_first_chunk(
 
 
 def record_operation_duration(
-    tracer, api_duration: Optional[float], dims: Dict[str, Any], error_type: Optional[str] = None
+    tracer,
+    api_duration: Optional[float],
+    dims: Dict[str, Any],
+    *,
+    provider_label: Optional[str] = None,
+    error_type: Optional[str] = None,
 ) -> None:
     """The OTel GenAI operation-duration histogram, in SECONDS (the spec
     unit), tagged with ``error.type`` on the failure path so success and
     error durations are queryable from one histogram."""
     if not api_duration:
         return
+    dims = dict(dims)
+    # Match the request counter's dashboard selector without changing the GenAI label.
+    if provider_label:
+        dims["provider"] = provider_label
     if error_type is not None:
-        dims = dict(dims)
         dims["error.type"] = error_type
     tracer.record_metric("gen_ai.client.operation.duration", api_duration, dims)
 

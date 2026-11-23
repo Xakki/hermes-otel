@@ -35,7 +35,7 @@ export HERMES_OTEL_HOST_METRICS_GPU=auto
 export HERMES_OTEL_HOST_METRICS_INTERVAL_MS=1000
 ```
 
-The startup banner confirms it: `✓ Host metrics sampler on (every 1000 ms, gpu=nvidia)` (`gpu=none` when no GPU SDK answered).
+The startup banner confirms it: `✓ Host metrics sampler on (every 1000 ms, gpu=nvidia)` (`gpu=none` when no GPU SDK answered). `metrics.enabled: false` prevents the sampler from running; the global metrics switch defaults to `true`.
 
 ## Requirements
 

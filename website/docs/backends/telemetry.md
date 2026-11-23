@@ -36,7 +36,7 @@ You should see `✓ telemetry-dev at https://ingest.telemetry.dev/v1/traces` in 
 | Signal | Endpoint | Notes |
 |---|---|---|
 | Traces | `https://ingest.telemetry.dev/v1/traces` | The one you configure. |
-| Metrics | `https://ingest.telemetry.dev/v1/metrics` | Derived automatically by replacing `/v1/traces` — matches telemetry.dev's path scheme, nothing to configure. |
+| Metrics | `https://ingest.telemetry.dev/v1/metrics` | Derived automatically by replacing `/v1/traces`; enabled by default unless the global or per-backend metrics switch is off. |
 | Logs | `https://ingest.telemetry.dev/v1/logs` | Accepted at ingest; the plugin sends log records only when [`logs: {capture: true}`](/configuration/logs) is set. |
 
 - Auth is a single header: `Authorization: Bearer td_live_...`. Keys are created per project (and per environment), so one Hermes deployment maps cleanly to one project.

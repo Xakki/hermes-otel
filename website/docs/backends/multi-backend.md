@@ -71,6 +71,8 @@ Each backend runs in **its own worker thread with its own bounded queue**:
 
 ## Per-backend signal overrides
 
+Metrics are enabled globally by default. `metrics.enabled: false` disables all metric recording and export, even for entries with `metrics: true`; those entries can still accept traces and logs.
+
 By default, every backend receives trace exports. Metrics and logs follow
 the type: a type whose backend takes no OTLP metrics (Phoenix, Langfuse,
 Jaeger, Zipkin, Tempo and the other traces-only types) gets no metrics

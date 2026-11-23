@@ -190,7 +190,8 @@
     "gen_ai.operation.name": "chat",
     "gen_ai.provider.name": "openai",
     "gen_ai.request.model": "gpt-4",
-    "profile": "golden"
+    "profile": "golden",
+    "provider": "openai"
    },
    "bucket_counts": "<measured>",
    "count": 1,
@@ -204,7 +205,8 @@
     "gen_ai.provider.name": "openai",
     "gen_ai.request.model": "gpt-4",
     "gen_ai.response.model": "gpt-4",
-    "profile": "golden"
+    "profile": "golden",
+    "provider": "openai"
    },
    "bucket_counts": "<measured>",
    "count": 1,
@@ -309,6 +311,17 @@
    "name": "hermes.api.error.count",
    "unit": "{request}",
    "value": 1
+  },
+  {
+   "attributes": {
+    "api_mode": "chat",
+    "model": "gpt-4",
+    "profile": "golden",
+    "provider": "openai"
+   },
+   "name": "hermes.api.request.count",
+   "unit": "{request}",
+   "value": 2
   },
   {
    "attributes": {

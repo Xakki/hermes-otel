@@ -638,6 +638,10 @@ def effective_yaml(reports: List[Dict[str, Any]], config_path: Optional[Path]) -
             node[path[-1]] = list(value) if isinstance(value, tuple) else value
             logs_sources.add(src)
             continue
+        if key == "metrics_enabled":
+            doc["metrics"] = {"enabled": value}
+            sources["metrics"] = src
+            continue
         if r["kind"] == "backends":
             if value:
                 doc[key] = [_backend_as_yaml(b) for b in value]

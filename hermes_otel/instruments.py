@@ -65,7 +65,7 @@ class InstrumentSpec:
         ``disable_metrics`` (#479) never exists; every other instrument always
         does. ``create_instruments`` creates exactly the enabled ones.
         """
-        if self.name in disabled_names(config.disable_metrics):
+        if not config.metrics_enabled or self.name in disabled_names(config.disable_metrics):
             return False
         return not self.compat or config.metric_name_compat in (self.compat, "both")
 
@@ -149,6 +149,7 @@ _B_TOOL_MS = (1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000
 _B_WAIT_MS = (100, 500, 1000, 5000, 10000, 30000, 60000, 300000, 600000)
 _B_RUN_MS = (1000, 5000, 10000, 30000, 60000, 120000, 300000, 600000, 1800000)
 _MODEL_LABELS = ("model", "provider")
+API_IDENTITY_LABELS = ("credential_id", "account_name")
 _GENAI_LABELS = (
     "gen_ai.operation.name",
     "gen_ai.provider.name",
@@ -206,7 +207,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "{token}",
         "Tokens consumed by type",
         "int",
-        labels=_MODEL_LABELS + ("token_type", "query_source"),
+        labels=_MODEL_LABELS + API_IDENTITY_LABELS + ("token_type", "query_source"),
     ),
     "prompt_cache_tokens": InstrumentSpec(
         "hermes.prompt_cache.tokens",
@@ -214,7 +215,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "{token}",
         "Prompt tokens by cache result",
         "int",
-        labels=_MODEL_LABELS + ("api_mode", "cache_result"),
+        labels=_MODEL_LABELS + API_IDENTITY_LABELS + ("api_mode", "cache_result"),
     ),
     "prompt_cache_observations": InstrumentSpec(
         "hermes.prompt_cache.observations",
@@ -222,7 +223,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "{request}",
         "Requests with provider-reported prompt-cache usage",
         "one",
-        labels=_MODEL_LABELS + ("api_mode", "cache_result"),
+        labels=_MODEL_LABELS + API_IDENTITY_LABELS + ("api_mode", "cache_result"),
     ),
     "cost_usage": InstrumentSpec(
         "hermes.cost.usage",
@@ -230,7 +231,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "USD",
         "USD cost per API call, as priced by Hermes (actual or estimated)",
         "float",
-        labels=_MODEL_LABELS + ("cost_status", "query_source"),
+        labels=_MODEL_LABELS + API_IDENTITY_LABELS + ("cost_status", "query_source"),
     ),
     "tool_duration": InstrumentSpec(
         "hermes.tool.duration",
@@ -256,7 +257,15 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "{message}",
         "Messages per model and provider",
         "one",
-        labels=_MODEL_LABELS + ("query_source",),
+        labels=_MODEL_LABELS + API_IDENTITY_LABELS + ("query_source",),
+    ),
+    "api_request_count": InstrumentSpec(
+        "hermes.api.request.count",
+        "counter",
+        "{request}",
+        "Provider API request attempts",
+        "one",
+        labels=_MODEL_LABELS + API_IDENTITY_LABELS + ("api_mode",),
     ),
     "auxiliary_count": InstrumentSpec(
         "hermes.auxiliary.count",
@@ -298,7 +307,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "{request}",
         "Failed provider API requests by error type / status class",
         "one",
-        labels=("error_type", "status_class", "retryable") + _MODEL_LABELS,
+        labels=("error_type", "status_class", "retryable") + _MODEL_LABELS + API_IDENTITY_LABELS,
     ),
     "retry_count": InstrumentSpec(
         "hermes.retry.count",
@@ -306,7 +315,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "{attempt}",
         "Provider API retry attempts",
         "int",
-        labels=_MODEL_LABELS,
+        labels=_MODEL_LABELS + API_IDENTITY_LABELS,
     ),
     "kanban_task_count": InstrumentSpec(
         "hermes.kanban.task.count",
@@ -448,7 +457,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "record",
         genai=True,
         boundaries=_B_TOKENS,
-        labels=("gen_ai.token.type",) + _GENAI_LABELS,
+        labels=("gen_ai.token.type",) + _GENAI_LABELS + API_IDENTITY_LABELS,
     ),
     "gen_ai.client.operation.duration": InstrumentSpec(
         "gen_ai.client.operation.duration",
@@ -458,7 +467,7 @@ _INSTRUMENTS: Dict[str, InstrumentSpec] = {
         "record",
         genai=True,
         boundaries=_B_OP_SECONDS,
-        labels=_GENAI_LABELS + ("error.type",),
+        labels=_GENAI_LABELS + API_IDENTITY_LABELS + ("error.type", "provider"),
     ),
     "gen_ai.agent.token.usage": InstrumentSpec(
         "gen_ai.agent.token.usage",
@@ -719,6 +728,8 @@ _CAPPED_LABELS = frozenset(
         "role",
         "child_status",
         "error_type",
+        "credential_id",
+        "account_name",
     }
 )
 

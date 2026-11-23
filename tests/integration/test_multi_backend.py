@@ -152,6 +152,7 @@ class TestConfigBackendsRouting:
     def test_three_metrics_capable_backends(self, monkeypatch):
         _clear_backend_env(monkeypatch)
         cfg = HermesOtelConfig(
+            metrics_enabled=True,
             backends=(
                 BackendConfig(type="lgtm", endpoint="http://a/v1/traces"),
                 BackendConfig(type="signoz", endpoint="http://b/v1/traces"),
@@ -192,6 +193,7 @@ class TestConfigBackendsRouting:
         """``traces: false`` keeps a dashboard backend out of trace export fan-out."""
         _clear_backend_env(monkeypatch)
         cfg = HermesOtelConfig(
+            metrics_enabled=True,
             backends=(
                 BackendConfig(
                     type="otlp",

@@ -32,6 +32,7 @@ from .instruments import (
     metric_temporality_map,
     metric_views,
 )
+from .log_events import CONTENT_ATTRIBUTES
 from .otlp_transport import create_exporter
 from .pipeline_env import (
     host_arch,
@@ -450,7 +451,12 @@ if _OTEL_AVAILABLE:
         def on_start(self, span: Any, parent_context: Any = None) -> None:
             try:
                 present = span.attributes or {}
+                is_api_span = span.name.startswith("api.")
                 for key, value in self._attributes.items():
+                    # Missing API content must not be replaced with config values:
+                    # inference events read captured content back from the span.
+                    if is_api_span and key in CONTENT_ATTRIBUTES:
+                        continue
                     if key not in present:
                         span.set_attribute(key, value)
             except Exception:  # pragma: no cover — never break span creation
@@ -810,6 +816,8 @@ def build_pipeline(
         for signal in b.enabled_signals():
             if signal == "logs":
                 continue  # built on the LoggerProvider in init_logs_pipeline
+            if signal == "metrics" and not config.metrics_enabled:
+                continue
             try:
                 built = _build_exporter(signal, b, config)
             except Exception as e:
@@ -826,9 +834,15 @@ def build_pipeline(
         else:
             logger.info(f"[hermes-otel] ✓ {b.display_name} at {b.endpoint}{b.describe_signals()}")
 
-    # Proceed when *either* an OTLP backend or the live store is active.
-    # (Live-only = the zero-config dashboard with no external collector.)
-    if not pipeline.span_processors and not pipeline.live_active:
+    init_logs_pipeline(
+        pipeline, config, backends, tracker=tracker, context_resolver=context_resolver
+    )
+    # A collector can take logs or metrics with traces intentionally disabled.
+    if not (
+        pipeline.span_processors or pipeline.metric_readers or pipeline.logger_provider
+        or pipeline.live_active
+    ):
+        provider.shutdown()
         return None
 
     # The OTel globals can be set once per process: on a re-init the
@@ -859,10 +873,6 @@ def build_pipeline(
         logger.info("[hermes-otel] disabled metrics: %s", ", ".join(config.disable_metrics))
     if config.disable_spans:
         logger.info("[hermes-otel] disabled span families: %s", ", ".join(config.disable_spans))
-
-    init_logs_pipeline(
-        pipeline, config, backends, tracker=tracker, context_resolver=context_resolver
-    )
 
     mode = content_mode(config)
     if mode == "off":

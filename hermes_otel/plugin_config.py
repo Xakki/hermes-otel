@@ -486,6 +486,13 @@ class HermesOtelConfig:
     # are the pre-1.11 spellings; load_config keeps them consistent with
     # ``content_capture`` (see _reconcile_content_capture) and hook code asks
     # ``content_mode()`` / ``captures_full_prompts()`` etc. below.
+    level: Optional[str] = _field(
+        None,
+        "Maximum request-log content: `debug` permits full, `info` permits previews, `notice` permits no bodies; existing privacy and log rules can only narrow it",
+        "Content capture",
+        choices=("debug", "info", "notice"),
+        normalize=_lower,
+    )
     content_capture: str = _field(
         "full",
         "`full` (default): complete prompt and response on every `api.*` span · `preview`: clipped previews only · `off`: no content, metadata only; see [Conversation capture](/configuration/conversation-capture)",
@@ -621,6 +628,11 @@ class HermesOtelConfig:
         "Spans and metrics",
         choices=VALID_TEMPORALITIES,
         normalize=_lower,
+    )
+    metrics_enabled: bool = _field(
+        True,
+        "Global metrics gate (`metrics.enabled` in YAML); `false` stops both local metrics and backend export without disabling spans or logs",
+        "Spans and metrics",
     )
     metrics_histogram: str = _field(
         "explicit",
@@ -1123,7 +1135,7 @@ def _flatten_logs_block(block: Any, flat: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def normalize_yaml_data(yaml_data: Dict[str, Any], *, notice: bool = True) -> Dict[str, Any]:
-    """Flatten the ``logs:`` block onto the flat fields (block wins; flat spellings noticed once).
+    """Flatten the ``logs:`` and ``metrics:`` blocks onto their fields.
 
     Shared by :func:`load_config` and the settings report so both see the
     same flat view of the file.
@@ -1132,6 +1144,16 @@ def normalize_yaml_data(yaml_data: Dict[str, Any], *, notice: bool = True) -> Di
     flat_log_keys = sorted(k for k in data if k in LOG_FIELDS)
     if LOGS_BLOCK_KEY in data:
         data.update(_flatten_logs_block(data.pop(LOGS_BLOCK_KEY), data))
+    if "metrics" in data:
+        block = data.pop("metrics")
+        if isinstance(block, dict):
+            if "enabled" in block:
+                data["metrics_enabled"] = block["enabled"]
+            if notice:
+                for key in block.keys() - {"enabled"}:
+                    logger.warning("[hermes-otel] config.yaml metrics.%s: unknown key; ignoring", key)
+        elif notice:
+            logger.warning("[hermes-otel] config.yaml 'metrics' must be a mapping; ignoring")
     if flat_log_keys and notice:
         logger.info(
             "[hermes-otel] %s %s the flat spelling; the logs: block is preferred "

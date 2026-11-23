@@ -198,7 +198,7 @@ class HermesOTelPlugin:
         self.pipeline = pipeline
         self.config_fingerprint = fingerprint
         self._register_atexit_flush()
-        if self.config.host_metrics:
+        if self.config.metrics_enabled and self.config.host_metrics:
             self.host_metrics = HostMetrics(
                 self.config, meter=pipeline.meter, live_active=pipeline.live_active
             )
@@ -477,6 +477,7 @@ class HermesOTelPlugin:
             **(self.config.common_attributes or {}),
             **(attributes or {}),
         }
+        attributes.pop("api_request_id", None)
         session_label = attributes.pop(COMPAT_SESSION_LABEL, None)
         if spec.compat and session_label and self.config.metric_name_compat_session_id:
             attributes[COMPAT_SESSION_LABEL] = str(session_label)

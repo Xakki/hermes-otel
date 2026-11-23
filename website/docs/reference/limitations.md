@@ -122,6 +122,8 @@ The plugin deliberately does not put user IDs, session IDs, tool arg values, or 
 
 If you need high-cardinality breakdowns, use traces (where every attribute is fine), not metrics.
 
+Per-attempt API instruments can carry the selected pool entry's `credential_id` and `account_name` when Hermes supplies them. Those labels are bounded by `metrics_label_limit` but can still add series, and an account label may contain an email or other user-supplied name. Use `api_request_id` on logs and traces for individual request correlation; it is not retained as a metric label.
+
 ## Host metrics are a sampler, not an accountant
 
 `host_metrics` reads the Hermes process tree and the host on a fixed interval.

@@ -45,7 +45,9 @@ from .attributes import (
     _session_identity_attributes,
     _turn_attributes,
     correlation_attributes,
+    request_identity,
 )
+from .request_logs import emit_request_event, has_provider_request_source, request_event_content
 from .session import _start_session_span
 from .usage import genai_metric_dims
 
@@ -307,18 +309,24 @@ def on_pre_api_request(
     if session_id:
         tracer.sessions.get_or_create(session_id).turn_summary.add_api_call()
 
+    payload = HookPayload(kwargs)
+    identity = request_identity(kwargs)
+    model_labels = _metric_model_labels(model, provider)
+    capture_request = tracer.config.level is None or has_provider_request_source(payload)
     attributes = request_attributes(
         tracer,
-        HookPayload(kwargs),
+        payload,
         session_id=session_id,
         model=model,
         provider=provider,
         message_count=message_count,
         approx_input_tokens=approx_input_tokens,
         max_tokens=max_tokens,
+        capture_prompt=capture_request,
     )
     attributes["llm.api_mode"] = api_mode
     attributes["hermes.query_source"] = _query_source(tracer, session_id)
+    attributes.update(identity)
 
     span = tracer.start_span(
         name=f"api.{model}",
@@ -330,6 +338,23 @@ def on_pre_api_request(
 
     # Push as parent — tool spans during this API call will nest under it
     tracer.spans.push_parent(span, session_id=session_id)
+    tracer.record_metric("api_request_count", 1, {**model_labels, **identity, "api_mode": api_mode})
+    emit_request_event(
+        tracer,
+        response=False,
+        payload=payload,
+        attributes=attributes,
+        metadata={
+            **model_labels,
+            **identity,
+            "api_mode": api_mode,
+            "api_call_count": api_call_count,
+            "retry_count": kwargs.get("retry_count"),
+        },
+        session_id=session_id,
+        span=span,
+        capture_request=capture_request,
+    )
     debug_log(f"  API span started: key={key}")
 
 
@@ -371,8 +396,12 @@ def on_post_api_request(
     if payload.response_id:
         attributes["gen_ai.response.id"] = truncate_string(payload.response_id, _ID_MAX)
     attributes.update(correlation_attributes(tracer, session_id, kwargs))
+    identity = request_identity(kwargs)
+    attributes.update(identity)
 
     model_labels = _metric_model_labels(model, provider)
+    metric_identity = {key: value for key, value in identity.items() if key != "api_request_id"}
+    model_labels.update(metric_identity)
     model_labels["query_source"] = _query_source(tracer, session_id)
     # Only the opt-in claude_code.* instruments keep this (record_metric
     # strips it for everything else, #485).
@@ -416,7 +445,10 @@ def on_post_api_request(
         )
     )
     record_operation_duration(
-        tracer, api_duration, genai_metric_dims(model, provider, response_model)
+        tracer,
+        api_duration,
+        {**genai_metric_dims(model, provider, response_model), **metric_identity},
+        provider_label=model_labels.get("provider"),
     )
     record_first_chunk(tracer, attributes, payload, _metric_model_labels(model, provider))
     attributes.update(full_response_attributes(tracer, payload, finish_reason))
@@ -425,6 +457,21 @@ def on_post_api_request(
     # span's start, response attributes from this hook, content gated by
     # logs.events.content. Read the span before end_span forgets it.
     api_span = tracer.spans.get_span(key)
+    emit_request_event(
+        tracer,
+        response=True,
+        payload=payload,
+        attributes=attributes,
+        metadata={
+            **_metric_model_labels(model, provider),
+            **identity,
+            "api_mode": api_mode,
+            "api_call_count": api_call_count,
+            "gen_ai.response.finish_reasons": attributes.get("gen_ai.response.finish_reasons"),
+        },
+        session_id=session_id,
+        span=api_span,
+    )
     if api_span is not None and tracer.config.log_events:
         start_attrs = dict(getattr(api_span, "attributes", None) or {})
         event_attrs: Dict[str, Any] = {
@@ -437,7 +484,7 @@ def on_post_api_request(
             EV.INFERENCE_DETAILS,
             f"{event_attrs.get('gen_ai.operation.name') or 'chat'} {model}"
             + token_suffix(event_attrs),
-            event_attrs,
+            request_event_content(tracer, {**event_attrs, **identity}),
             session_id=session_id,
             span=api_span,
         )
@@ -519,6 +566,8 @@ def on_api_request_error(
     attributes.update(_gen_ai_attributes(session_id, "chat"))
     attributes.update(_provider_attributes(provider or platform))
     attributes.update(correlation_attributes(tracer, session_id, kwargs))
+    identity = request_identity(kwargs)
+    attributes.update(identity)
 
     # Remember why this turn failed so on_session_end can surface it on the root.
     ps = tracer.sessions.peek(session_id) if session_id else None
@@ -572,7 +621,8 @@ def on_api_request_error(
 
     # Metrics. Keep labels low-cardinality. ``retryable`` keeps the three-way
     # answer coerce_bool gives (unknown when Hermes sent nothing usable).
-    model_labels = _metric_model_labels(model, provider)
+    metric_identity = {key: value for key, value in identity.items() if key != "api_request_id"}
+    model_labels = {**_metric_model_labels(model, provider), **metric_identity}
     metric_attrs: Dict[str, Any] = {
         "error_type": error_type or "unknown",
         "status_class": status_class,
@@ -586,7 +636,11 @@ def on_api_request_error(
 
     # The GenAI operation-duration histogram on the failure path.
     record_operation_duration(
-        tracer, api_duration, genai_metric_dims(model, provider), error_type=error_type or "unknown"
+        tracer,
+        api_duration,
+        {**genai_metric_dims(model, provider), **metric_identity},
+        provider_label=model_labels.get("provider"),
+        error_type=error_type or "unknown",
     )
 
     debug_log(f"  API error span ended: key={key}, error.type={error_type}, class={status_class}")

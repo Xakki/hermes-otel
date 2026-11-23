@@ -138,6 +138,10 @@ backends:
 
 The repo ships a ready-made one for destinations the plugin cannot reach with a static header ([Azure Monitor](/backends/azure-monitor), AWS, Google Cloud) and for printing the raw export: see [OpenTelemetry Collector](/backends/collector).
 
+### Logs and metrics without traces
+
+Set `traces: false` on the backend entry to keep that destination out of trace fan-out. Configured logs and metrics can still run, even with `dashboard_live: false`. For structured API events, enable `logs.events.enabled` at the top level and choose `level`; `metrics.enabled: false` disables the metrics path without disabling events. See [Graylog + Prometheus via Collector](/backends/graylog-prometheus).
+
 ### Metrics at a separate endpoint
 
 If your collector splits traces and metrics across different paths, the plugin derives the metrics endpoint by replacing `/v1/traces` with `/v1/metrics`. If that doesn't match your setup, set the full URL with `metrics_endpoint:` (and `logs_endpoint:` for logs) on the entry.

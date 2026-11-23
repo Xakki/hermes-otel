@@ -1537,6 +1537,8 @@ EVENT_TURN_START = "hermes.turn.start"
 EVENT_TURN_END = "hermes.turn.end"
 EVENT_TOOL_CALL = "hermes.tool.call"
 EVENT_APPROVAL_DECISION = "hermes.approval.decision"
+EVENT_API_REQUEST = "hermes.api.request"
+EVENT_API_RESPONSE = "hermes.api.response"
 EVENT_API_ERROR = "hermes.api.error"
 EVENT_SUBAGENT_START = "hermes.subagent.start"
 EVENT_SUBAGENT_STOP = "hermes.subagent.stop"
@@ -1552,6 +1554,8 @@ EVENT_NAMES: Tuple[str, ...] = (
     EVENT_TURN_END,
     EVENT_TOOL_CALL,
     EVENT_APPROVAL_DECISION,
+    EVENT_API_REQUEST,
+    EVENT_API_RESPONSE,
     EVENT_API_ERROR,
     EVENT_SUBAGENT_START,
     EVENT_SUBAGENT_STOP,

@@ -42,6 +42,7 @@ const sidebars: SidebarsConfig = {
         'backends/agenta',
         'backends/tempo',
         'backends/otlp',
+        'backends/graylog-prometheus',
         'backends/lgtm',
         'backends/uptrace',
         'backends/openobserve',
