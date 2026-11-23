@@ -1,0 +1,1361 @@
+{
+ "provider": "club.lan narration studio (Dia 1.6B + Maxine StudioVoice + Nemotron ASR)",
+ "voice": "Narrator Vega (voice sample 4)",
+ "speed": 1.0,
+ "gap": 0.0,
+ "episode": 2,
+ "scenes": {
+  "S01": {
+   "title": "the myth (print world)",
+   "kicker": "A PLUGIN FOR HERMES AGENT",
+   "duration": 6.185,
+   "sentences": [
+    {
+     "text": "The day he was born, Hermes stole Apollo's cattle and walked them backwards, so no one could follow the tracks.",
+     "start": 0.0,
+     "end": 6.185
+    }
+   ],
+   "seed": 521445147,
+   "take_score": 9.86,
+   "transcript": "The day he was born, Permes stole Apollo's cattle and walked them backward so no one could follow the tracks.",
+   "words": [
+    {
+     "t": "The",
+     "s": 0.15,
+     "e": 0.23
+    },
+    {
+     "t": "day",
+     "s": 0.23,
+     "e": 0.31
+    },
+    {
+     "t": "he",
+     "s": 0.39,
+     "e": 0.47
+    },
+    {
+     "t": "was",
+     "s": 0.55,
+     "e": 0.63
+    },
+    {
+     "t": "born,",
+     "s": 0.63,
+     "e": 1.27
+    },
+    {
+     "t": "Permes",
+     "s": 1.51,
+     "e": 1.91
+    },
+    {
+     "t": "stole",
+     "s": 1.99,
+     "e": 2.23
+    },
+    {
+     "t": "Apollo's",
+     "s": 2.23,
+     "e": 2.71
+    },
+    {
+     "t": "cattle",
+     "s": 2.71,
+     "e": 2.87
+    },
+    {
+     "t": "and",
+     "s": 3.03,
+     "e": 3.11
+    },
+    {
+     "t": "walked",
+     "s": 3.27,
+     "e": 3.43
+    },
+    {
+     "t": "them",
+     "s": 3.51,
+     "e": 3.67
+    },
+    {
+     "t": "backward",
+     "s": 3.75,
+     "e": 3.91
+    },
+    {
+     "t": "so",
+     "s": 4.31,
+     "e": 4.39
+    },
+    {
+     "t": "no",
+     "s": 4.47,
+     "e": 4.55
+    },
+    {
+     "t": "one",
+     "s": 4.63,
+     "e": 4.71
+    },
+    {
+     "t": "could",
+     "s": 4.79,
+     "e": 4.87
+    },
+    {
+     "t": "follow",
+     "s": 4.95,
+     "e": 5.11
+    },
+    {
+     "t": "the",
+     "s": 5.11,
+     "e": 5.19
+    },
+    {
+     "t": "tracks.",
+     "s": 5.35,
+     "e": 5.75
+    }
+   ]
+  },
+  "S02": {
+   "title": "agents still cover their tracks",
+   "kicker": "THE BLACK BOX",
+   "duration": 4.62,
+   "sentences": [
+    {
+     "text": "Agents still cover their tracks.",
+     "start": 0.0,
+     "end": 1.83
+    },
+    {
+     "text": "Question in, answer out, and nothing in between.",
+     "start": 1.83,
+     "end": 4.62
+    }
+   ],
+   "seed": 797157204,
+   "take_score": 10.0,
+   "transcript": "Agents still cover their tracks. Question in answer out, and nothing in between",
+   "words": [
+    {
+     "t": "Agents",
+     "s": 0.15,
+     "e": 0.55
+    },
+    {
+     "t": "still",
+     "s": 0.55,
+     "e": 0.63
+    },
+    {
+     "t": "cover",
+     "s": 0.63,
+     "e": 0.79
+    },
+    {
+     "t": "their",
+     "s": 0.79,
+     "e": 0.87
+    },
+    {
+     "t": "tracks.",
+     "s": 0.95,
+     "e": 1.83
+    },
+    {
+     "t": "Question",
+     "s": 1.83,
+     "e": 2.07
+    },
+    {
+     "t": "in",
+     "s": 2.39,
+     "e": 2.47
+    },
+    {
+     "t": "answer",
+     "s": 2.79,
+     "e": 2.95
+    },
+    {
+     "t": "out,",
+     "s": 3.03,
+     "e": 3.51
+    },
+    {
+     "t": "and",
+     "s": 3.43,
+     "e": 3.51
+    },
+    {
+     "t": "nothing",
+     "s": 3.59,
+     "e": 3.75
+    },
+    {
+     "t": "in",
+     "s": 3.83,
+     "e": 3.91
+    },
+    {
+     "t": "between",
+     "s": 3.99,
+     "e": 4.15
+    }
+   ]
+  },
+  "S03": {
+   "title": "the telescope: why OpenTelemetry",
+   "kicker": "OPENTELEMETRY FOR HERMES AGENT",
+   "duration": 6.193,
+   "sentences": [
+    {
+     "text": "Hermes OTel brings the tracks back with OpenTelemetry, the open standard for traces, metrics and logs.",
+     "start": 0.0,
+     "end": 6.193
+    }
+   ],
+   "seed": 162294703,
+   "take_score": 9.85,
+   "transcript": "Hermes Hotel brings the tracks back with open telemetry. The open standard for traces, metrics, and logs.",
+   "words": [
+    {
+     "t": "Hermes",
+     "s": 0.15,
+     "e": 0.63
+    },
+    {
+     "t": "Hotel",
+     "s": 0.79,
+     "e": 1.03
+    },
+    {
+     "t": "brings",
+     "s": 1.11,
+     "e": 1.27
+    },
+    {
+     "t": "the",
+     "s": 1.27,
+     "e": 1.35
+    },
+    {
+     "t": "tracks",
+     "s": 1.43,
+     "e": 1.75
+    },
+    {
+     "t": "back",
+     "s": 1.83,
+     "e": 1.91
+    },
+    {
+     "t": "with",
+     "s": 2.07,
+     "e": 2.15
+    },
+    {
+     "t": "open",
+     "s": 2.39,
+     "e": 2.55
+    },
+    {
+     "t": "telemetry.",
+     "s": 2.63,
+     "e": 3.43
+    },
+    {
+     "t": "The",
+     "s": 3.43,
+     "e": 3.51
+    },
+    {
+     "t": "open",
+     "s": 3.67,
+     "e": 3.83
+    },
+    {
+     "t": "standard",
+     "s": 3.91,
+     "e": 4.15
+    },
+    {
+     "t": "for",
+     "s": 4.23,
+     "e": 4.31
+    },
+    {
+     "t": "traces,",
+     "s": 4.39,
+     "e": 5.35
+    },
+    {
+     "t": "metrics,",
+     "s": 5.35,
+     "e": 5.67
+    },
+    {
+     "t": "and",
+     "s": 5.59,
+     "e": 5.67
+    },
+    {
+     "t": "logs.",
+     "s": 5.75,
+     "e": 6.07
+    }
+   ]
+  },
+  "S04": {
+   "title": "one turn, one trace",
+   "kicker": "ONE TURN \u00b7 ONE TRACE",
+   "duration": 6.989,
+   "sentences": [
+    {
+     "text": "Each turn becomes one trace.",
+     "start": 0.0,
+     "end": 2.64
+    },
+    {
+     "text": "Every model call, tool and sub-agent nests inside it, with tokens, cost and timing.",
+     "start": 2.72,
+     "end": 6.989
+    }
+   ],
+   "seed": 1023536447,
+   "take_score": 9.95,
+   "transcript": "Each turn becomes one trace. Every model call, tool, and subagent nests inside it with tokens, cost, and timing.",
+   "words": [
+    {
+     "t": "Each",
+     "s": 0.4,
+     "e": 0.48
+    },
+    {
+     "t": "turn",
+     "s": 0.8,
+     "e": 0.96
+    },
+    {
+     "t": "becomes",
+     "s": 1.04,
+     "e": 1.2
+    },
+    {
+     "t": "one",
+     "s": 1.6,
+     "e": 1.68
+    },
+    {
+     "t": "trace.",
+     "s": 1.92,
+     "e": 2.64
+    },
+    {
+     "t": "Every",
+     "s": 2.72,
+     "e": 2.88
+    },
+    {
+     "t": "model",
+     "s": 2.96,
+     "e": 3.12
+    },
+    {
+     "t": "call,",
+     "s": 3.36,
+     "e": 3.92
+    },
+    {
+     "t": "tool,",
+     "s": 3.92,
+     "e": 4.24
+    },
+    {
+     "t": "and",
+     "s": 4.16,
+     "e": 4.24
+    },
+    {
+     "t": "subagent",
+     "s": 4.4,
+     "e": 4.88
+    },
+    {
+     "t": "nests",
+     "s": 4.96,
+     "e": 5.2
+    },
+    {
+     "t": "inside",
+     "s": 5.36,
+     "e": 5.6
+    },
+    {
+     "t": "it",
+     "s": 5.6,
+     "e": 5.68
+    },
+    {
+     "t": "with",
+     "s": 5.84,
+     "e": 5.92
+    },
+    {
+     "t": "tokens,",
+     "s": 6.08,
+     "e": 6.56
+    },
+    {
+     "t": "cost,",
+     "s": 6.72,
+     "e": 6.96
+    },
+    {
+     "t": "and",
+     "s": 6.88,
+     "e": 6.96
+    }
+   ]
+  },
+  "S05": {
+   "title": "start local: SQLite + the dashboard tab",
+   "kicker": "LOCAL BY DEFAULT",
+   "duration": 11.197,
+   "sentences": [
+    {
+     "text": "Out of the box, Hermes OTel captures OpenTelemetry data locally, in a SQLite file on your machine.",
+     "start": 0.0,
+     "end": 5.087
+    },
+    {
+     "text": "The plugin adds a tab to the Hermes dashboard.",
+     "start": 5.167,
+     "end": 7.967
+    },
+    {
+     "text": "There you can browse every trace, chart your metrics and search your logs.",
+     "start": 8.047,
+     "end": 11.197
+    }
+   ],
+   "seed": 74796274,
+   "take_score": 9.84,
+   "transcript": "Out of the box, Hermes Hotel captures open telemetry data locally in a SQLite file on your machine. The plugin adds a tab to the Hermes dashboard. There you can browse every trace, chart your metrics, and search your logs.",
+   "words": [
+    {
+     "t": "Out",
+     "s": 0.367,
+     "e": 0.447
+    },
+    {
+     "t": "of",
+     "s": 0.527,
+     "e": 0.607
+    },
+    {
+     "t": "the",
+     "s": 0.687,
+     "e": 0.767
+    },
+    {
+     "t": "box,",
+     "s": 0.767,
+     "e": 1.007
+    },
+    {
+     "t": "Hermes",
+     "s": 1.087,
+     "e": 1.407
+    },
+    {
+     "t": "Hotel",
+     "s": 1.567,
+     "e": 1.727
+    },
+    {
+     "t": "captures",
+     "s": 1.807,
+     "e": 2.047
+    },
+    {
+     "t": "open",
+     "s": 2.207,
+     "e": 2.367
+    },
+    {
+     "t": "telemetry",
+     "s": 2.527,
+     "e": 2.927
+    },
+    {
+     "t": "data",
+     "s": 3.007,
+     "e": 3.167
+    },
+    {
+     "t": "locally",
+     "s": 3.247,
+     "e": 3.407
+    },
+    {
+     "t": "in",
+     "s": 3.807,
+     "e": 3.887
+    },
+    {
+     "t": "a",
+     "s": 3.887,
+     "e": 3.967
+    },
+    {
+     "t": "SQLite",
+     "s": 4.127,
+     "e": 4.687
+    },
+    {
+     "t": "file",
+     "s": 4.687,
+     "e": 4.927
+    },
+    {
+     "t": "on",
+     "s": 4.927,
+     "e": 5.007
+    },
+    {
+     "t": "your",
+     "s": 5.007,
+     "e": 5.087
+    },
+    {
+     "t": "machine.",
+     "s": 5.167,
+     "e": 5.647
+    },
+    {
+     "t": "The",
+     "s": 5.727,
+     "e": 5.807
+    },
+    {
+     "t": "plugin",
+     "s": 5.887,
+     "e": 6.127
+    },
+    {
+     "t": "adds",
+     "s": 6.207,
+     "e": 6.367
+    },
+    {
+     "t": "a",
+     "s": 6.367,
+     "e": 6.447
+    },
+    {
+     "t": "tab",
+     "s": 6.447,
+     "e": 6.527
+    },
+    {
+     "t": "to",
+     "s": 6.687,
+     "e": 6.767
+    },
+    {
+     "t": "the",
+     "s": 6.767,
+     "e": 6.847
+    },
+    {
+     "t": "Hermes",
+     "s": 6.927,
+     "e": 7.407
+    },
+    {
+     "t": "dashboard.",
+     "s": 7.407,
+     "e": 7.967
+    },
+    {
+     "t": "There",
+     "s": 8.047,
+     "e": 8.127
+    },
+    {
+     "t": "you",
+     "s": 8.127,
+     "e": 8.207
+    },
+    {
+     "t": "can",
+     "s": 8.207,
+     "e": 8.287
+    },
+    {
+     "t": "browse",
+     "s": 8.287,
+     "e": 8.447
+    },
+    {
+     "t": "every",
+     "s": 8.527,
+     "e": 8.687
+    },
+    {
+     "t": "trace,",
+     "s": 8.767,
+     "e": 9.327
+    },
+    {
+     "t": "chart",
+     "s": 9.407,
+     "e": 9.647
+    },
+    {
+     "t": "your",
+     "s": 9.647,
+     "e": 9.727
+    },
+    {
+     "t": "metrics,",
+     "s": 9.727,
+     "e": 10.287
+    },
+    {
+     "t": "and",
+     "s": 10.207,
+     "e": 10.287
+    },
+    {
+     "t": "search",
+     "s": 10.287,
+     "e": 10.447
+    },
+    {
+     "t": "your",
+     "s": 10.527,
+     "e": 10.607
+    },
+    {
+     "t": "logs.",
+     "s": 10.607,
+     "e": 11.197
+    }
+   ]
+  },
+  "S06": {
+   "title": "the tab reads the backends too",
+   "kicker": "ONE TAB \u00b7 FIFTEEN BACKENDS",
+   "duration": 5.35,
+   "sentences": [
+    {
+     "text": "The dashboard also displays data from fifteen OTel backends, using their APIs and custom adapters.",
+     "start": 0.0,
+     "end": 5.35
+    }
+   ],
+   "seed": 1085244842,
+   "take_score": 9.85,
+   "transcript": "The dashboard also displays data from fifteen hotel backends using their APIs and custom adapters",
+   "words": [
+    {
+     "t": "The",
+     "s": 0.15,
+     "e": 0.23
+    },
+    {
+     "t": "dashboard",
+     "s": 0.31,
+     "e": 0.63
+    },
+    {
+     "t": "also",
+     "s": 0.79,
+     "e": 0.87
+    },
+    {
+     "t": "displays",
+     "s": 0.87,
+     "e": 1.19
+    },
+    {
+     "t": "data",
+     "s": 1.19,
+     "e": 1.35
+    },
+    {
+     "t": "from",
+     "s": 1.43,
+     "e": 1.51
+    },
+    {
+     "t": "fifteen",
+     "s": 1.75,
+     "e": 1.91
+    },
+    {
+     "t": "hotel",
+     "s": 2.23,
+     "e": 2.39
+    },
+    {
+     "t": "backends",
+     "s": 2.47,
+     "e": 2.95
+    },
+    {
+     "t": "using",
+     "s": 3.19,
+     "e": 3.35
+    },
+    {
+     "t": "their",
+     "s": 3.35,
+     "e": 3.43
+    },
+    {
+     "t": "APIs",
+     "s": 3.67,
+     "e": 4.15
+    },
+    {
+     "t": "and",
+     "s": 4.31,
+     "e": 4.39
+    },
+    {
+     "t": "custom",
+     "s": 4.47,
+     "e": 4.71
+    },
+    {
+     "t": "adapters",
+     "s": 4.71,
+     "e": 5.11
+    }
+   ]
+  },
+  "S07": {
+   "title": "any OTLP backend, async fan-out (tile wall + rapid cuts)",
+   "kicker": "ANY OTLP BACKEND \u00b7 ALL AT ONCE",
+   "duration": 8.441,
+   "sentences": [
+    {
+     "text": "The plugin does asynchronous fan-out to any number of configured backends, so a slow backend doesn't slow your agent.",
+     "start": 0.0,
+     "end": 5.27
+    },
+    {
+     "text": "Hermes OTel supports virtually every OpenTelemetry compatible backend.",
+     "start": 5.35,
+     "end": 8.441
+    }
+   ],
+   "seed": 76098525,
+   "take_score": 9.89,
+   "transcript": "The plugin does asynchronous fan out to any number of configured backends, so a slow backend doesn't slow your agent. Hermes Hotel supports virtually every Opentelemetry compatible backend.",
+   "words": [
+    {
+     "t": "The",
+     "s": 0.15,
+     "e": 0.23
+    },
+    {
+     "t": "plugin",
+     "s": 0.31,
+     "e": 0.63
+    },
+    {
+     "t": "does",
+     "s": 0.71,
+     "e": 0.79
+    },
+    {
+     "t": "asynchronous",
+     "s": 0.87,
+     "e": 1.51
+    },
+    {
+     "t": "fan",
+     "s": 1.51,
+     "e": 1.59
+    },
+    {
+     "t": "out",
+     "s": 1.75,
+     "e": 1.83
+    },
+    {
+     "t": "to",
+     "s": 1.91,
+     "e": 1.99
+    },
+    {
+     "t": "any",
+     "s": 1.99,
+     "e": 2.07
+    },
+    {
+     "t": "number",
+     "s": 2.07,
+     "e": 2.15
+    },
+    {
+     "t": "of",
+     "s": 2.15,
+     "e": 2.23
+    },
+    {
+     "t": "configured",
+     "s": 2.39,
+     "e": 2.71
+    },
+    {
+     "t": "backends,",
+     "s": 2.79,
+     "e": 3.43
+    },
+    {
+     "t": "so",
+     "s": 3.35,
+     "e": 3.43
+    },
+    {
+     "t": "a",
+     "s": 3.51,
+     "e": 3.59
+    },
+    {
+     "t": "slow",
+     "s": 3.59,
+     "e": 3.75
+    },
+    {
+     "t": "backend",
+     "s": 3.83,
+     "e": 4.15
+    },
+    {
+     "t": "doesn't",
+     "s": 4.23,
+     "e": 4.39
+    },
+    {
+     "t": "slow",
+     "s": 4.47,
+     "e": 4.55
+    },
+    {
+     "t": "your",
+     "s": 4.63,
+     "e": 4.71
+    },
+    {
+     "t": "agent.",
+     "s": 4.79,
+     "e": 5.27
+    },
+    {
+     "t": "Hermes",
+     "s": 5.35,
+     "e": 5.67
+    },
+    {
+     "t": "Hotel",
+     "s": 5.83,
+     "e": 5.99
+    },
+    {
+     "t": "supports",
+     "s": 6.07,
+     "e": 6.31
+    },
+    {
+     "t": "virtually",
+     "s": 6.31,
+     "e": 6.55
+    },
+    {
+     "t": "every",
+     "s": 6.79,
+     "e": 6.95
+    },
+    {
+     "t": "Opentelemetry",
+     "s": 7.19,
+     "e": 7.75
+    },
+    {
+     "t": "compatible",
+     "s": 7.83,
+     "e": 8.15
+    },
+    {
+     "t": "backend.",
+     "s": 8.15,
+     "e": 8.31
+    }
+   ]
+  },
+  "S08": {
+   "title": "two conventions",
+   "kicker": "GEN_AI \u00b7 OPENINFERENCE",
+   "duration": 7.25,
+   "sentences": [
+    {
+     "text": "There are two popular conventions for annotating agent data: OpenTelemetry GenAI and OpenInference.",
+     "start": 0.0,
+     "end": 4.71
+    },
+    {
+     "text": "Hermes OTel supports both.",
+     "start": 4.79,
+     "end": 7.25
+    }
+   ],
+   "seed": 375575389,
+   "take_score": 9.69,
+   "transcript": "There are two popular conventions for annotating agent data open telemetry gen AI and Open Inference. Herney's hotel supports both.",
+   "words": [
+    {
+     "t": "There",
+     "s": 0.15,
+     "e": 0.23
+    },
+    {
+     "t": "are",
+     "s": 0.23,
+     "e": 0.31
+    },
+    {
+     "t": "two",
+     "s": 0.39,
+     "e": 0.47
+    },
+    {
+     "t": "popular",
+     "s": 0.55,
+     "e": 0.71
+    },
+    {
+     "t": "conventions",
+     "s": 0.95,
+     "e": 1.27
+    },
+    {
+     "t": "for",
+     "s": 1.27,
+     "e": 1.35
+    },
+    {
+     "t": "annotating",
+     "s": 1.51,
+     "e": 1.91
+    },
+    {
+     "t": "agent",
+     "s": 2.07,
+     "e": 2.23
+    },
+    {
+     "t": "data",
+     "s": 2.31,
+     "e": 2.47
+    },
+    {
+     "t": "open",
+     "s": 2.79,
+     "e": 2.95
+    },
+    {
+     "t": "telemetry",
+     "s": 3.03,
+     "e": 3.43
+    },
+    {
+     "t": "gen",
+     "s": 3.51,
+     "e": 3.59
+    },
+    {
+     "t": "AI",
+     "s": 3.91,
+     "e": 4.15
+    },
+    {
+     "t": "and",
+     "s": 4.39,
+     "e": 4.47
+    },
+    {
+     "t": "Open",
+     "s": 4.55,
+     "e": 4.71
+    },
+    {
+     "t": "Inference.",
+     "s": 4.79,
+     "e": 5.35
+    },
+    {
+     "t": "Herney's",
+     "s": 5.51,
+     "e": 5.99
+    },
+    {
+     "t": "hotel",
+     "s": 6.07,
+     "e": 6.23
+    },
+    {
+     "t": "supports",
+     "s": 6.39,
+     "e": 6.63
+    },
+    {
+     "t": "both.",
+     "s": 6.71,
+     "e": 6.95
+    }
+   ]
+  },
+  "S09": {
+   "title": "Claude Code metrics",
+   "kicker": "CLAUDE CODE DASHBOARDS",
+   "duration": 8.29,
+   "sentences": [
+    {
+     "text": "Hermes OTel implements four of Claude Code's usage metrics: sessions, tokens, cost and active time, so your Claude Code dashboards show Hermes too.",
+     "start": 0.0,
+     "end": 8.29
+    }
+   ],
+   "seed": 1817106314,
+   "take_score": 9.9,
+   "transcript": "Hermes Hotel implements four of Claude Code's usage metrics sessions, tokens, cost, and active time so your claude code dashboards show Hermes too.",
+   "words": [
+    {
+     "t": "Hermes",
+     "s": 0.4,
+     "e": 0.88
+    },
+    {
+     "t": "Hotel",
+     "s": 0.96,
+     "e": 1.12
+    },
+    {
+     "t": "implements",
+     "s": 1.28,
+     "e": 1.6
+    },
+    {
+     "t": "four",
+     "s": 1.92,
+     "e": 2.0
+    },
+    {
+     "t": "of",
+     "s": 2.0,
+     "e": 2.08
+    },
+    {
+     "t": "Claude",
+     "s": 2.24,
+     "e": 2.4
+    },
+    {
+     "t": "Code's",
+     "s": 2.4,
+     "e": 2.72
+    },
+    {
+     "t": "usage",
+     "s": 2.72,
+     "e": 2.88
+    },
+    {
+     "t": "metrics",
+     "s": 2.96,
+     "e": 3.28
+    },
+    {
+     "t": "sessions,",
+     "s": 3.92,
+     "e": 4.24
+    },
+    {
+     "t": "tokens,",
+     "s": 4.32,
+     "e": 4.72
+    },
+    {
+     "t": "cost,",
+     "s": 4.8,
+     "e": 5.04
+    },
+    {
+     "t": "and",
+     "s": 4.96,
+     "e": 5.04
+    },
+    {
+     "t": "active",
+     "s": 5.12,
+     "e": 5.28
+    },
+    {
+     "t": "time",
+     "s": 5.36,
+     "e": 5.44
+    },
+    {
+     "t": "so",
+     "s": 5.92,
+     "e": 6.0
+    },
+    {
+     "t": "your",
+     "s": 6.08,
+     "e": 6.16
+    },
+    {
+     "t": "claude",
+     "s": 6.24,
+     "e": 6.48
+    },
+    {
+     "t": "code",
+     "s": 6.48,
+     "e": 6.64
+    },
+    {
+     "t": "dashboards",
+     "s": 6.72,
+     "e": 7.2
+    },
+    {
+     "t": "show",
+     "s": 7.6,
+     "e": 7.84
+    },
+    {
+     "t": "Hermes",
+     "s": 7.84,
+     "e": 8.24
+    }
+   ]
+  },
+  "S10": {
+   "title": "the skill: traces in chat",
+   "kicker": "ASK THE AGENT",
+   "duration": 6.242,
+   "sentences": [
+    {
+     "text": "Hermes OTel ships with a skill that lets your agent read and display traces right in its chat responses.",
+     "start": 0.0,
+     "end": 6.242
+    }
+   ],
+   "seed": 1859730093,
+   "take_score": 9.86,
+   "transcript": "Hermes Hotel ships with a skill that lets your agent read and display traces right in its chat responses.",
+   "words": [
+    {
+     "t": "Hermes",
+     "s": 0.462,
+     "e": 1.022
+    },
+    {
+     "t": "Hotel",
+     "s": 1.182,
+     "e": 1.342
+    },
+    {
+     "t": "ships",
+     "s": 1.422,
+     "e": 1.662
+    },
+    {
+     "t": "with",
+     "s": 1.742,
+     "e": 1.822
+    },
+    {
+     "t": "a",
+     "s": 1.822,
+     "e": 1.902
+    },
+    {
+     "t": "skill",
+     "s": 1.982,
+     "e": 2.062
+    },
+    {
+     "t": "that",
+     "s": 2.142,
+     "e": 2.222
+    },
+    {
+     "t": "lets",
+     "s": 2.302,
+     "e": 2.462
+    },
+    {
+     "t": "your",
+     "s": 2.542,
+     "e": 2.622
+    },
+    {
+     "t": "agent",
+     "s": 2.702,
+     "e": 2.942
+    },
+    {
+     "t": "read",
+     "s": 3.102,
+     "e": 3.342
+    },
+    {
+     "t": "and",
+     "s": 3.422,
+     "e": 3.502
+    },
+    {
+     "t": "display",
+     "s": 3.582,
+     "e": 3.822
+    },
+    {
+     "t": "traces",
+     "s": 3.902,
+     "e": 4.222
+    },
+    {
+     "t": "right",
+     "s": 4.542,
+     "e": 4.622
+    },
+    {
+     "t": "in",
+     "s": 4.702,
+     "e": 4.782
+    },
+    {
+     "t": "its",
+     "s": 4.782,
+     "e": 4.862
+    },
+    {
+     "t": "chat",
+     "s": 4.942,
+     "e": 5.022
+    },
+    {
+     "t": "responses.",
+     "s": 5.182,
+     "e": 6.242
+    }
+   ]
+  },
+  "S11": {
+   "title": "close",
+   "kicker": "FOLLOW THE MESSENGER",
+   "duration": 5.157,
+   "sentences": [
+    {
+     "text": "Open source, and in the Hermes plugin catalog.",
+     "start": 0.0,
+     "end": 3.36
+    },
+    {
+     "text": "Hermes OTel. Follow the messenger.",
+     "start": 3.44,
+     "end": 5.157
+    }
+   ],
+   "seed": 105932454,
+   "take_score": 9.75,
+   "transcript": "Open source and in the Hermes plug in catalog, Hermes Hotel follow the messenger.",
+   "words": [
+    {
+     "t": "Open",
+     "s": 0.64,
+     "e": 0.88
+    },
+    {
+     "t": "source",
+     "s": 0.88,
+     "e": 1.12
+    },
+    {
+     "t": "and",
+     "s": 1.68,
+     "e": 1.76
+    },
+    {
+     "t": "in",
+     "s": 1.84,
+     "e": 1.92
+    },
+    {
+     "t": "the",
+     "s": 1.92,
+     "e": 2.0
+    },
+    {
+     "t": "Hermes",
+     "s": 2.0,
+     "e": 2.4
+    },
+    {
+     "t": "plug",
+     "s": 2.48,
+     "e": 2.64
+    },
+    {
+     "t": "in",
+     "s": 2.72,
+     "e": 2.8
+    },
+    {
+     "t": "catalog,",
+     "s": 2.8,
+     "e": 3.36
+    },
+    {
+     "t": "Hermes",
+     "s": 3.44,
+     "e": 3.84
+    },
+    {
+     "t": "Hotel",
+     "s": 4.08,
+     "e": 4.32
+    },
+    {
+     "t": "follow",
+     "s": 4.64,
+     "e": 4.8
+    },
+    {
+     "t": "the",
+     "s": 4.8,
+     "e": 4.88
+    },
+    {
+     "t": "messenger.",
+     "s": 4.88,
+     "e": 5.157
+    }
+   ]
+  }
+ }
+}

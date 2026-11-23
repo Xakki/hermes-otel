@@ -99,7 +99,7 @@ describe("env grouping", () => {
     { name: "HERMES_OTEL_CAPTURE_LOGS", group: "override", description: "", set: true, value: "true", maps_to: "capture_logs" },
     { name: "HERMES_HOME", group: "plugin", description: "", set: true, value: "/h", maps_to: null },
     { name: "OTEL_X", group: "other", description: "", set: true, value: "1", maps_to: null },
-    { name: "LANGSMITH_API_KEY", group: "langsmith", description: "", set: false, value: null, maps_to: null },
+    { name: "LANGSMITH_API_KEY", group: "backend", description: "", set: false, value: null, maps_to: null },
   ];
   it("hides unset entries by default and keeps the fixed order", () => {
     const g = groupEnv(env, false);
@@ -109,7 +109,7 @@ describe("env grouping", () => {
   });
   it("shows unset entries on request", () => {
     const g = groupEnv(env, true);
-    expect(g.map((x) => x.group)).toEqual(["override", "plugin", "langsmith", "other"]);
+    expect(g.map((x) => x.group)).toEqual(["override", "plugin", "backend", "other"]);
     expect(g[0].entries).toHaveLength(2);
   });
   it("counts", () => {
@@ -143,20 +143,14 @@ describe("backend cards", () => {
     const forced = signalPill("metrics", { supported: false, configured: "on", exported: true }, "Jaeger");
     expect(forced.cls).toBe("forced");
     expect(forced.title).toContain("does not accept OTLP metrics");
-    expect(signalPill("traces", { supported: true, configured: "on", exported: true }, "Phoenix").title).toContain(
-      "traces: true in the config file"
-    );
+    expect(signalPill("traces", { supported: true, configured: "on", exported: true }, "Phoenix").title).toContain("traces: true in the config file");
   });
 
   it("summarises what the dashboard can query", () => {
     expect(queryCapabilityLine(undefined, "Phoenix")).toBeNull();
-    expect(queryCapabilityLine({ supported: false, metrics: false, logs: false }, "OTLP")?.text).toBe(
-      "not queryable from this dashboard"
-    );
+    expect(queryCapabilityLine({ supported: false, metrics: false, logs: false }, "OTLP")?.text).toBe("not queryable from this dashboard");
     expect(queryCapabilityLine({ supported: true, metrics: false, logs: false }, "Phoenix")?.text).toBe("dashboard queries traces");
-    expect(queryCapabilityLine({ supported: true, metrics: true, logs: true }, "OpenObserve")?.text).toBe(
-      "dashboard queries traces, metrics, logs"
-    );
+    expect(queryCapabilityLine({ supported: true, metrics: true, logs: true }, "OpenObserve")?.text).toBe("dashboard queries traces, metrics, logs");
   });
 
   it("shows the type badge only when the name does not already say it", () => {

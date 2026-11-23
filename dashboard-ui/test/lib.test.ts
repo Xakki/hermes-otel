@@ -8,9 +8,16 @@ import { groupLiveTraces, traceTotals, traceSpanCount, LiveSpan, metricOtlpName 
 const T = "daaf7828a1b2c3d4e5f60718293a4b5c";
 function span(name: string, id: string, parent: string | null, attrs: Record<string, any> = {}, start = 0, end = 1): LiveSpan {
   return {
-    trace_id: T, span_id: id, parent_span_id: parent, name,
-    start_time_unix_nano: 1_000_000 + start, end_time_unix_nano: 1_000_000 + end,
-    duration_ms: (end - start) / 1e6, status: "OK", attributes: attrs, seq: 0,
+    trace_id: T,
+    span_id: id,
+    parent_span_id: parent,
+    name,
+    start_time_unix_nano: 1_000_000 + start,
+    end_time_unix_nano: 1_000_000 + end,
+    duration_ms: (end - start) / 1e6,
+    status: "OK",
+    attributes: attrs,
+    seq: 0,
   };
 }
 const MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning-nvfp4";
@@ -34,7 +41,11 @@ describe("traceTotals (#178)", () => {
   });
   it("never counts llm.* spans, which mirror the api spans", () => {
     const withLlmTotals = turn.map((s) =>
-      s.name.startsWith("llm.") ? { ...s, attributes: { ...s.attributes, "gen_ai.usage.total_tokens": 42638 } } : s.name === "agent" ? { ...s, attributes: {} } : s
+      s.name.startsWith("llm.")
+        ? { ...s, attributes: { ...s.attributes, "gen_ai.usage.total_tokens": 42638 } }
+        : s.name === "agent"
+          ? { ...s, attributes: {} }
+          : s
     );
     expect(traceTotals(withLlmTotals).tokens).toBe(42638);
   });
@@ -44,6 +55,13 @@ describe("traceTotals (#178)", () => {
   it("takes cost from the root when present, else the api spans", () => {
     const withCost = turn.map((s) => (s.name.startsWith("api.") ? { ...s, attributes: { ...s.attributes, "hermes.cost.usage": 0.01 } } : s));
     expect(traceTotals(withCost).cost).toBeCloseTo(0.03);
+  });
+  it("leaves auxiliary api.* spans out of the turn's subtotal (#389)", () => {
+    const withAux = [
+      ...turn.map((s) => (s.name === "agent" ? { ...s, attributes: {} } : s)),
+      span("api.gpt-4o-mini", "x1", "root", { "gen_ai.usage.total_tokens": 999, "hermes.query_source": "auxiliary" }),
+    ];
+    expect(traceTotals(withAux).tokens).toBe(42638);
   });
   it("shows no total for a root whose cost status carries no amount (#252)", () => {
     const partial = turn.map((s) =>

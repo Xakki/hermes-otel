@@ -38,8 +38,8 @@ configurable and nothing breaks: the plugin's handler is dormant.
   OpenTelemetry context, so the SDK's in-protocol propagation has no parent to
   carry. That is an upstream change; hermes-otel is the concrete consumer for it.
 
-The hook is therefore **not** declared in `plugin.yaml` and not part of the
-"15 hooks" the startup banner reports on Hermes 0.21. The plugin registers it
+The hook is therefore **not** declared in `plugin.yaml` and is not one of the
+34 hooks the plugin registers on a current Hermes. The plugin registers it
 only when the running Hermes lists `mcp_request_headers` in its hook registry;
 when the registry cannot be inspected at all it stays unregistered, so the
 plugin catalog's declared-vs-registered check can never see an undeclared hook.
@@ -72,5 +72,6 @@ from any thread or event loop.
 
 ## See also
 
+- [Query your traces over MCP](/configuration/mcp-query-server): the other direction, an MCP server that reads the traces back; its own client spans show the gap described here.
 - [Hooks reference](/reference/hooks): which hooks are registered on which Hermes version.
 - [Span hierarchy](/architecture/span-hierarchy): how the agent's spans nest.

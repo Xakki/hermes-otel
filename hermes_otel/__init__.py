@@ -17,42 +17,27 @@ def register(ctx):
     from .tracer import get_tracer
 
     # Install stderr handler on the hermes_otel logger unless the host app
-    # has already wired up its own. Keeps the "✓ backend connected" banner
+    # has already wired up its own. Keeps the "✓ <backend> at <endpoint>" banner
     # visible without forcing downstream apps to configure logging.
     configure_default_handler()
 
     tracer = get_tracer()
     tracer.init()
+    on_unload = getattr(ctx, "on_unload", None)
+    if callable(on_unload):
+        on_unload(tracer.shutdown)
 
     if not tracer.is_enabled:
         return
 
-    # Core hooks (always available)
-    ctx.register_hook("pre_tool_call", hooks.on_pre_tool_call)
-    ctx.register_hook("post_tool_call", hooks.on_post_tool_call)
-    ctx.register_hook("pre_llm_call", hooks.on_pre_llm_call)
-    ctx.register_hook("post_llm_call", hooks.on_post_llm_call)
-    ctx.register_hook("pre_api_request", hooks.on_pre_api_request)
-    ctx.register_hook("post_api_request", hooks.on_post_api_request)
-
-    # Session + sub-agent hooks (available on newer Hermes versions). Each is
-    # registered defensively so an older Hermes that lacks a given hook name
-    # doesn't break registration of the rest.
-    optional_hooks = 0
-    for hook_name, callback in [
-        ("on_session_start", hooks.on_session_start),
-        ("on_session_end", hooks.on_session_end),
-        ("on_session_finalize", hooks.on_session_finalize),
-        ("on_session_reset", hooks.on_session_reset),
-        ("subagent_start", hooks.on_subagent_start),
-        ("subagent_stop", hooks.on_subagent_stop),
-        ("api_request_error", hooks.on_api_request_error),
-        ("pre_approval_request", hooks.on_pre_approval_request),
-        ("post_approval_response", hooks.on_post_approval_response),
-    ]:
+    # Every hook the manifest declares, in one table (hooks.HOOKS). Each is
+    # registered defensively so a Hermes that lacks a given hook name doesn't
+    # break registration of the rest.
+    registered = 0
+    for hook_name, callback in hooks.HOOKS:
         try:
             ctx.register_hook(hook_name, callback)
-            optional_hooks += 1
+            registered += 1
         except Exception:
             debug_log(f"{hook_name} hook unavailable")
 
@@ -64,7 +49,6 @@ def register(ctx):
     # in VALID_HOOKS. When the registry cannot be inspected at all, fail
     # closed: the catalog validator diffs declared vs. registered hooks and an
     # undeclared registration fails admission (#130).
-    mcp_hooks = 0
     try:
         from hermes_cli.plugins import VALID_HOOKS as _valid_hooks
     except Exception:
@@ -72,7 +56,7 @@ def register(ctx):
     if _valid_hooks is not None and "mcp_request_headers" in _valid_hooks:
         try:
             ctx.register_hook("mcp_request_headers", hooks.on_mcp_request_headers)
-            mcp_hooks = 1
+            registered += 1
         except Exception:
             debug_log("mcp_request_headers hook unavailable")
     elif _valid_hooks is None:
@@ -80,7 +64,7 @@ def register(ctx):
     else:
         debug_log("mcp_request_headers hook not supported by this Hermes; skipping")
 
-    logger.info(f"[hermes-otel] Registered {6 + optional_hooks + mcp_hooks} hooks")
+    logger.info(f"[hermes-otel] Registered {registered} hooks")
 
     # Bundle a companion Hermes skill that explains how to turn on and read this
     # plugin's telemetry. Resolvable as `hermes_otel:observability` via
@@ -114,7 +98,7 @@ def register(ctx):
     # hermes-otel is observer-only unless the user opts in. Only registered
     # when the skill it points at actually registered, and never allowed to
     # raise — Hermes drops the whole plugin if register() fails.
-    if skill_registered and getattr(getattr(tracer, "config", None), "discovery_prompt", False):
+    if skill_registered and tracer.config.discovery_prompt:
         try:
             ctx.register_system_prompt_section(
                 "hermes-otel.discovery",

@@ -1,0 +1,68 @@
+<template>
+  <style>
+    @font-face { font-family: "Rules Compressed"; src: url("assets/fonts/RulesCompressed-Medium.woff2") format("woff2"); font-weight: 500; }
+    @font-face { font-family: "Mondwest"; src: url("assets/fonts/Mondwest-Regular.woff2") format("woff2"); }
+    @font-face { font-family: "JB Mono"; src: url("assets/fonts/JetBrainsMono-Bold.woff2") format("woff2"); font-weight: 700; }
+    #root { position: absolute; inset: 0; background: #f2f2f2; overflow: hidden; }
+    /* the generated engraving (club.lan, FLUX 3 klein in the style of the 1592 Goltzius plate) */
+    #s01-plate { position: absolute; left: 860px; top: 0; width: 1060px; height: 1080px; overflow: hidden; }
+    #s01-plate img { position: absolute; left: -560px; top: 0; width: 1920px; height: 1080px; object-fit: cover; }
+    #s01-word { position: absolute; left: 110px; top: 150px; font-family: "Rules Compressed"; font-weight: 500;
+      font-size: 330px; line-height: 0.84; color: #0000f2; }
+    #s01-sub { position: absolute; left: 120px; top: 716px; width: 720px; font-family: "Mondwest"; font-size: 50px; color: #0000f2; white-space: nowrap; }
+    #s01-rule { position: absolute; left: 120px; top: 796px; width: 700px; height: 4px; background: #0000f2; transform-origin: 0 50%; }
+    #s01-kicker { position: absolute; left: 120px; top: 96px; font-family: "JB Mono"; font-weight: 700; font-size: 28px;
+      letter-spacing: 0.22em; color: #0000f2; }
+    #s01-line { position: absolute; left: 120px; top: 958px; width: 720px; font-family: "Mondwest"; font-size: 50px; color: #0000f2; white-space: nowrap; }
+    .s01-w { display: inline-block; }
+    .s01-print { position: absolute; width: 40px; height: 69px; }
+    .s01-print svg { width: 100%; height: 100%; display: block; }
+  </style>
+  <div id="root" data-composition-id="s01" data-width="1920" data-height="1080" data-layout-allow-overflow>
+    <div id="s01-plate"><img src="assets/gen/a01-cattle.png" alt="Engraving: Hermes drives Apollo's cattle backwards across a moonlit plain" /></div>
+    <div id="s01-kicker">A PLUGIN FOR HERMES AGENT</div>
+    <div id="s01-word">HERMES<br />OTEL</div>
+    <div id="s01-sub">OpenTelemetry for Hermes Agent</div>
+    <div id="s01-rule"></div>
+    <div id="s01-prints">
+      <div class="s01-print" id="s01-p0" style="left:128px; top:822px"></div>
+      <div class="s01-print" id="s01-p1" style="left:186px; top:872px"></div>
+      <div class="s01-print" id="s01-p2" style="left:244px; top:822px"></div>
+      <div class="s01-print" id="s01-p3" style="left:302px; top:872px"></div>
+      <div class="s01-print" id="s01-p4" style="left:360px; top:822px"></div>
+      <div class="s01-print" id="s01-p5" style="left:418px; top:872px"></div>
+      <div class="s01-print" id="s01-p6" style="left:476px; top:822px"></div>
+      <div class="s01-print" id="s01-p7" style="left:534px; top:872px"></div>
+      <div class="s01-print" id="s01-p8" style="left:592px; top:822px"></div>
+      <div class="s01-print" id="s01-p9" style="left:650px; top:872px"></div>
+    </div>
+    <div id="s01-line"><span class="s01-w">Fifty cattle.</span> <span class="s01-w">Walked backwards.</span></div>
+  </div>
+  <script>
+    (function () {
+      const C = /*CUES*/{"dur": 7.035, "lead": 0.35, "sents": [[0.35, 6.535]], "w": [{"t": "the", "s": 0.5, "e": 0.58}, {"t": "day", "s": 0.58, "e": 0.66}, {"t": "he", "s": 0.74, "e": 0.82}, {"t": "was", "s": 0.9, "e": 0.98}, {"t": "born", "s": 0.98, "e": 1.62}, {"t": "permes", "s": 1.86, "e": 2.26}, {"t": "stole", "s": 2.34, "e": 2.58}, {"t": "apollos", "s": 2.58, "e": 3.06}, {"t": "cattle", "s": 3.06, "e": 3.22}, {"t": "and", "s": 3.38, "e": 3.46}, {"t": "walked", "s": 3.62, "e": 3.78}, {"t": "them", "s": 3.86, "e": 4.02}, {"t": "backward", "s": 4.1, "e": 4.26}, {"t": "so", "s": 4.66, "e": 4.74}, {"t": "no", "s": 4.82, "e": 4.9}, {"t": "one", "s": 4.98, "e": 5.06}, {"t": "could", "s": 5.14, "e": 5.22}, {"t": "follow", "s": 5.3, "e": 5.46}, {"t": "the", "s": 5.46, "e": 5.54}, {"t": "tracks", "s": 5.7, "e": 6.1}]}/*END*/;
+      const W = C.w || [], D = C.dur || 8;
+      const at = (re, n, fb) => { const h = W.filter((w) => re.test(w.t)); return h.length > (n || 0) ? h[n || 0].s : fb; };
+      // cloven prints walk right, toward the god, each pointing LEFT: the herd went backwards
+      const hoof = '<svg viewBox="0 0 46 80"><path fill="#0000f2" d="M19 2 C11 10 4 26 4 41 C4 53 9 59 16 59 C20 59 21 55 21 49 L21 8 Z"/>' +
+        '<path fill="#0000f2" d="M27 2 C35 10 42 26 42 41 C42 53 37 59 30 59 C26 59 25 55 25 49 L25 8 Z"/>' +
+        '<circle fill="#0000f2" cx="10" cy="73" r="4"/><circle fill="#0000f2" cx="36" cy="73" r="4"/></svg>';
+      document.querySelectorAll(".s01-print").forEach((d) => { d.innerHTML = hoof; });
+      const jit = [3, -4, 2, -2, 5, -3, 1, -5, 4, -1];
+      const tl = gsap.timeline({ paused: true });
+      // frame 0 is the title card (name, what it is, the plate); the myth then plays under it:
+      // the rule draws, the prints walk, the caption lands on its words. The plate pans with the herd.
+      tl.fromTo("#s01-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.9, ease: "power2.inOut" }, 0.25);
+      tl.fromTo("#s01-plate img", { x: 0, scale: 1.04 }, { x: 260, scale: 1.12, duration: D, ease: "none" }, 0);
+      const end = (C.sents[0] || [0, D - 1])[1];
+      for (let i = 0; i < 10; i++) {
+        tl.fromTo("#s01-p" + i, { opacity: 0, scale: 1.25, rotation: -90 + jit[i] },
+          { opacity: 1, scale: 1, rotation: -90 + jit[i], duration: 0.12, ease: "power4.out" }, 0.35 + i * (end - 0.8) / 10);
+      }
+      const ws = document.querySelectorAll(".s01-w");
+      tl.fromTo(ws[0], { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.3, ease: "expo.out" }, at(/cattle/, 0, 3) - 0.15);
+      tl.fromTo(ws[1], { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.3, ease: "expo.out" }, at(/backward/, 0, 4.5) - 0.1);
+      window.__timelines["s01"] = tl;
+    })();
+  </script>
+</template>

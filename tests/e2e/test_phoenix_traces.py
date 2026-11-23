@@ -1,6 +1,5 @@
 """E2E tests: fire hooks with a real Phoenix backend and verify traces via GraphQL."""
 
-import json
 import os
 import time
 
@@ -69,7 +68,7 @@ def _init_phoenix_plugin(phoenix_url, project_name="hermes-otel-e2e-test"):
     plugin = HermesOTelPlugin()
     os.environ["OTEL_PROJECT_NAME"] = project_name
 
-    result = plugin._init_otlp(endpoint, backend_name="Phoenix")
+    result = plugin.init(endpoint=endpoint)
     assert result, f"Failed to initialize Phoenix plugin at {endpoint}"
 
     tracer_mod._tracer = plugin
@@ -146,7 +145,7 @@ class TestPhoenixTraceExport:
             )
 
             # Force flush
-            plugin._force_flush()
+            plugin.pipeline.force_flush()
 
             # Wait for Phoenix to ingest
             time.sleep(3)
@@ -244,7 +243,7 @@ class TestPhoenixTraceExport:
                 platform="e2e-test",
             )
 
-            plugin._force_flush()
+            plugin.pipeline.force_flush()
             time.sleep(3)
 
             spans = _query_phoenix_spans(phoenix_service)
@@ -306,7 +305,7 @@ class TestPhoenixTraceExport:
                 assistant_tool_call_count=0,
             )
 
-            plugin._force_flush()
+            plugin.pipeline.force_flush()
             time.sleep(3)
 
             spans = _query_phoenix_spans(phoenix_service)

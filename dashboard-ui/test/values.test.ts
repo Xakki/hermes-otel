@@ -1,16 +1,6 @@
 // What an attribute value is, and the per-key rules (src/values.ts).
 import { describe, expect, it } from "vitest";
-import {
-  classify,
-  fmtCount,
-  looksLikeMarkdown,
-  parseChat,
-  parsePyRepr,
-  parseToolCalls,
-  splitList,
-  splitToolResult,
-  turnTools,
-} from "../src/values";
+import { classify, fmtCount, looksLikeMarkdown, parseChat, parsePyRepr, parseToolCalls, splitList, splitToolResult, turnTools } from "../src/values";
 
 const MESSAGES = JSON.stringify([
   { role: "system", content: "You are Hermes." },
@@ -24,6 +14,29 @@ const MESSAGES = JSON.stringify([
 ]);
 
 describe("parseChat", () => {
+  it("reads the OTel GenAI parts schema (#647)", () => {
+    const msgs = parseChat(
+      JSON.stringify([
+        { role: "user", parts: [{ type: "text", content: "list files" }] },
+        { role: "assistant", parts: [{ type: "tool_call", id: "c1", name: "terminal", arguments: { command: "ls" } }] },
+        { role: "tool", parts: [{ type: "tool_call_response", id: "c1", response: "a.txt" }] },
+        { role: "assistant", parts: [{ type: "text", content: "One file." }], finish_reason: "stop" },
+      ])
+    )!;
+    expect(msgs.map((m) => m.role)).toEqual(["user", "assistant", "tool", "assistant"]);
+    expect(msgs[0].parts).toEqual([{ type: "text", text: "list files" }]);
+    expect(msgs[1].parts).toEqual([{ type: "tool_call", id: "c1", name: "terminal", args: { command: "ls" } }]);
+    expect(msgs[2].parts).toEqual([{ type: "text", text: "a.txt" }]);
+    expect(msgs[2].toolCallId).toBe("c1");
+    expect(msgs[3].parts).toEqual([{ type: "text", text: "One file." }]);
+  });
+
+  it("renders gen_ai.system_instructions text parts as prose", () => {
+    const c = classify("gen_ai.system_instructions", JSON.stringify([{ type: "text", content: "You are Hermes." }]));
+    expect(c.kind).toBe("markdown");
+    expect(c.value).toBe("You are Hermes.");
+  });
+
   it("reads OpenAI-style messages with tool calls and tool results", () => {
     const msgs = parseChat(MESSAGES)!;
     expect(msgs.map((m) => m.role)).toEqual(["system", "user", "assistant", "tool"]);
@@ -34,7 +47,13 @@ describe("parseChat", () => {
   it("reads the flattened Hermes tool-call shape and content parts", () => {
     const msgs = parseChat([
       { role: "assistant", tool_calls: [{ id: "c", name: "read_file", arguments: { path: "/x" } }] },
-      { role: "user", content: [{ type: "text", text: "hi" }, { type: "image_url", image_url: { url: "data:..." } }] },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "hi" },
+          { type: "image_url", image_url: { url: "data:..." } },
+        ],
+      },
     ])!;
     expect(msgs[0].parts[0]).toMatchObject({ type: "tool_call", name: "read_file", args: { path: "/x" } });
     expect(msgs[1].parts[0]).toEqual({ type: "text", text: "hi" });
@@ -99,22 +118,27 @@ describe("lists, python reprs, tool results, turn tools", () => {
     });
     expect(splitToolResult("just text")).toEqual({ output: "just text", rest: null, error: null });
   });
-  it("zips the root span's tools with outcomes, commands and targets", () => {
-    expect(
-      turnTools({
-        "hermes.turn.tools": "terminal",
-        "hermes.turn.tool_count": "2",
-        "hermes.turn.tool_outcomes": "completed,error",
-        "hermes.turn.tool_commands": "echo a|ls /nope",
-      })
-    ).toEqual([
-      { tool: "terminal", outcome: "completed", command: "echo a", target: null },
-      { tool: "terminal", outcome: "error", command: "ls /nope", target: null },
-    ]);
-    expect(turnTools({ "hermes.turn.tools": "read_file,write_file", "hermes.turn.tool_outcomes": "completed" })).toEqual([
-      { tool: "read_file", outcome: "completed", command: null, target: null },
-      { tool: "write_file", outcome: "completed", command: null, target: null },
-    ]);
+  it("splits tool targets on the plugin's | separator (#612)", () => {
+    expect(splitList("hermes.turn.tool_targets", "/tmp/a,b.txt|https://x.test/?q=1,2")).toEqual(["/tmp/a,b.txt", "https://x.test/?q=1,2"]);
+    expect(classify("hermes.turn.tool_targets", "/a|/b")).toMatchObject({ kind: "list", value: ["/a", "/b"] });
+  });
+  it("keeps the turn's tool sets apart instead of pairing them by position (#612)", () => {
+    // Two calls: terminal "echo a" completed, read_file /etc/x errored. The plugin
+    // sorts the distinct outcomes, so index 0 of outcomes is not the first call's.
+    const t = turnTools({
+      "hermes.turn.tools": "read_file,terminal",
+      "hermes.turn.tool_count": "2",
+      "hermes.turn.tool_outcomes": "completed,error",
+      "hermes.turn.tool_commands": "echo a",
+      "hermes.turn.tool_targets": "/etc/x|/tmp/y",
+    });
+    expect(t).toEqual({
+      tools: ["read_file", "terminal"],
+      outcomes: ["completed", "error"],
+      commands: ["echo a"],
+      targets: ["/etc/x", "/tmp/y"],
+    });
+    expect(turnTools({})).toEqual({ tools: [], outcomes: [], commands: [], targets: [] });
   });
   it("formats counts and spots markdown", () => {
     expect(fmtCount(1234567)).toBe("1,234,567");

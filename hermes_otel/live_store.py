@@ -18,8 +18,13 @@ Design (schema v2, #184):
 - Thread-local connections: Hermes dispatches hooks across executor threads.
 - The cursor-based API (``add_*`` / ``spans(since)`` / ``cursor()``) is
   unchanged from v1; the query API (``query_traces`` and friends) is new.
-- A v1 file (no ``user_version``) is a bounded buffer of recent activity, not a
-  record: it is dropped and recreated with the v2 schema on first open.
+- Schema versions (``PRAGMA user_version``): v1 (plugin < 1.9) was a JSON
+  blob only and is dropped and recreated on first open. v2 (1.9 to 1.18) and
+  v3 (1.19, #266: log rows carry the OTel severity spelling, span id and
+  attributes inside the JSON) share the table layout, so a v2 file is kept and
+  stamped v3 in place: a dashboard running 1.19 can read a file an older
+  gateway is still writing. A file stamped with a newer version than this
+  module knows is opened read-compatibly and never re-stamped.
 """
 
 from __future__ import annotations
@@ -30,15 +35,57 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, TypeVar
+
+from . import semconv as _sc
+from .buckets import bucketize
+from .coerce import optional_number
+from .live_summary import _session_of, summarize_trace
+from .severity import python_level
+
+T = TypeVar("T")
 
 LIVE_DB_FILENAME = "hermes_otel_live.db"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3  # v3 (#266): log rows carry OTel severity spelling, span_id, attributes
+# Rows a failed commit may hold back for the next attempt (#291); beyond this
+# the oldest are dropped so a backend that stays locked cannot grow memory.
+MAX_PENDING_ROWS = 5000
+# Host samples (CPU, GPU, power) arrive several times a second when
+# ``host_metrics`` is on; they get their own small cap so they can never evict
+# the turn's token and cost points from the metric buffer (#291).
+HOST_SAMPLE_MAX_ROWS = 200
+_HOST_METRIC_SQL = "(name LIKE 'process.cpu.%' OR name LIKE 'system.cpu.%' OR name LIKE 'hw.%')"
 
-_SESSION_KEYS = ("hermes.session_id", "session.id", "session_id")
-_MODEL_KEYS = ("gen_ai.request.model", "llm.model_name", "gen_ai.response.model")
-_TOKEN_KEYS = ("gen_ai.usage.total_tokens", "llm.token_count.total")
-_COST_KEYS = ("hermes.cost.usage",)
+# The vocabulary lives in ``semconv`` (#404); these names stay for the readers.
+_MODEL_KEYS = _sc.MODEL_KEYS
+_KIND_PREFIXES: Dict[str, Tuple[str, ...]] = _sc.KIND_PREFIXES
+
+
+def _like(text: str) -> str:
+    r"""Escape a user string for ``LIKE ... ESCAPE '\'`` (``%`` and ``_`` are literal)."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _json_attr(key: str) -> str:
+    """SQL expression for one attribute of the row's JSON blob (dotted keys quoted)."""
+    return "json_extract(data, '$.attributes.\"" + key.replace('"', "") + "\"')"
+
+
+def _restrict_to_owner(path: str) -> None:
+    """``chmod 0600`` the file at *path*; never raises.
+
+    The store holds full prompts, responses and tool I/O, so it must not be
+    readable by other local accounts the way the process umask (usually
+    ``022``) would leave it. Called right after the SQLite file is opened and
+    before WAL mode is enabled: SQLite gives the ``-wal`` / ``-shm`` sidecars
+    the mode of the main database file, so tightening the database first
+    covers all three. On Windows ``chmod`` only touches the read-only bit,
+    which ``0o600`` leaves clear.
+    """
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 def default_db_path_for(home: Path) -> str:
@@ -61,154 +108,6 @@ def _default_db_path() -> str:
     return default_db_path_for(hermes_home())
 
 
-# ── pure helpers (also used by the dashboard API) ─────────────────────────
-
-
-def _num(v: Any) -> Optional[float]:
-    if isinstance(v, bool) or v is None:
-        return None
-    if isinstance(v, (int, float)):
-        return float(v)
-    if isinstance(v, str):
-        try:
-            return float(v.strip())
-        except ValueError:
-            return None
-    return None
-
-
-def _first(attrs: Dict[str, Any], keys: Sequence[str]) -> Any:
-    for k in keys:
-        v = attrs.get(k)
-        if v not in (None, ""):
-            return v
-    return None
-
-
-def _session_of(attrs: Dict[str, Any]) -> Optional[str]:
-    v = _first(attrs, _SESSION_KEYS)
-    return str(v) if v is not None else None
-
-
-def span_kind(name: str, attrs: Optional[Dict[str, Any]] = None) -> str:
-    """Same classification as ``kindOf`` in ``dashboard-ui/src/lib.ts``."""
-    a = attrs or {}
-    if a.get("hermes.span_kind") == "skill":
-        return "skill"
-    if a.get("hermes.span_kind") == "approval":
-        return "approval"
-    n = (name or "").lower()
-    if n == "agent" or n.startswith("agent."):
-        return "agent"
-    if n.startswith("cron"):
-        return "cron"
-    if n.startswith("session"):
-        return "session"
-    if n.startswith("skill."):
-        return "skill"
-    if n.startswith("approval"):
-        return "approval"
-    if n.startswith("subagent"):
-        return "subagent"
-    if n.startswith("llm."):
-        return "llm"
-    if n.startswith("api."):
-        return "api"
-    if n.startswith("tool."):
-        return "tool"
-    return "other"
-
-
-def trace_totals(spans: Iterable[Dict[str, Any]]) -> Dict[str, Optional[float]]:
-    """Tokens and cost for ONE trace, counted once (#178).
-
-    The ``agent`` root already carries the turn's totals and every ``api.*``
-    span carries its own call, so summing all spans doubled every turn. Use
-    the root's figure when it has one; otherwise sum the ``api.*`` spans only
-    (``llm.*`` spans mirror the API spans). Mirrors ``traceTotals`` in
-    ``dashboard-ui/src/lib.ts``.
-    """
-    spans = list(spans)
-    ids = {s.get("span_id") for s in spans}
-    root = next(
-        (s for s in spans if not s.get("parent_span_id") or s.get("parent_span_id") not in ids),
-        None,
-    )
-
-    def pick(keys: Sequence[str]) -> Optional[float]:
-        if root is not None:
-            v = _num(_first(root.get("attributes") or {}, keys))
-            if v is not None:
-                return v
-        total, seen = 0.0, False
-        for s in spans:
-            if not str(s.get("name", "")).startswith("api."):
-                continue
-            v = _num(_first(s.get("attributes") or {}, keys))
-            if v is not None:
-                total += v
-                seen = True
-        return total if seen else None
-
-    # A root with a cost status but no amount (unknown, included or partial
-    # pricing) has no total; never fall back to a subtotal (#252).
-    root_attrs = (root.get("attributes") or {}) if root is not None else {}
-    no_cost_total = (
-        "hermes.cost.status" in root_attrs and _num(_first(root_attrs, _COST_KEYS)) is None
-    )
-    return {"tokens": pick(_TOKEN_KEYS), "cost": None if no_cost_total else pick(_COST_KEYS)}
-
-
-def summarize_trace(spans: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """One trace-list row from its spans (the shape ``LiveTrace`` uses in the UI)."""
-    ids = {s.get("span_id") for s in spans}
-    root = next(
-        (s for s in spans if not s.get("parent_span_id") or s.get("parent_span_id") not in ids),
-        spans[0],
-    )
-    start = min(int(s.get("start_time_unix_nano") or 0) for s in spans)
-    end = max(int(s.get("end_time_unix_nano") or s.get("start_time_unix_nano") or 0) for s in spans)
-    totals = trace_totals(spans)
-    model = None
-    for s in spans:
-        model = _first(s.get("attributes") or {}, _MODEL_KEYS)
-        if model:
-            break
-    rattrs = root.get("attributes") or {}
-    return {
-        "traceId": root.get("trace_id"),
-        "rootName": root.get("name"),
-        "rootKind": span_kind(root.get("name") or "", rattrs),
-        "service": rattrs.get("service.name") or "hermes",
-        "startNs": start,
-        "endNs": end,
-        "durationMs": (end - start) / 1e6,
-        "spanCount": len(spans),
-        "model": model,
-        "tokens": totals["tokens"],
-        "cost": totals["cost"],
-        "error": any(s.get("status") == "ERROR" for s in spans),
-        "session": _session_of(rattrs)
-        or next(
-            (
-                _session_of(s.get("attributes") or {})
-                for s in spans
-                if _session_of(s.get("attributes") or {})
-            ),
-            None,
-        ),
-        "turn": _num(rattrs.get("hermes.turn.number")),
-        "platform": rattrs.get("hermes.platform"),
-    }
-
-
-_LEVELS = {"debug": 10, "info": 20, "warning": 30, "warn": 30, "error": 40, "critical": 50}
-
-
-def _level_no(level: Any) -> int:
-    return _LEVELS.get(str(level or "info").lower(), 20)
-
-
 class LiveStore:
     """Bounded, cross-process telemetry store backed by SQLite (WAL)."""
 
@@ -222,7 +121,7 @@ class LiveStore:
         self.max_rows = max(10, int(max_rows))
         self.retention_ns = int(max(0.0, float(retention_hours)) * 3600 * 1e9)
         self._local = threading.local()
-        self._conns: list = []  # every connection ever opened, for close()
+        self._conns: list = []  # (owner thread, connection) still open, for close()
         self._conns_lock = threading.Lock()
         self._writes = 0
         # Writes are buffered and committed in one transaction by a daemon
@@ -237,6 +136,12 @@ class LiveStore:
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._writer: Optional[threading.Thread] = None
+        # Why the file could not be opened or initialised, if it could not;
+        # ``stats()`` reports it so the dashboard can say "corrupt file" rather
+        # than "no telemetry yet" (#291).
+        self.open_error: Optional[str] = None
+        self.last_write_error: Optional[str] = None
+        self._last_error_log = 0.0
         self._init_db()
 
     # ── connection / schema ───────────────────────────────────────────────
@@ -251,7 +156,7 @@ class LiveStore:
         self.flush()
         with self._conns_lock:
             conns, self._conns = self._conns, []
-        for c in conns:
+        for _owner, c in conns:
             try:
                 c.close()
             except Exception:  # pragma: no cover: never raise on shutdown
@@ -262,13 +167,48 @@ class LiveStore:
         c = getattr(self._local, "conn", None)
         if c is None:
             c = sqlite3.connect(self.db_path, timeout=5.0, check_same_thread=False)
+            _restrict_to_owner(self.db_path)  # before WAL: sidecars inherit this mode
             c.execute("PRAGMA journal_mode=WAL")
             c.execute("PRAGMA busy_timeout=3000")
             c.execute("PRAGMA synchronous=NORMAL")
             self._local.conn = c
+            me = threading.current_thread()
             with self._conns_lock:
-                self._conns.append(c)
+                # A thread-local connection outlives its thread (sqlite3
+                # connections can't be weakref'd, and _conns keeps them
+                # alive). Close the ones whose owner thread has exited, or a
+                # gateway serving reads/writes from transient worker threads
+                # leaks 2 fds (db + wal) per thread until it crosses
+                # FD_SETSIZE and select() callers in the process break.
+                live = []
+                for owner, conn in self._conns:
+                    if owner.is_alive() or owner is me:
+                        live.append((owner, conn))
+                    else:
+                        try:
+                            conn.close()
+                        except Exception:  # pragma: no cover
+                            pass
+                live.append((me, c))
+                self._conns = live
         return c
+
+    # Indexed columns added since v2, in the order they were introduced; an
+    # older file gets the missing ones with ALTER TABLE instead of a DROP.
+    _COLUMNS: Tuple[Tuple[str, str], ...] = (
+        ("trace_id", "TEXT"),
+        ("span_id", "TEXT"),
+        ("parent_span_id", "TEXT"),
+        ("session_id", "TEXT"),
+        ("name", "TEXT"),
+        ("status", "TEXT"),
+        ("start_ns", "integer"),
+        ("end_ns", "integer"),
+        ("duration_ms", "REAL"),
+        ("level", "integer"),
+        ("logger", "TEXT"),
+        ("value", "REAL"),
+    )
 
     def _init_db(self) -> None:
         try:
@@ -279,11 +219,22 @@ class LiveStore:
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'"
                 ).fetchone()
             )
-            if has_table and version < SCHEMA_VERSION:
-                # v1 layout (JSON blob only). The buffer is recent activity, not
-                # a record; start over with the indexed layout.
-                c.execute("DROP TABLE events")
-                c.execute("DELETE FROM sqlite_sequence WHERE name='events'")
+            if has_table:
+                existing = {r[1] for r in c.execute("PRAGMA table_info(events)").fetchall()}
+                if version < 2 or "trace_id" not in existing:
+                    # v1 layout (JSON blob only, plugin < 1.9). The buffer is
+                    # recent activity, not a record; start over with the
+                    # indexed layout.
+                    c.execute("DROP TABLE events")
+                    c.execute("DELETE FROM sqlite_sequence WHERE name='events'")
+                    has_table = False
+                else:
+                    # v2 → v3 in place: same layout, newer JSON shape for log
+                    # rows; add any column a later version introduced so an
+                    # older gateway can keep writing the file we read (#291).
+                    for col, typ in self._COLUMNS:
+                        if col not in existing:
+                            c.execute(f"ALTER TABLE events ADD COLUMN {col} {typ}")
             c.execute(
                 "CREATE TABLE IF NOT EXISTS events ("
                 "  seq  INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -303,10 +254,57 @@ class LiveStore:
                 ("ix_events_kind_ts", "kind, ts"),
             ):
                 c.execute(f"CREATE INDEX IF NOT EXISTS {ix} ON events({cols})")
-            c.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            if version < SCHEMA_VERSION:
+                # Never re-stamp a file a newer plugin wrote (a downgrade):
+                # it stays readable and the newer plugin finds it intact.
+                c.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            # One trim per open, so a store nobody writes 64 rows to at a
+            # time (one-shot runs) is still bounded by cap and age (#291).
+            self._trim(c, ("span", "metric", "log"))
             c.commit()
-        except Exception:  # pragma: no cover: never break the agent
+        except Exception as e:  # never break the agent; say why instead
+            self.open_error = f"{type(e).__name__}: {e}"
+            self._log_error(f"live store: cannot open {self.db_path}: {self.open_error}")
+
+    def _log_error(self, msg: str) -> None:
+        """One debug-log line per 30 s at most; never raises."""
+        now = time.monotonic()
+        if now - self._last_error_log < 30.0:
+            return
+        self._last_error_log = now
+        try:
+            from .debug_utils import debug_log
+
+            debug_log(msg)
+        except Exception:  # pragma: no cover
             pass
+
+    def _trim(self, c: sqlite3.Connection, kinds: Iterable[str]) -> None:
+        """Enforce the per-kind row cap, the host-sample cap and the age limit."""
+        for kind in kinds:
+            if kind == "metric":
+                c.execute(
+                    "DELETE FROM events WHERE kind = 'metric' AND NOT " + _HOST_METRIC_SQL + " "
+                    "AND seq NOT IN (SELECT seq FROM events WHERE kind = 'metric' AND NOT "
+                    + _HOST_METRIC_SQL
+                    + " ORDER BY seq DESC LIMIT ?)",
+                    (self.max_rows,),
+                )
+                c.execute(
+                    "DELETE FROM events WHERE kind = 'metric' AND " + _HOST_METRIC_SQL + " "
+                    "AND seq NOT IN (SELECT seq FROM events WHERE kind = 'metric' AND "
+                    + _HOST_METRIC_SQL
+                    + " ORDER BY seq DESC LIMIT ?)",
+                    (HOST_SAMPLE_MAX_ROWS,),
+                )
+                continue
+            c.execute(
+                "DELETE FROM events WHERE kind = ? AND seq NOT IN "
+                "(SELECT seq FROM events WHERE kind = ? ORDER BY seq DESC LIMIT ?)",
+                (kind, kind, self.max_rows),
+            )
+        if self.retention_ns:
+            c.execute("DELETE FROM events WHERE ts < ?", (time.time_ns() - self.retention_ns,))
 
     # ── writers (hot path: cheap, never raise) ────────────────────────────
     def _insert(
@@ -370,23 +368,32 @@ class LiveStore:
                     kinds.add(kind)
                     written += 1
                 before, self._writes = self._writes, self._writes + written
-                # Trim every 64 writes, as before: per kind, so a chatty logger
-                # cannot evict every span (#100), and by age (#184).
+                # Trim every 64 writes (and once per open, see _init_db): per
+                # kind, so a chatty logger cannot evict every span (#100), and
+                # by age (#184).
                 if before // 64 != self._writes // 64:
-                    for kind in kinds:
-                        c.execute(
-                            "DELETE FROM events WHERE kind = ? AND seq NOT IN "
-                            "(SELECT seq FROM events WHERE kind = ? ORDER BY seq DESC LIMIT ?)",
-                            (kind, kind, self.max_rows),
-                        )
-                    if self.retention_ns:
-                        c.execute(
-                            "DELETE FROM events WHERE ts < ?",
-                            (time.time_ns() - self.retention_ns,),
-                        )
+                    self._trim(c, kinds)
                 c.commit()
-            except Exception:  # pragma: no cover
-                pass
+                self.last_write_error = None
+            except Exception as e:
+                # The batch is NOT lost: put it back at the front, bounded, so
+                # a lock held by another process or a transient disk error
+                # costs a delay rather than a turn (#291). SQLite rolled the
+                # partial transaction back when the statement failed.
+                try:
+                    c.rollback()
+                except Exception:  # pragma: no cover
+                    pass
+                written = 0
+                self.last_write_error = f"{type(e).__name__}: {e}"
+                with self._pending_lock:
+                    self._pending = (rows + self._pending)[-MAX_PENDING_ROWS:]
+                    held = len(self._pending)
+                self._log_error(
+                    f"live store: commit to {self.db_path} failed ({self.last_write_error}); "
+                    f"{held} rows held for the next attempt"
+                )
+                self._wake.set()
         return written
 
     def add_span(self, span: Dict[str, Any]) -> None:
@@ -405,7 +412,7 @@ class LiveStore:
             status=span.get("status"),
             start_ns=start,
             end_ns=end,
-            duration_ms=_num(span.get("duration_ms")),
+            duration_ms=optional_number(span.get("duration_ms")),
         )
 
     def add_metric(self, name: str, value: float, attributes: Dict[str, Any], ts_ns: int) -> None:
@@ -419,7 +426,7 @@ class LiveStore:
             },
             ts=ts_ns or None,
             name=name,
-            value=_num(value),
+            value=optional_number(value),
         )
 
     def add_log(self, record: Dict[str, Any]) -> None:
@@ -428,11 +435,29 @@ class LiveStore:
             record,
             ts=int(record.get("time_unix_nano") or 0) or None,
             trace_id=record.get("trace_id"),
+            span_id=record.get("span_id"),
             session_id=record.get("session_id"),
-            name=record.get("logger"),
-            level=_level_no(record.get("level")),
+            name=record.get("event_name") or record.get("logger"),
+            level=python_level(record.get("level")),
             logger=record.get("logger"),
         )
+
+    # ── readers ───────────────────────────────────────────────────────────
+    def _read(self, default: T, fn: Callable[[sqlite3.Connection], T]) -> T:
+        """Flush, then run ``fn`` on this thread's connection; ``default`` on failure.
+
+        The one guard every reader goes through (#518): a corrupt or locked
+        file answers "no telemetry" to the caller and says why in the debug
+        log (rate-limited by :meth:`_log_error`), instead of ten silent copies.
+        """
+        self.flush()
+        try:
+            return fn(self._conn())
+        except Exception as e:
+            self._log_error(
+                f"live store: read from {self.db_path} failed ({type(e).__name__}: {e})"
+            )
+            return default
 
     # ── cursor readers (dashboard API, unchanged since v1) ────────────────
     @staticmethod
@@ -448,15 +473,13 @@ class LiveStore:
         return out
 
     def _query(self, kind: str, since: int, limit: int) -> List[Dict[str, Any]]:
-        self.flush()
-        try:
-            c = self._conn()
-            rows = c.execute(
+        rows = self._read(
+            [],
+            lambda c: c.execute(
                 "SELECT seq, data FROM events WHERE kind=? AND seq>? ORDER BY seq DESC LIMIT ?",
                 (kind, int(since or 0), int(limit) if limit else 1000000),
-            ).fetchall()
-        except Exception:  # pragma: no cover
-            return []
+            ).fetchall(),
+        )
         return self._rows_to_dicts(reversed(rows))  # back to ascending seq
 
     def spans(self, since: int = 0, limit: int = 0) -> List[Dict[str, Any]]:
@@ -469,29 +492,31 @@ class LiveStore:
         return self._query("log", since, limit)
 
     def cursor(self) -> int:
-        self.flush()
-        try:
-            r = self._conn().execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()
-            return int(r[0]) if r else 0
-        except Exception:  # pragma: no cover
-            return 0
+        return self._read(
+            0, lambda c: int(c.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0])
+        )
 
-    def stats(self) -> Dict[str, int]:
-        self.flush()
-        try:
-            c = self._conn()
-            counts = {
-                k: n
-                for k, n in c.execute("SELECT kind, COUNT(*) FROM events GROUP BY kind").fetchall()
-            }
-        except Exception:  # pragma: no cover
-            counts = {}
-        return {
+    def stats(self) -> Dict[str, Any]:
+        """Row counts per kind and the cursor; ``open_error`` / ``write_error``
+        when the file could not be opened or the last commit failed."""
+        counts = self._read(
+            {},
+            lambda c: dict(c.execute("SELECT kind, COUNT(*) FROM events GROUP BY kind").fetchall()),
+        )
+        out: Dict[str, Any] = {
             "spans": int(counts.get("span", 0)),
             "metrics": int(counts.get("metric", 0)),
             "logs": int(counts.get("log", 0)),
             "cursor": self.cursor(),
         }
+        if self.open_error:
+            out["open_error"] = self.open_error
+        if self.last_write_error:
+            out["write_error"] = self.last_write_error
+        with self._pending_lock:
+            if self._pending:
+                out["pending"] = len(self._pending)
+        return out
 
     def clear(self) -> None:
         with self._pending_lock:
@@ -525,9 +550,11 @@ class LiveStore:
             where.append("duration_ms >= ?")
             args.append(float(min_duration_ms))
         if model:
-            # attributes carry the model under gen_ai.request.model / llm.model_name
-            where.append("data LIKE ?")
-            args.append(f'%.model%": "%{model}%')
+            # A substring of the model *attribute* only, never of the whole
+            # blob: a model name quoted in a prompt is not a match (#291).
+            parts = [f"{_json_attr(k)} LIKE ? ESCAPE '\\'" for k in _MODEL_KEYS]
+            where.append("(" + " OR ".join(parts) + ")")
+            args.extend([f"%{_like(model)}%"] * len(_MODEL_KEYS))
         if tool:
             where.append("name = ?")
             args.append(f"tool.{tool}" if not tool.startswith("tool.") else tool)
@@ -543,33 +570,57 @@ class LiveStore:
         if status == "error":
             where.append("status = 'ERROR'")
         elif status == "ok":
-            where.append("status != 'ERROR'")
+            # A trace is ok when NONE of its spans failed, not when one span
+            # happened to succeed (#291).
+            where.append(
+                "trace_id NOT IN (SELECT trace_id FROM events WHERE kind='span' "
+                "AND status = 'ERROR' AND trace_id IS NOT NULL)"
+            )
         if name:
-            where.append("name LIKE ?")
-            args.append(f"%{name}%")
+            where.append("name LIKE ? ESCAPE '\\'")
+            args.append(f"%{_like(name)}%")
         if kind:
-            if kind in ("agent", "cron", "session", "subagent", "approval"):
-                where.append("name LIKE ?")
-                args.append(f"{kind}%")
-            else:
-                where.append("name LIKE ?")
-                args.append(f"{kind}.%")
+            where.append(self._kind_sql(kind, args))
         if text:
-            where.append("data LIKE ?")
-            args.append(f"%{text}%")
+            where.append("data LIKE ? ESCAPE '\\'")
+            args.append(f"%{_like(text)}%")
         if trace_id:
             where.append("trace_id = ?")
             args.append(trace_id)
         return " AND ".join(where), args
 
+    @staticmethod
+    def _kind_sql(kind: str, args: List[Any]) -> str:
+        """SQL for one span kind, mirroring :func:`semconv.span_kind` (prefix or
+        ``hermes.span_kind`` attribute); ``other`` is none of the known kinds."""
+        # COALESCE: a missing attribute is NULL, and NOT (NULL OR …) would be
+        # NULL rather than true, hiding every row from ``kind=other``.
+        attr = "COALESCE(" + _json_attr(_sc.KIND_OVERRIDE_ATTR) + ", '')"
+
+        def one(k: str) -> str:
+            clauses = []
+            for prefix in _KIND_PREFIXES[k]:
+                clauses.append("name LIKE ? ESCAPE '\\'")
+                args.append(f"{_like(prefix)}%")
+            if k in _sc.KIND_OVERRIDES:
+                clauses.append(f"{attr} = ?")
+                args.append(k)
+            return "(" + " OR ".join(clauses) + ")"
+
+        if kind == "other":
+            return "NOT (" + " OR ".join(one(k) for k in _KIND_PREFIXES) + ")"
+        if kind not in _KIND_PREFIXES:
+            args.append(f"{_like(kind)}.%")
+            return "name LIKE ? ESCAPE '\\'"
+        return one(kind)
+
     def spans_for_traces(self, trace_ids: Sequence[str]) -> Dict[str, List[Dict[str, Any]]]:
-        self.flush()
         """All stored spans of the given traces, grouped by trace id."""
         out: Dict[str, List[Dict[str, Any]]] = {t: [] for t in trace_ids}
         if not trace_ids:
             return out
-        try:
-            c = self._conn()
+
+        def fill(c: sqlite3.Connection) -> Dict[str, List[Dict[str, Any]]]:
             for chunk_start in range(0, len(trace_ids), 500):
                 chunk = list(trace_ids[chunk_start : chunk_start + 500])
                 marks = ", ".join("?" * len(chunk))
@@ -580,9 +631,9 @@ class LiveStore:
                 ).fetchall()
                 for d in self._rows_to_dicts(rows):
                     out.setdefault(d.get("trace_id"), []).append(d)
-        except Exception:  # pragma: no cover
-            pass
-        return out
+            return out
+
+        return self._read(out, fill)
 
     def query_traces(
         self,
@@ -599,9 +650,18 @@ class LiveStore:
         min_duration_ms: Optional[float] = None,
         model: Optional[str] = None,
         tool: Optional[str] = None,
+        before_ns: Optional[int] = None,
     ) -> Dict[str, Any]:
-        self.flush()
-        """Trace-list rows (newest first) whose spans match every given filter."""
+        """Trace-list rows, newest start first, whose spans match every filter.
+
+        Paging is by keyset: ``before_ns`` keeps only traces whose start is
+        strictly older than it, and ``next_before_ns`` in the result is the
+        start of the oldest row returned (``None`` when empty), so a turn
+        landing between two pages never shifts the older page. ``offset``
+        still works for callers that use it. ``total`` counts every matching
+        trace regardless of the cursor; ``has_more`` says whether rows exist
+        past this page.
+        """
         where, args = self._span_where(
             start_ns,
             end_ns,
@@ -615,29 +675,47 @@ class LiveStore:
             model,
             tool,
         )
-        try:
-            c = self._conn()
+        # The cursor and the order use the same key (the earliest matching
+        # span's start), so pages are gap-free and duplicate-free.
+        grouped = (
+            f"SELECT trace_id, MIN(COALESCE(start_ns, ts)) AS first FROM events "
+            f"WHERE {where} AND trace_id IS NOT NULL GROUP BY trace_id"
+        )
+        having = " HAVING first < ?" if before_ns else ""
+        cursor_args = [int(before_ns)] if before_ns else []
+
+        def page(c: sqlite3.Connection) -> Tuple[int, int, List[tuple]]:
             total = int(
                 c.execute(
                     f"SELECT COUNT(DISTINCT trace_id) FROM events WHERE {where}", args
                 ).fetchone()[0]
             )
-            ids = [
-                r[0]
-                for r in c.execute(
-                    f"SELECT trace_id, MAX(COALESCE(end_ns, start_ns, ts)) AS last FROM events "
-                    f"WHERE {where} GROUP BY trace_id ORDER BY last DESC LIMIT ? OFFSET ?",
-                    args + [int(limit), int(offset)],
-                ).fetchall()
-            ]
-        except Exception:  # pragma: no cover
-            return {"traces": [], "total": 0}
+            remaining = total
+            if before_ns:
+                remaining = int(
+                    c.execute(
+                        f"SELECT COUNT(*) FROM ({grouped}{having})", args + cursor_args
+                    ).fetchone()[0]
+                )
+            rows = c.execute(
+                f"{grouped}{having} ORDER BY first DESC LIMIT ? OFFSET ?",
+                args + cursor_args + [int(limit), int(offset)],
+            ).fetchall()
+            return total, remaining, rows
+
+        # On a read failure the default yields the empty envelope below.
+        total, remaining, rows = self._read((0, 0, []), page)
+        ids = [r[0] for r in rows]
         by_trace = self.spans_for_traces(ids)
         traces = [summarize_trace(by_trace[t]) for t in ids if by_trace.get(t)]
-        return {"traces": traces, "total": total}
+        return {
+            "traces": traces,
+            "total": total,
+            "has_more": int(offset) + len(ids) < remaining,
+            "next_before_ns": int(rows[-1][1]) if rows else None,
+        }
 
     def trace(self, trace_id: str) -> Dict[str, Any]:
-        self.flush()
         spans = self.spans_for_traces([trace_id]).get(trace_id) or []
         if not spans:
             return {"trace": None, "spans": []}
@@ -649,21 +727,25 @@ class LiveStore:
         end_ns: Optional[int] = None,
         limit: int = 50,
     ) -> Dict[str, Any]:
-        self.flush()
-        """One row per session id: turns, span/error counts, totals, first/last."""
+        """One row per session id: turns, span/error counts, totals, first/last.
+
+        Every trace in the window that carries a session id is grouped (the
+        store is bounded by its row cap, so this is at most ``max_rows``
+        spans); ``has_more`` says whether more sessions than ``limit`` exist.
+        """
         where, args = self._span_where(start_ns, end_ns, None, None, None, None, None)
-        try:
-            c = self._conn()
-            ids = [
-                r[0]
-                for r in c.execute(
+        ids = [
+            r[0]
+            for r in self._read(
+                [],
+                lambda c: c.execute(
                     f"SELECT trace_id FROM events WHERE {where} AND session_id IS NOT NULL "
-                    "GROUP BY trace_id ORDER BY MAX(COALESCE(end_ns, start_ns, ts)) DESC LIMIT ?",
-                    args + [int(limit) * 20],
-                ).fetchall()
-            ]
-        except Exception:  # pragma: no cover
-            return {"sessions": []}
+                    "AND trace_id IS NOT NULL GROUP BY trace_id "
+                    "ORDER BY MAX(COALESCE(end_ns, start_ns, ts)) DESC",
+                    args,
+                ).fetchall(),
+            )
+        ]
         by_trace = self.spans_for_traces(ids)
         sessions: Dict[str, Dict[str, Any]] = {}
         for t in ids:
@@ -684,6 +766,7 @@ class LiveStore:
                     "tokens": 0.0,
                     "cost": 0.0,
                     "toolCalls": 0,
+                    "subagentTokens": 0.0,
                     "startNs": s["startNs"],
                     "endNs": s["endNs"],
                     "platform": s.get("platform"),
@@ -696,30 +779,28 @@ class LiveStore:
             row["errors"] += sum(1 for sp in spans if sp.get("status") == "ERROR")
             row["tokens"] += s["tokens"] or 0
             row["cost"] += s["cost"] or 0
+            row["subagentTokens"] += (s.get("subagents") or {}).get("tokens") or 0
             row["toolCalls"] += sum(
                 1 for sp in spans if str(sp.get("name", "")).startswith("tool.")
             )
             row["startNs"] = min(row["startNs"], s["startNs"])
             row["endNs"] = max(row["endNs"], s["endNs"])
             row["traceIds"].append(t)
-        rows = sorted(sessions.values(), key=lambda r: r["endNs"], reverse=True)[: int(limit)]
+        ordered = sorted(sessions.values(), key=lambda r: r["endNs"], reverse=True)
+        rows = ordered[: int(limit)]
         for r in rows:
             r["tokens"] = r["tokens"] or None
             r["cost"] = r["cost"] or None
-        return {"sessions": rows}
+            r["subagentTokens"] = r["subagentTokens"] or None
+        return {"sessions": rows, "has_more": len(ordered) > len(rows)}
 
     def metric_names(self) -> List[Dict[str, Any]]:
-        self.flush()
-        try:
-            rows = (
-                self._conn()
-                .execute(
-                    "SELECT name, COUNT(*), MAX(ts) FROM events WHERE kind='metric' GROUP BY name ORDER BY name"
-                )
-                .fetchall()
-            )
-        except Exception:  # pragma: no cover
-            return []
+        rows = self._read(
+            [],
+            lambda c: c.execute(
+                "SELECT name, COUNT(*), MAX(ts) FROM events WHERE kind='metric' GROUP BY name ORDER BY name"
+            ).fetchall(),
+        )
         return [{"name": n, "count": int(c), "lastTs": int(t or 0)} for n, c, t in rows]
 
     def metric_buckets(
@@ -731,58 +812,31 @@ class LiveStore:
         group_by: Optional[str] = None,
         agg: str = "sum",
     ) -> Dict[str, Any]:
-        self.flush()
-        """Aggregate one instrument into fixed time buckets, optionally per attribute value."""
+        """Aggregate one instrument into fixed time buckets, optionally per attribute value.
+
+        ``points`` counts every stored row of the instrument in the window,
+        valueless rows included (:func:`bucketize`).
+        """
         bucket_ns = max(1, int(bucket_s)) * 1_000_000_000
-        start_ns = int(start_ns) - int(start_ns) % bucket_ns
-        n_buckets = max(1, int((int(end_ns) - start_ns) // bucket_ns) + 1)
-        try:
-            rows = (
-                self._conn()
-                .execute(
-                    "SELECT ts, value, data FROM events WHERE kind='metric' AND name=? AND ts>=? AND ts<=?",
-                    (name, start_ns, int(end_ns)),
-                )
-                .fetchall()
-            )
-        except Exception:  # pragma: no cover
-            rows = []
-        series: Dict[str, List[List[float]]] = {}
-        for ts, value, data in rows:
-            if value is None:
-                continue
-            idx = int((int(ts) - start_ns) // bucket_ns)
-            if idx < 0 or idx >= n_buckets:
-                continue
-            label = "_"
-            if group_by:
-                try:
-                    label = str(json.loads(data).get("attributes", {}).get(group_by, "—"))
-                except Exception:
-                    label = "—"
-            series.setdefault(label, [[] for _ in range(n_buckets)])[idx].append(float(value))
+        lo = int(start_ns) - int(start_ns) % bucket_ns
+        rows = self._read(
+            [],
+            lambda c: c.execute(
+                "SELECT ts, value, data FROM events WHERE kind='metric' AND name=? AND ts>=? AND ts<=?",
+                (name, lo, int(end_ns)),
+            ).fetchall(),
+        )
 
-        def reduce(vals: List[float]) -> Optional[float]:
-            if not vals:
-                return None
-            if agg == "count":
-                return float(len(vals))
-            if agg == "avg":
-                return sum(vals) / len(vals)
-            if agg == "max":
-                return max(vals)
-            if agg == "last":
-                return vals[-1]
-            return sum(vals)
+        def label_of(data: str) -> str:
+            if not group_by:
+                return "_"
+            try:
+                return str(json.loads(data).get("attributes", {}).get(group_by, "—"))
+            except Exception:
+                return "—"
 
-        return {
-            "name": name,
-            "agg": agg,
-            "bucketS": int(bucket_s),
-            "buckets": [start_ns + i * bucket_ns for i in range(n_buckets)],
-            "series": {label: [reduce(v) for v in vals] for label, vals in series.items()},
-            "points": len(rows),
-        }
+        points = [(ts, value, label_of(data)) for ts, value, data in rows]
+        return {"name": name, **bucketize(points, lo, end_ns, bucket_s, agg)}
 
     def query_logs(
         self,
@@ -795,13 +849,23 @@ class LiveStore:
         end_ns: Optional[int] = None,
         limit: int = 300,
         before_ns: Optional[int] = None,
+        span_id: Optional[str] = None,
+        event_name: Optional[str] = None,
+        events_only: bool = False,
     ) -> List[Dict[str, Any]]:
-        self.flush()
         where = ["kind='log'"]
         args: List[Any] = []
         if trace_id:
             where.append("trace_id = ?")
             args.append(trace_id)
+        if span_id:
+            where.append("span_id = ?")
+            args.append(span_id)
+        if event_name:
+            where.append("json_extract(data, '$.event_name') = ?")
+            args.append(event_name)
+        elif events_only:
+            where.append("json_extract(data, '$.event_name') IS NOT NULL")
         if session:
             where.append("session_id = ?")
             args.append(session)
@@ -812,8 +876,8 @@ class LiveStore:
             where.append("logger = ?")
             args.append(logger)
         if text:
-            where.append("data LIKE ?")
-            args.append(f"%{text}%")
+            where.append("data LIKE ? ESCAPE '\\'")
+            args.append(f"%{_like(text)}%")
         if start_ns:
             where.append("ts >= ?")
             args.append(int(start_ns))
@@ -824,92 +888,21 @@ class LiveStore:
             # Keyset paging: the page after the one that ended at ``before_ns``.
             where.append("ts < ?")
             args.append(int(before_ns))
-        try:
-            rows = (
-                self._conn()
-                .execute(
-                    f"SELECT seq, data FROM events WHERE {' AND '.join(where)} ORDER BY seq DESC LIMIT ?",
-                    args + [int(limit)],
-                )
-                .fetchall()
-            )
-        except Exception:  # pragma: no cover
-            return []
+        rows = self._read(
+            [],
+            lambda c: c.execute(
+                f"SELECT seq, data FROM events WHERE {' AND '.join(where)} ORDER BY seq DESC LIMIT ?",
+                args + [int(limit)],
+            ).fetchall(),
+        )
         return self._rows_to_dicts(rows)  # newest first
 
     def loggers(self) -> List[Dict[str, Any]]:
-        self.flush()
-        try:
-            rows = (
-                self._conn()
-                .execute(
-                    "SELECT logger, COUNT(*) FROM events WHERE kind='log' AND logger IS NOT NULL "
-                    "GROUP BY logger ORDER BY COUNT(*) DESC"
-                )
-                .fetchall()
-            )
-        except Exception:  # pragma: no cover
-            return []
+        rows = self._read(
+            [],
+            lambda c: c.execute(
+                "SELECT logger, COUNT(*) FROM events WHERE kind='log' AND logger IS NOT NULL "
+                "GROUP BY logger ORDER BY COUNT(*) DESC"
+            ).fetchall(),
+        )
         return [{"logger": n, "count": int(c)} for n, c in rows]
-
-
-# Per-process singleton; both processes point at the same SQLite file (default
-# path), so they share data without sharing memory.
-_LIVE_STORE: Optional[LiveStore] = None
-_LIVE_LOCK = threading.Lock()
-# Read-side stores by file, for a dashboard that serves several profiles from
-# one process (#70): each profile has its own ``hermes_otel_live.db``.
-_STORES_BY_PATH: Dict[str, LiveStore] = {}
-
-
-def get_live_store_for_home(create: bool = True) -> Optional[LiveStore]:
-    """The live store of the Hermes home in force for the caller.
-
-    In the dashboard, Hermes resolves the home per request (``?profile=``), so
-    the Live source must open that profile's file rather than the one the
-    process opened first. The process singleton is reused when it already
-    points at the same file; other files get one reader each, kept for the
-    life of the process. ``None`` when the file cannot be opened.
-    """
-    path = os.environ.get("HERMES_OTEL_LIVE_DB") or _default_db_path()
-    current = _LIVE_STORE
-    if current is not None and str(getattr(current, "db_path", "")) == path:
-        return current
-    with _LIVE_LOCK:
-        store = _STORES_BY_PATH.get(path)
-        if store is None and create:
-            try:
-                store = LiveStore(db_path=path)
-            except Exception:  # pragma: no cover
-                return None
-            _STORES_BY_PATH[path] = store
-    return store
-
-
-def get_live_store(
-    create: bool = False,
-    db_path: Optional[str] = None,
-    max_rows: int = 4000,
-    retention_hours: float = 168.0,
-    **_ignored: Any,
-) -> Optional[LiveStore]:
-    """Return the process-wide :class:`LiveStore`.
-
-    ``create=True`` lazily builds it (the tracer, when ``dashboard_live`` is on).
-    The dashboard API calls with ``create=True`` too (read side) so the file is
-    opened even if the dashboard process started first. ``None`` only when the
-    SQLite backend can't be opened at all.
-    """
-    global _LIVE_STORE
-    if _LIVE_STORE is None and create:
-        with _LIVE_LOCK:
-            if _LIVE_STORE is None:
-                try:
-                    _LIVE_STORE = LiveStore(
-                        db_path=db_path or os.environ.get("HERMES_OTEL_LIVE_DB"),
-                        max_rows=max_rows,
-                        retention_hours=retention_hours,
-                    )
-                except Exception:  # pragma: no cover
-                    return None
-    return _LIVE_STORE

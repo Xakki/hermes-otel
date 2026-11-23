@@ -16,8 +16,9 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
+from hermes_otel.pipeline import _MCPPingFilterProcessor, is_mcp_keepalive_ping
 from hermes_otel.plugin_config import HermesOtelConfig, load_config
-from hermes_otel.tracer import HermesOTelPlugin, _is_mcp_keepalive_ping, _MCPPingFilterProcessor
+from hermes_otel.tracer import HermesOTelPlugin
 
 # Exactly what mcp/shared/jsonrpc_dispatcher.py emits for a keepalive.
 _PING_ATTRS = {"mcp.method.name": "ping", "jsonrpc.request.id": "42"}
@@ -55,7 +56,7 @@ class TestPredicate:
             attributes = _PING_ATTRS
             status = Status(StatusCode.UNSET)
 
-        assert _is_mcp_keepalive_ping(S()) is True
+        assert is_mcp_keepalive_ping(S()) is True
 
     def test_failed_ping_is_kept(self):
         class S:
@@ -63,7 +64,7 @@ class TestPredicate:
             attributes = _PING_ATTRS
             status = Status(StatusCode.ERROR, "boom")
 
-        assert _is_mcp_keepalive_ping(S()) is False
+        assert is_mcp_keepalive_ping(S()) is False
 
     def test_name_fallback_without_attributes(self):
         class S:
@@ -71,7 +72,7 @@ class TestPredicate:
             attributes = None
             status = None
 
-        assert _is_mcp_keepalive_ping(S()) is True
+        assert is_mcp_keepalive_ping(S()) is True
 
     def test_other_mcp_requests_are_not_pings(self):
         class S:
@@ -79,7 +80,7 @@ class TestPredicate:
             attributes = {"mcp.method.name": "tools/call"}
             status = Status(StatusCode.OK)
 
-        assert _is_mcp_keepalive_ping(S()) is False
+        assert is_mcp_keepalive_ping(S()) is False
 
 
 class TestFilterProcessor:
@@ -160,7 +161,7 @@ class TestInitWiring:
             "OTEL_TEMPO_ENDPOINT",
         ):
             monkeypatch.delenv(var, raising=False)
-        import hermes_otel.live_store as ls
+        import hermes_otel.live_store_registry as ls
 
         if ls._LIVE_STORE is not None:
 
@@ -172,9 +173,9 @@ class TestInitWiring:
         )
         # The global-provider install is patched out so the test never mutates
         # process-wide OTel state; the plugin keeps its own provider object.
-        with patch("hermes_otel.tracer.trace.set_tracer_provider"):
+        with patch("hermes_otel.pipeline.trace.set_tracer_provider"):
             assert plugin.init() is True
-        provider = plugin._tracer_provider
+        provider = plugin.pipeline.tracer_provider
         assert provider is not None
         return provider, ls
 

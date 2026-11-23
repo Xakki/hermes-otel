@@ -1,17 +1,16 @@
 """Hook-thread latency guards (#91).
 
-Three things used to run synchronously inside the hook thread, that is inside
-the agent loop: the turn-end force-flush of every backend, a LangSmith HTTP
-round-trip per span start and end, and a SQLite commit per live-store row.
+Two things used to run synchronously inside the hook thread, that is inside
+the agent loop: the turn-end force-flush of every backend and a SQLite commit
+per live-store row. (A third, LangSmith's run-tree client, went with #415.)
 These tests put a collector that never answers behind each path and assert
 the hook returns promptly anyway, so a regression is visible.
 """
 
 from __future__ import annotations
 
-import threading
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from opentelemetry.sdk.trace import TracerProvider
@@ -19,9 +18,9 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter, Spa
 
 import hermes_otel.tracer as tracer_mod
 from hermes_otel.hooks import on_session_end, on_session_start
-from hermes_otel.langsmith_backend import LangSmithBackend
 from hermes_otel.live_store import LiveStore
 from hermes_otel.plugin_config import HermesOtelConfig
+from hermes_otel.testing import attach_pipeline
 from hermes_otel.tracer import HermesOTelPlugin
 
 # Generous bounds: the point is "milliseconds, not seconds", on a loaded CI box.
@@ -60,18 +59,14 @@ def stuck_plugin():
     plugin.config = HermesOtelConfig(
         force_flush_on_session_end=True, force_flush_wait_ms=100, dashboard_live=False
     )
-    plugin.tracer = provider.get_tracer("test")
-    plugin._span_processors = [processor]
-    plugin._initialized = True
+    attach_pipeline(plugin, tracer=provider.get_tracer("test"), span_processors=[processor])
     tracer_mod._tracer = plugin
     try:
         yield exporter, plugin
     finally:
-        plugin._flush_pending.clear()
-        ex = plugin._flush_executor
-        if ex is not None:
-            ex.shutdown(wait=False)
-        plugin._initialized = False
+        plugin.flusher.pending.clear()
+        plugin.flusher.shutdown()
+        plugin.pipeline = None
 
 
 class TestTurnEndFlush:
@@ -86,8 +81,8 @@ class TestTurnEndFlush:
         # Bounded by force_flush_wait_ms (100 ms here), not by the stuck collector.
         assert elapsed < TURN_END_BUDGET_S, f"on_session_end took {elapsed:.2f}s on the hook thread"
         assert elapsed >= 0.09, "the hook should have waited its budget for the stuck flush"
-        plugin.flush_wait(timeout_s=5)
-        assert not plugin._flush_pending.is_set()
+        plugin.flusher.wait(timeout_s=5)
+        assert not plugin.flusher.pending.is_set()
 
     def test_wait_is_short_when_the_flush_is_fast(self, stuck_plugin):
         exporter, plugin = stuck_plugin
@@ -96,7 +91,7 @@ class TestTurnEndFlush:
         )
         fast = MagicMock()
         fast.force_flush.return_value = True
-        plugin._span_processors = [fast]
+        plugin.pipeline.span_processors = [fast]
         on_session_start(session_id="s3", model="gpt-4", platform="cli")
         t0 = time.perf_counter()
         on_session_end(
@@ -105,18 +100,26 @@ class TestTurnEndFlush:
         assert time.perf_counter() - t0 < 0.3  # returned as soon as the flush finished
         fast.force_flush.assert_called_once()
 
-    def test_zero_wait_returns_immediately(self, stuck_plugin):
+    def test_zero_wait_returns_immediately(self, stuck_plugin, monkeypatch):
+        # ``force_flush_wait_ms: 0`` queues the flush and never waits for it.
+        # Asserted on the flusher's calls, not the wall clock: a loaded CI box
+        # made a ``< 0.05 s`` bound flaky (#564).
         exporter, plugin = stuck_plugin
         plugin.config = HermesOtelConfig(
             force_flush_on_session_end=True, force_flush_wait_ms=0, dashboard_live=False
         )
+        queued = MagicMock(wraps=plugin.flusher.flush_async)
+        waited = MagicMock(wraps=plugin.flusher.wait)
+        monkeypatch.setattr(plugin.flusher, "flush_async", queued)
+        monkeypatch.setattr(plugin.flusher, "wait", waited)
         on_session_start(session_id="s4", model="gpt-4", platform="cli")
-        t0 = time.perf_counter()
         on_session_end(
             session_id="s4", completed=True, interrupted=False, model="gpt-4", platform="cli"
         )
-        assert time.perf_counter() - t0 < 0.05
-        plugin.flush_wait(timeout_s=5)
+        queued.assert_called_once_with(plugin.pipeline)  # a flush was queued …
+        waited.assert_not_called()  # … and the hook did not wait for it
+        monkeypatch.undo()
+        plugin.flusher.wait(timeout_s=5)
 
     def test_flushes_coalesce_while_one_is_queued(self, stuck_plugin):
         exporter, plugin = stuck_plugin
@@ -124,13 +127,13 @@ class TestTurnEndFlush:
         # stuck collector); an empty BatchSpanProcessor returns instantly.
         slow = MagicMock()
         slow.force_flush.side_effect = lambda timeout_millis=0: time.sleep(0.3)
-        plugin._span_processors = [slow]
-        assert plugin.flush_async() is True
-        assert plugin.flush_async() is False  # already queued: no-op
-        plugin.flush_wait(timeout_s=5)
+        plugin.pipeline.span_processors = [slow]
+        assert plugin.flusher.flush_async(plugin.pipeline) is True
+        assert plugin.flusher.flush_async(plugin.pipeline) is False  # already queued: no-op
+        plugin.flusher.wait(timeout_s=5)
         assert slow.force_flush.call_count == 1
-        assert plugin.flush_async() is True
-        plugin.flush_wait(timeout_s=5)
+        assert plugin.flusher.flush_async(plugin.pipeline) is True
+        plugin.flusher.wait(timeout_s=5)
         assert slow.force_flush.call_count == 2
 
     def test_background_flush_covers_metric_and_log_providers_off_the_hook_thread(
@@ -141,16 +144,16 @@ class TestTurnEndFlush:
         # tick nor atexit, so this flush is the only metric export it gets.
         # It still runs on the worker thread, never on the hook thread.
         exporter, plugin = stuck_plugin
-        plugin._meter_provider = MagicMock()
-        plugin._logger_provider = MagicMock()
-        plugin.flush_async()
-        plugin.flush_wait(timeout_s=5)
-        plugin._meter_provider.force_flush.assert_called_once()
-        plugin._logger_provider.force_flush.assert_called_once()
+        plugin.pipeline.meter_provider = MagicMock()
+        plugin.pipeline.logger_provider = MagicMock()
+        plugin.flusher.flush_async(plugin.pipeline)
+        plugin.flusher.wait(timeout_s=5)
+        plugin.pipeline.meter_provider.force_flush.assert_called_once()
+        plugin.pipeline.logger_provider.force_flush.assert_called_once()
         # Shutdown still flushes them synchronously (a second call).
-        plugin._force_flush(timeout_millis=10)
-        assert plugin._meter_provider.force_flush.call_count == 2
-        assert plugin._logger_provider.force_flush.call_count == 2
+        plugin.pipeline.force_flush(timeout_millis=10)
+        assert plugin.pipeline.meter_provider.force_flush.call_count == 2
+        assert plugin.pipeline.logger_provider.force_flush.call_count == 2
 
     def test_no_flush_when_disabled(self, stuck_plugin):
         exporter, plugin = stuck_plugin
@@ -159,33 +162,7 @@ class TestTurnEndFlush:
         on_session_end(
             session_id="s2", completed=True, interrupted=False, model="gpt-4", platform="cli"
         )
-        assert not plugin._flush_pending.is_set()
-
-
-class TestLangSmithQueue:
-    def test_span_start_and_end_do_not_wait_on_http(self):
-        gate = threading.Event()
-
-        def stuck_urlopen(req, timeout=None):
-            gate.wait(5)
-            resp = MagicMock()
-            resp.read.return_value = b""
-            resp.__enter__ = lambda s: s
-            resp.__exit__ = MagicMock(return_value=False)
-            return resp
-
-        backend = LangSmithBackend(api_key="k", endpoint="https://api.smith.test", project="p")
-        with patch("hermes_otel.langsmith_backend.urllib.request.urlopen", stuck_urlopen):
-            t0 = time.perf_counter()
-            for i in range(20):
-                run = backend.start_span(f"tool.t{i}", f"tool:t{i}", kind="tool")
-                backend.end_span(run, attributes={"output.value": "ok"})
-            elapsed = time.perf_counter() - t0
-            assert elapsed < 20 * PER_SPAN_BUDGET_S, f"20 spans took {elapsed:.3f}s"
-            assert backend._queue.qsize() >= 39  # queued, not sent
-            gate.set()
-            assert backend.flush(timeout=10)
-        backend.shutdown()
+        assert not plugin.flusher.pending.is_set()
 
 
 class TestLiveStoreBatching:

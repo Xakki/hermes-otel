@@ -16,7 +16,7 @@ The plugin ships a trimmed compose that boots just what hermes-otel needs (Click
 
 ```bash
 cd ~/.hermes/plugins/hermes_otel
-docker compose -p uptrace -f docker-compose/uptrace.yaml up -d
+docker compose -f docker-compose/uptrace/docker-compose.yaml up -d
 ```
 
 Wait ~20s for ClickHouse to finish applying migrations, then open the UI at http://localhost:14318 and log in with the seeded admin:
@@ -24,7 +24,7 @@ Wait ~20s for ClickHouse to finish applying migrations, then open the UI at http
 - **Email:** `admin@uptrace.local`
 - **Password:** `admin`
 
-Point the plugin at it — minimal `config.yaml`:
+Point the plugin at it — minimal `hermes_otel.yaml`:
 
 ```yaml
 backends:
@@ -32,7 +32,8 @@ backends:
     endpoint: http://localhost:14318/v1/traces
     dsn: http://project1_secret@localhost:14318?grpc=14317
 
-capture_logs: true
+logs:
+  capture: true   # send Python log lines as OTel logs too
 ```
 
 The `dsn` value is the ingestion DSN for the seeded project (`hermes-agent` under org `hermes-otel`, token `project1_secret`). The plugin sends it as the `uptrace-dsn` header on every OTLP request; Uptrace uses it to route data to the right project.
@@ -41,12 +42,12 @@ The `dsn` value is the ingestion DSN for the seeded project (`hermes-agent` unde
 
 Uptrace authenticates with a custom `uptrace-dsn` header that `type: otlp` can't synthesise for you. Declaring `type: uptrace` asks the plugin to:
 
-1. Read `dsn:` (or `dsn_env:` → env var → `UPTRACE_DSN` / `OTEL_UPTRACE_DSN`).
+1. Read `dsn:`, else the variable `dsn_env:` names, else `OTEL_UPTRACE_DSN`, else `UPTRACE_DSN`. The entry is skipped at startup when none is set.
 2. Set the `uptrace-dsn` request header automatically.
 3. Display `✓ Uptrace at <endpoint>` in startup logs.
-4. Enable all three signals (`supports_metrics=True`, `supports_logs=True`).
+4. Send all three signals (traces, metrics and logs) by default, with metrics as delta (the type's preset).
 
-Keep secrets out of `config.yaml` — use `dsn_env` and set the variable in your shell:
+Keep secrets out of `hermes_otel.yaml` — use `dsn_env` and set the variable in your shell:
 
 ```yaml
 backends:
@@ -69,7 +70,7 @@ export UPTRACE_DSN='http://project1_secret@localhost:14318?grpc=14317'
 | 14317 | Uptrace | OTLP/gRPC receiver |
 | 14318 | Uptrace | **UI + OTLP/HTTP receiver — the plugin exports here** |
 
-Port 14318 was picked specifically to avoid the standard 4318 used by LGTM / Jaeger / SigNoz, so Uptrace can run alongside them. The only likely conflict is port 5432 with a host-installed PostgreSQL — stop it or remap in `docker-compose/uptrace.yaml`.
+Port 14318 was picked specifically to avoid the standard 4318 used by LGTM / Jaeger / SigNoz, so Uptrace can run alongside them. The only likely conflict is port 5432 with a host-installed PostgreSQL — stop it or remap in `docker-compose/uptrace/docker-compose.yaml`.
 
 ## What you'll see in the UI
 
@@ -84,7 +85,7 @@ Navigation → Metrics. Query with PromQL over any `hermes_*` metric the plugin 
 - `hermes_tool_duration_bucket` — tool execution histogram
 
 **Logs:**
-Navigation → Logs. When `capture_logs: true` is on, every `logger.info(...)` from hermes or the plugin lands here with the active span's `trace_id` and `span_id` attached — click a log record's `trace_id` to jump into the corresponding trace. See [OTel logs](/configuration/logs) for the full story.
+Navigation → Logs. When `logs: {capture: true}` is on, every `logger.info(...)` from hermes or the plugin lands here. A line logged during a turn carries that turn's `trace_id` and `span_id`, `hermes.session_id` and `hermes.log.attribution`; lines the plugin cannot attribute to a turn (between turns, or from another thread while several sessions are active) arrive without trace ids. Click a log record's `trace_id` to jump into the corresponding trace. See [OTel logs](/configuration/logs#where-the-ids-come-from) for the attribution rules.
 
 ## Dashboard
 
@@ -102,16 +103,29 @@ project token inside the DSN, so the backend entry needs one more key:
     # project_id: 1
 ```
 
+Uptrace 2.1 and 2.0 spell that API differently (2.1 has one route per signal,
+`/spans/{project}`, `/logs/{project}`, `/traces/{project}/{id}`, with
+`time_start`/`time_end` and typed attribute keys such as
+`hermes_session_id::str`; 2.0 keeps everything under `/tracing/{project}/…` with
+`time_gte`/`time_lt`). The adapter asks the server once per process which one it
+speaks and remembers the answer; the dashboard's status shows it as `api_dialect`.
+The 2.1 spelling was taken from Uptrace's own UI requests and checked against
+2.1.0-beta.5 (the version `docker-compose/uptrace/docker-compose.yaml` pins); the 2.0 spelling
+is the one recorded against 2.0.2 when the adapter was written.
+
 Metrics go through MQL (`metric=<name>&alias=$m` plus `$m group by model`,
 `sum($m)`, `avg($m)`, `max($m)`, `count($m)`); a counter only supports its
 per-interval sum, so the other aggregates fall back to it. Logs are the span
-store's `log:*` systems: `--level` narrows the systems, `--trace`, `--session`
-and `--logger` become `where` clauses on `_trace_id`, `hermes_session_id` and
-`otel_library_name`, and `--text` uses Uptrace's search. The logger list is the
-`otel_library_name` attribute's values with counts.
+store's `log:*` systems: `--level` narrows the systems, `--trace`, `--session`,
+`--logger` and `--event` become `where` clauses on `_trace_id`,
+`hermes_session_id`, `otel_library_name` and `event_name` (`--events-only` is
+`where event_name exists`), and `--text` uses Uptrace's search. The logger list
+is the `otel_library_name` attribute's values with counts, scoped to the
+agent's service so Uptrace's own log lines stay out of it.
 
 Timestamps on this API are milliseconds and attribute keys are flattened with
-underscores; the adapter maps them back to the documented dotted names.
+underscores; the adapter strips 2.1's type suffixes and maps the keys back to
+the documented dotted names.
 
 ## Rotating the DSN
 
@@ -136,7 +150,8 @@ backends:
   - type: phoenix
     endpoint: http://localhost:6006/v1/traces
 
-capture_logs: true
+logs:
+  capture: true
 ```
 
 Traces fan out to both; metrics and logs go only to Uptrace (Phoenix ingests traces only — the plugin skips it automatically).

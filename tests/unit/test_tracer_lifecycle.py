@@ -11,10 +11,13 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from dataclasses import replace
 
 import pytest
 
 from hermes_otel import hooks
+from hermes_otel.backends import _ResolvedBackend
+from hermes_otel.hooks.attributes import correlation_attributes
 from hermes_otel.plugin_config import HermesOtelConfig
 from hermes_otel.session_state import SessionState
 from hermes_otel.span_tracker import SpanTracker
@@ -60,7 +63,7 @@ class TestShutdownAndReinit:
         assert plugin.is_enabled is False
         assert plugin.spans.active_count() == 0
         assert plugin.sessions.active_count() == 0
-        assert plugin._span_processors == [] and plugin._metric_readers == []
+        assert plugin.pipeline is None
         # Open spans were ended, not dropped.
         assert sorted(s.name for s in exporter.get_finished_spans()) == ["agent", "tool.bash"]
         plugin.shutdown()  # second call is a no-op, never raises
@@ -73,24 +76,35 @@ class TestShutdownAndReinit:
         root = logging.getLogger()
         level_before = root.level
         assert plugin.init() is True
-        first_provider = plugin._tracer_provider
-        first_handler = plugin._live_log_handler
-        assert first_provider is not None and first_handler in root.handlers
+        first_provider = plugin.pipeline.tracer_provider
+        from hermes_otel import log_handler as lh
 
-        assert plugin.init() is True  # reload / reconfigure
+        def ours():
+            return [h for h in root.handlers if getattr(h, lh._HANDLER_MARKER, False)]
+
+        first_logger_provider = plugin.pipeline.logger_provider
+        assert first_provider is not None and first_logger_provider is not None
+        assert len(ours()) == 1  # live-only: the log provider exists for the live sink
+
+        assert plugin.init() is True  # a reload with the same config: a no-op (#484)
+        assert plugin.pipeline.tracer_provider is first_provider
+        assert plugin.pipeline.logger_provider is first_logger_provider
+        assert len(ours()) == 1
+
+        plugin.config = replace(plugin.config, project_name="other")
+        assert plugin.init() is True  # a reconfigure: rebuilt
         assert plugin.is_enabled
-        assert plugin._tracer_provider is not first_provider
-        # The first live-log handler is gone; exactly one of ours is attached.
-        ours = [h for h in root.handlers if type(h).__name__ == "_LiveLogHandler"]
-        assert ours == [plugin._live_log_handler]
+        assert plugin.pipeline.tracer_provider is not first_provider
+        # The first logging handler is gone; exactly one of ours is attached.
+        assert len(ours()) == 1 and plugin.pipeline.logger_provider is not first_logger_provider
         # The tracer in use belongs to the new provider, not the once-only global.
-        assert plugin.tracer is not None
+        assert plugin.pipeline.tracer is not None
         span = plugin.start_span("probe", "probe", session_id="s")
         assert span.is_recording()
         plugin.end_span("probe")
 
         plugin.shutdown()
-        assert not any(type(h).__name__ == "_LiveLogHandler" for h in root.handlers)
+        assert ours() == []
         assert root.level == level_before
 
     def test_atexit_registers_shutdown_once(self, live_only_plugin, monkeypatch):
@@ -111,7 +125,7 @@ class TestShutdownAndReinit:
 class TestPerSessionLeak:
     def test_correlation_helper_is_read_only(self, inmemory_otel_setup):
         _, plugin = inmemory_otel_setup
-        attrs = hooks._correlation_attributes(plugin, "ghost", {})
+        attrs = correlation_attributes(plugin, "ghost", {})
         assert attrs == {}  # no host id, no invented one (#154)
         assert not plugin.sessions.has("ghost")
 
@@ -188,13 +202,78 @@ class TestOrphanSweepContextStack:
 
 
 class TestHeaderPrecedence:
+    """``_ResolvedBackend.target``: the one header-merge and endpoint rule every
+    signal's exporter is built from."""
+
+    GLOBAL = {"X-Both": "global", "X-Global": "g"}
+
     def test_per_backend_header_wins_over_global(self):
-        plugin = HermesOTelPlugin(
-            config=HermesOtelConfig(headers={"X-Both": "global", "X-Global": "g"})
+        rb = _ResolvedBackend(
+            type="otlp",
+            endpoint="http://c:4318/v1/traces",
+            headers={"X-Both": "backend", "Authorization": "Basic x"},
         )
-        merged = plugin._merge_headers({"X-Both": "backend", "Authorization": "Basic x"})
+        merged = rb.target("traces", self.GLOBAL).headers
         assert merged == {"X-Global": "g", "X-Both": "backend", "Authorization": "Basic x"}
-        assert plugin._merge_headers(None) == {"X-Both": "global", "X-Global": "g"}
+        bare = _ResolvedBackend(type="otlp", endpoint="http://c:4318/v1/traces")
+        assert bare.target("traces", self.GLOBAL).headers == self.GLOBAL
+        assert bare.target("traces", None).headers is None  # nothing configured: no header map
+
+    def test_per_signal_headers_replace_the_trace_headers_even_when_empty(self):
+        # GreptimeDB's trace pipeline header must not reach /v1/metrics (#363).
+        rb = _ResolvedBackend(
+            type="greptime",
+            endpoint="http://g:4000/v1/otlp/v1/traces",
+            headers={"X-Greptime-Pipeline-Name": "greptime_trace_v1"},
+            metrics_headers={},
+            logs_headers={"X-Greptime-DB-Name": "otel"},
+        )
+        assert rb.target("metrics", self.GLOBAL).headers == self.GLOBAL
+        assert rb.target("logs", self.GLOBAL).headers == {
+            **self.GLOBAL,
+            "X-Greptime-DB-Name": "otel",
+        }
+        assert rb.target("metrics", None).headers is None
+
+    def test_per_signal_endpoint_else_derived_from_the_traces_url(self):
+        rb = _ResolvedBackend(type="otlp", endpoint="http://c:4318/v1/traces")
+        assert rb.target("traces").endpoint == "http://c:4318/v1/traces"
+        assert rb.target("metrics").endpoint == "http://c:4318/v1/metrics"
+        assert rb.target("logs").endpoint == "http://c:4318/v1/logs"
+        split = _ResolvedBackend(
+            type="victoria",
+            endpoint="http://vt:10428/insert/opentelemetry/v1/traces",
+            metrics_endpoint="http://vm:8428/opentelemetry/v1/metrics",
+            logs_endpoint="http://vl:9428/insert/opentelemetry/v1/logs",
+        )
+        assert split.target("metrics").endpoint == "http://vm:8428/opentelemetry/v1/metrics"
+        assert split.target("logs").endpoint == "http://vl:9428/insert/opentelemetry/v1/logs"
+
+    def test_enabled_signals_and_banner_suffix(self):
+        def rb(**flags):
+            return _ResolvedBackend(type="otlp", endpoint="http://c/v1/traces", **flags)
+
+        assert rb(supports_logs=True).enabled_signals() == ("traces", "metrics", "logs")
+        assert rb(supports_metrics=False).enabled_signals() == ("traces",)
+        assert rb(supports_traces=False, supports_metrics=False).enabled_signals() == ()
+        assert rb().describe_signals() == ""
+        assert rb(supports_logs=True).describe_signals() == ""
+        assert rb(supports_metrics=False).describe_signals() == " (traces only)"
+        assert (
+            rb(supports_metrics=False, supports_logs=True).describe_signals() == " (traces + logs)"
+        )
+        # traces off: name what still exports; "query only" when nothing does (#608)
+        assert rb(supports_traces=False).describe_signals() == " (metrics only)"
+        assert (
+            rb(supports_traces=False, supports_metrics=False, supports_logs=True).describe_signals()
+            == " (logs only)"
+        )
+        assert (
+            rb(supports_traces=False, supports_logs=True).describe_signals() == " (metrics + logs)"
+        )
+        assert (
+            rb(supports_traces=False, supports_metrics=False).describe_signals() == " (query only)"
+        )
 
 
 class TestSharedStateLocks:
@@ -208,7 +287,7 @@ class TestSharedStateLocks:
                 for i in range(300):
                     sid = f"s{n}-{i % 7}"
                     tracker.push_parent(object(), session_id=sid)
-                    sessions.get_or_create(sid).turn_summary.api_call_count += 1
+                    sessions.get_or_create(sid).turn_summary.add_api_call()
                     sessions.next_turn(sid)
                     tracker.register_skill_span(sid, "k", f"skill:{sid}:k")
                     tracker.pop_skill_spans(sid)

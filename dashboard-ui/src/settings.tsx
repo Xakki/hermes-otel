@@ -2,11 +2,11 @@
 // from (env var, config file, default) and a one-line description; the config
 // file raw and as an effective YAML; and the environment variables the plugin
 // honours. Read-only: the file is edited outside the dashboard.
-import { React, useState, useEffect, useCallback, useMemo, fetchJSON, API, Button, Input, Badge, cn } from "./sdk";
+import { React, useState, useEffect, useCallback, useMemo, api, Button, Input, Badge, cn } from "./sdk";
 import { fmtAbsTime, fmtTimeAgo } from "./lib";
-import { MiniLabel, ErrorBanner, Stat } from "./atoms";
-import { IconRefresh, IconCopy, IconCheck, IconExternal } from "./icons";
-import type { SourceStatus } from "./source";
+import { MiniLabel, ErrorBanner, Stat, CopyButton, Segmented } from "./atoms";
+import { IconRefresh, IconExternal } from "./icons";
+import { useSource } from "./source";
 import {
   SettingsReport,
   SettingField,
@@ -26,7 +26,6 @@ import {
   sourceNote,
 } from "./settings-lib";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 type View = "structured" | "raw" | "env";
 const VIEWS: { id: View; label: string }[] = [
   { id: "structured", label: "Structured" },
@@ -39,9 +38,13 @@ function Description({ text }: { text: string }) {
     <span>
       {renderDescription(text).map((tok, i) =>
         tok.t === "code" ? (
-          <code key={i} className="otel-code">{tok.v}</code>
+          <code key={i} className="otel-code">
+            {tok.v}
+          </code>
         ) : tok.t === "link" ? (
-          <a key={i} className="otel-link" href={tok.href} target="_blank" rel="noreferrer">{tok.v}</a>
+          <a key={i} className="otel-link" href={tok.href} target="_blank" rel="noreferrer">
+            {tok.v}
+          </a>
         ) : (
           <span key={i}>{tok.v}</span>
         )
@@ -51,8 +54,7 @@ function Description({ text }: { text: string }) {
 }
 
 function SourceBadge({ source }: { source: SettingField["source"] }) {
-  const title =
-    source === "env" ? "set by a HERMES_OTEL_* environment variable" : source === "file" ? "set in the config file" : "the built-in default";
+  const title = source === "env" ? "set by a HERMES_OTEL_* environment variable" : source === "file" ? "set in the config file" : "the built-in default";
   return (
     <span className={cn("otel-src", `otel-src-${source}`)} title={title}>
       {source}
@@ -63,8 +65,7 @@ function SourceBadge({ source }: { source: SettingField["source"] }) {
 function Value({ f }: { f: SettingField }) {
   const v = f.value;
   if (v == null) return <span className="otel-unset">unset</span>;
-  if (f.kind === "bool")
-    return <span className={cn("otel-pill", v ? "otel-pill-on" : "otel-pill-off")}>{v ? "on" : "off"}</span>;
+  if (f.kind === "bool") return <span className={cn("otel-pill", v ? "otel-pill-on" : "otel-pill-off")}>{v ? "on" : "off"}</span>;
   if (f.kind === "map")
     return (
       <div className="otel-kv">
@@ -134,50 +135,44 @@ function Row({ k, children, title }: { k: string; children: any; title?: string 
   );
 }
 
-const stop = (e: any) => e.stopPropagation();
-
-/** One configured backend. The whole card opens the backend's UI in a new
- *  window when the report could name it (an explicit `ui_url`, or a derivation
- *  it explains in the tooltip); inner links stop the click from bubbling. */
+/** One configured backend. The name opens the backend's UI in a new window
+ *  when the report could name it (an explicit `ui_url`, or a derivation it
+ *  explains in the tooltip); the card itself is not a click target (#286). */
 function BackendCard({ b, q }: { b: BackendSummary; q?: QueryCapability }) {
   const href = b.ui.url;
-  const open = () => {
-    if (href) window.open(href, "_blank", "noopener,noreferrer");
-  };
   const query = queryCapabilityLine(q, b.display_type);
   const metricsOn = b.signals.metrics?.exported;
   return (
-    <div
-      className={cn("otel-card-bg border border-border px-3 py-2.5", href ? "otel-backend-card" : "")}
-      onClick={href ? open : undefined}
-      onKeyDown={href ? (e: any) => (e.key === "Enter" ? open() : undefined) : undefined}
-      role={href ? "link" : undefined}
-      tabIndex={href ? 0 : undefined}
-      title={href ? `${b.ui.note} · opens ${href} in a new window` : b.ui.note}
-    >
+    <div className="otel-card-bg border border-border px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-2">
         {href ? (
-          <a className="otel-backend-name" href={href} target="_blank" rel="noreferrer noopener" onClick={stop}>
+          <a className="otel-backend-name" href={href} target="_blank" rel="noreferrer noopener" title={`${b.ui.note} · opens ${href} in a new window`}>
             {b.name}
             <IconExternal size={12} className="otel-backend-ext" />
           </a>
         ) : (
-          <span className="text-sm font-medium">{b.name}</span>
+          <span className="text-sm font-medium" title={b.ui.note}>
+            {b.name}
+          </span>
         )}
-        {showTypeBadge(b) ? <Badge variant="secondary" className="text-[10px] uppercase">{b.display_type}</Badge> : null}
+        {showTypeBadge(b) ? (
+          <Badge variant="secondary" className="text-[10px] uppercase">
+            {b.display_type}
+          </Badge>
+        ) : null}
         {b.docs_path ? (
           <a
             className="otel-link text-[11px] text-muted-foreground"
             href={DOCS_BASE + b.docs_path}
             target="_blank"
             rel="noreferrer"
-            onClick={stop}
             title={`${b.display_type} backend docs`}
           >
             docs
           </a>
         ) : null}
-        <span className="ml-auto flex flex-wrap gap-1">
+        <span className="ml-auto flex flex-wrap items-center gap-1" title="what the plugin exports to this backend">
+          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">export</span>
           {SIGNALS.map((sig) => {
             const st = b.signals[sig];
             if (!st) return null;
@@ -192,7 +187,7 @@ function BackendCard({ b, q }: { b: BackendSummary; q?: QueryCapability }) {
       </div>
       {query ? (
         <div className="mt-1 text-[11px] text-muted-foreground" title={query.title}>
-          {query.text}
+          <span className="text-[10px] uppercase tracking-wide">query</span> · {query.text}
         </div>
       ) : null}
       <div className="otel-attr-table mt-2 text-xs">
@@ -201,10 +196,10 @@ function BackendCard({ b, q }: { b: BackendSummary; q?: QueryCapability }) {
             <span className="font-mono">{String(v)}</span>
           </Row>
         ))}
-        <Row k="ui" title="the link the card opens; set ui_url on the entry to override">
+        <Row k="ui" title="the link the name opens; set ui_url on the entry to override">
           {href ? (
             <>
-              <a className="otel-link font-mono" href={href} target="_blank" rel="noreferrer noopener" onClick={stop}>
+              <a className="otel-link font-mono" href={href} target="_blank" rel="noreferrer noopener">
                 {href}
               </a>
               <span className="text-muted-foreground"> · {b.ui.source === "file" ? "ui_url" : "derived"}</span>
@@ -249,25 +244,6 @@ function BackendCard({ b, q }: { b: BackendSummary; q?: QueryCapability }) {
   );
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [done, setDone] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setDone(true);
-      setTimeout(() => setDone(false), 1500);
-    } catch {
-      /* clipboard unavailable */
-    }
-  };
-  return (
-    <Button variant="outline" size="sm" onClick={copy} title="copy to clipboard">
-      {done ? <IconCheck size={13} /> : <IconCopy size={13} />}
-      <span className="ml-1">{done ? "copied" : "copy"}</span>
-    </Button>
-  );
-}
-
 function ConfigFileLine({ r }: { r: SettingsReport }) {
   const c = r.config;
   return (
@@ -275,7 +251,9 @@ function ConfigFileLine({ r }: { r: SettingsReport }) {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <MiniLabel>config file</MiniLabel>
         {c.path ? <span className="font-mono break-all">{c.path}</span> : <span className="text-muted-foreground">none found</span>}
-        <span className="otel-pill" title="how the file was chosen: HERMES_OTEL_CONFIG, then $HERMES_HOME/hermes_otel.yaml, then the plugin directory">{pathSourceLabel(c.path_source)}</span>
+        <span className="otel-pill" title="how the file was chosen: HERMES_OTEL_CONFIG, then $HERMES_HOME/hermes_otel.yaml, then the plugin directory">
+          {pathSourceLabel(c.path_source)}
+        </span>
         {c.exists && c.mtime ? (
           <span className="text-muted-foreground" title={fmtAbsTime(c.mtime * 1e9)}>
             edited {fmtTimeAgo(c.mtime * 1e9)}
@@ -287,7 +265,10 @@ function ConfigFileLine({ r }: { r: SettingsReport }) {
       {!c.path ? (
         <div className="mt-1 text-muted-foreground">
           Create <span className="font-mono">{c.durable_path}</span> to change settings; see the{" "}
-          <a className="otel-link" href={`${DOCS_BASE}/configuration/overview`} target="_blank" rel="noreferrer">configuration guide</a>.
+          <a className="otel-link" href={`${DOCS_BASE}/configuration/overview`} target="_blank" rel="noreferrer">
+            configuration guide
+          </a>
+          .
         </div>
       ) : null}
       {c.unknown_keys.length ? (
@@ -309,35 +290,47 @@ function ConfigFileLine({ r }: { r: SettingsReport }) {
           ))}
         </div>
       ) : null}
+      {c.deprecated_keys && c.deprecated_keys.length ? (
+        <div className="mt-1 text-muted-foreground">
+          <span className="otel-warn">deprecated spelling:</span>{" "}
+          {c.deprecated_keys.map((u, i) => (
+            <span key={u.key}>
+              {i ? ", " : ""}
+              <span className="font-mono">{u.key}</span>
+            </span>
+          ))}{" "}
+          (the <span className="font-mono">logs:</span> block is the preferred form; see the{" "}
+          <a className="otel-link" href={`${DOCS_BASE}/configuration/logs#configuration`} target="_blank" rel="noreferrer">
+            logs configuration
+          </a>
+          )
+        </div>
+      ) : null}
     </div>
   );
 }
 
 export function SettingsPage() {
+  const { status } = useSource();
   const [report, setReport] = useState<SettingsReport | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState<View>("structured");
   const [reveal, setReveal] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [query, setQuery] = useState("");
   const [changedOnly, setChangedOnly] = useState(false);
   const [rawMode, setRawMode] = useState<"file" | "effective">("file");
   const [showUnset, setShowUnset] = useState(false);
-  // What the dashboard can query from each backend (adapter present, metrics,
-  // logs) comes from /status, the same view the source selector uses.
-  const [status, setStatus] = useState<SourceStatus | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    fetchJSON(`${API}/status`)
-      .then((st: SourceStatus) => setStatus(st))
-      .catch(() => setStatus(null));
     try {
-      const r = await fetchJSON(`${API}/settings?reveal=${reveal ? "true" : "false"}`);
+      const r = await api("/settings", { reveal: reveal ? "true" : "false" });
       setReport(r);
       setError(null);
-    } catch (e: any) {
-      setError(String(e?.message || e));
+    } catch (e: unknown) {
+      setError(e);
     } finally {
       setLoading(false);
     }
@@ -357,11 +350,16 @@ export function SettingsPage() {
     return out;
   }, [fields]);
   const cap = report?.capture_summary;
+  // What the dashboard can query from each backend (adapter present, metrics,
+  // logs) comes from /status, the same view the source selector uses.
   const queryCaps = useMemo(() => {
     const out: Record<string, QueryCapability> = {};
     for (const a of status?.available || []) out[a.name] = { supported: a.supported, metrics: a.metrics, logs: a.logs };
     return out;
   }, [status]);
+  const q = query.trim().toLowerCase();
+  const rawText = rawMode === "file" ? report?.config.raw || "" : report?.effective_yaml || "";
+  const rawMatches = q ? rawText.split("\n").filter((l) => l.toLowerCase().includes(q)).length : 0;
 
   return (
     <div className="space-y-3">
@@ -369,29 +367,50 @@ export function SettingsPage() {
         <span className="text-base font-semibold tracking-tight">Settings</span>
         {report ? (
           <span className="text-xs text-muted-foreground">
-            hermes-otel {report.process.plugin_version || "?"} · resolved {fmtTimeAgo(report.resolved_at * 1e9)}
+            hermes-otel {report.process.plugin_version || "?"}
+            {report.config.fingerprint ? (
+              <>
+                {" · config "}
+                <span
+                  className="font-mono"
+                  title="Fingerprint of the resolved configuration (secrets hashed). The plugin logs the same value when it builds its pipeline; a match means this is the configuration the gateway runs."
+                >
+                  {report.config.fingerprint}
+                </span>
+              </>
+            ) : null}
+            {" · resolved "}
+            {fmtTimeAgo(report.resolved_at * 1e9)}
           </span>
         ) : null}
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1 border border-border p-0.5">
-            {VIEWS.map((v) => (
-              <button
-                key={v.id}
-                type="button"
-                onClick={() => setView(v.id)}
-                className={cn(
-                  "otel-toggle px-3 py-1 text-xs font-medium transition-colors",
-                  view === v.id ? "otel-toggle-active text-foreground" : "text-muted-foreground hover:text-foreground"
-                )}
+          <Segmented value={view} onChange={setView} label="settings view" options={VIEWS} />
+          {reveal ? (
+            <Button variant="outline" size="sm" onClick={() => setReveal(false)} title="mask credential values again">
+              hide secrets
+            </Button>
+          ) : confirming ? (
+            <span className="inline-flex items-center gap-2 text-[11px] text-muted-foreground">
+              credential values will be shown on this page
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setConfirming(false);
+                  setReveal(true);
+                }}
               >
-                {v.label}
-              </button>
-            ))}
-          </div>
-          <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground" title="credential values are masked unless this is on">
-            <input type="checkbox" checked={reveal} onChange={(e: any) => setReveal(e.target.checked)} />
-            show secrets
-          </label>
+                show them
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>
+                keep masked
+              </Button>
+            </span>
+          ) : (
+            <Button variant="outline" size="sm" onClick={() => setConfirming(true)} title="credential values are masked unless you ask">
+              show secrets…
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={load} disabled={loading} title="re-read the file and environment">
             <IconRefresh size={13} className={loading ? "otel-spin" : ""} />
             <span className="ml-1">reload</span>
@@ -399,7 +418,7 @@ export function SettingsPage() {
         </div>
       </div>
 
-      {error ? <ErrorBanner error={error} /> : null}
+      {error ? <ErrorBanner error={error} prefix="Settings" /> : null}
       {!report && !error ? <div className="text-sm text-muted-foreground">Loading settings…</div> : null}
 
       {report ? (
@@ -411,23 +430,19 @@ export function SettingsPage() {
             <Stat label="From file" value={report.counts.file} sub={report.config.exists ? "in the config file" : "no file"} />
             <Stat label="From env" value={report.counts.env} sub="HERMES_OTEL_* variables" />
             <Stat label="Backends" value={backends.length} sub={backends.map((b) => b.name).join(", ") || "live store only"} />
-            <Stat
-              label="Content"
-              value={cap ? cap.mode : "?"}
-              sub={cap ? cap.detail : ""}
-              accent={cap?.mode === "off" ? undefined : cap?.mode === "full" ? "cost" : undefined}
-            />
+            <Stat label="Content" value={cap ? cap.mode : "?"} sub={cap ? cap.detail : ""} accent={cap?.mode === "full" ? "cost" : undefined} />
           </div>
 
-          {view === "structured" ? (
-            <>
-              <div className="flex flex-wrap items-center gap-3">
-                <Input
-                  value={query}
-                  onChange={(e: any) => setQuery(e.target.value)}
-                  placeholder="filter by name, value, description…"
-                  className="otel-w-56 h-8 text-xs"
-                />
+          <div className="flex flex-wrap items-center gap-3">
+            <Input
+              value={query}
+              onChange={(e: any) => setQuery(e.target.value)}
+              placeholder={view === "structured" ? "filter by name, value, description…" : view === "raw" ? "find in the YAML…" : "filter variables…"}
+              className="otel-w-56 h-8 text-xs"
+              aria-label="filter"
+            />
+            {view === "structured" ? (
+              <>
                 <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
                   <input type="checkbox" checked={changedOnly} onChange={(e: any) => setChangedOnly(e.target.checked)} />
                   changed from default only
@@ -436,8 +451,16 @@ export function SettingsPage() {
                   {shown.length} of {fields.length} · precedence: <span className="otel-src otel-src-env">env</span> over{" "}
                   <span className="otel-src otel-src-file">file</span> over <span className="otel-src otel-src-default">default</span>
                 </span>
-              </div>
+              </>
+            ) : view === "raw" && q ? (
+              <span className="text-[11px] text-muted-foreground">
+                {rawMatches} line{rawMatches === 1 ? "" : "s"} match
+              </span>
+            ) : null}
+          </div>
 
+          {view === "structured" ? (
+            <>
               {groups.length === 0 ? (
                 <div className="border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">No setting matches.</div>
               ) : null}
@@ -461,7 +484,8 @@ export function SettingsPage() {
                         </div>
                       ) : (
                         <div className="text-xs text-muted-foreground">
-                          No <span className="font-mono">backends:</span> entry. Telemetry stays in the live store on this machine; single-backend environment variables, if any, are listed under Environment.
+                          No <span className="font-mono">backends:</span> entry. Telemetry stays in the live store on this machine; single-backend environment
+                          variables, if any, are listed under Environment.
                         </div>
                       )}
                     </div>
@@ -480,21 +504,15 @@ export function SettingsPage() {
           {view === "raw" ? (
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-1 border border-border p-0.5">
-                  {(["file", "effective"] as const).map((id) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => setRawMode(id)}
-                      className={cn(
-                        "otel-toggle px-3 py-1 text-xs font-medium transition-colors",
-                        rawMode === id ? "otel-toggle-active text-foreground" : "text-muted-foreground hover:text-foreground"
-                      )}
-                    >
-                      {id === "file" ? "File as written" : "Effective config"}
-                    </button>
-                  ))}
-                </div>
+                <Segmented
+                  value={rawMode}
+                  onChange={setRawMode}
+                  label="raw view"
+                  options={[
+                    { id: "file", label: "File as written" },
+                    { id: "effective", label: "Effective config" },
+                  ]}
+                />
                 <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" title={rawMode === "file" ? report.config.path || "" : ""}>
                   {rawMode === "file"
                     ? report.config.exists
@@ -503,12 +521,12 @@ export function SettingsPage() {
                     : "every setting after env, file and defaults are applied; each key notes its source"}
                 </span>
                 <span className="shrink-0">
-                  <CopyButton text={rawMode === "file" ? report.config.raw || "" : report.effective_yaml} />
+                  <CopyButton text={rawText} label="copy" />
                 </span>
               </div>
               {rawMode === "file" ? (
                 report.config.raw != null ? (
-                  <pre className="otel-pre otel-raw">{report.config.raw}</pre>
+                  <pre className="otel-pre otel-raw">{q ? highlightLines(report.config.raw, q) : report.config.raw}</pre>
                 ) : (
                   <div className="border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
                     <div className="mb-1 text-base font-medium text-foreground">No config file</div>
@@ -522,29 +540,35 @@ export function SettingsPage() {
                   </div>
                 )
               ) : (
-                <pre className="otel-pre otel-raw">{report.effective_yaml}</pre>
+                <pre className="otel-pre otel-raw">{q ? highlightLines(report.effective_yaml, q) : report.effective_yaml}</pre>
               )}
             </div>
           ) : null}
 
           {view === "env" ? (
             <div className="space-y-3">
+              {(report.env_notices ?? []).map((n) => (
+                <div key={n} className="border border-dashed border-border px-3 py-2 text-[11px] text-muted-foreground" role="status">
+                  {n}
+                </div>
+              ))}
               <div className="flex flex-wrap items-center gap-3">
                 <span className="text-[11px] text-muted-foreground">
-                  {envCounts(report.env).set} set of {envCounts(report.env).known} the plugin reads, as seen by the dashboard process
+                  {envCounts(report.env).set} set of {envCounts(report.env).known} the plugin reads, as seen by the process that answered (pid{" "}
+                  {report.process.pid}); the gateway may differ
                 </span>
                 <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
                   <input type="checkbox" checked={showUnset} onChange={(e: any) => setShowUnset(e.target.checked)} />
                   show unset variables
                 </label>
               </div>
-              {groupEnv(report.env, showUnset).length === 0 ? (
+              {groupEnv(report.env, showUnset, q).length === 0 ? (
                 <div className="border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-                  <div className="mb-1 text-base font-medium text-foreground">No plugin environment variables set</div>
-                  Every setting comes from the file or its default. Tick "show unset variables" to see every variable the plugin would read.
+                  <div className="mb-1 text-base font-medium text-foreground">{q ? "No variable matches" : "No plugin environment variables set"}</div>
+                  {q ? "" : 'Every setting comes from the file or its default. Tick "show unset variables" to see every variable the plugin would read.'}
                 </div>
               ) : null}
-              {groupEnv(report.env, showUnset).map((g) => (
+              {groupEnv(report.env, showUnset, q).map((g) => (
                 <div key={g.group} className="space-y-1">
                   <MiniLabel>{g.label}</MiniLabel>
                   <div className="otel-settings-list">
@@ -578,4 +602,15 @@ export function SettingsPage() {
       ) : null}
     </div>
   );
+}
+
+/** The YAML with matching lines marked (a find box for the Raw view, #286). */
+function highlightLines(text: string, q: string): any {
+  const needle = q.toLowerCase();
+  return text.split("\n").map((line, i) => (
+    <React.Fragment key={i}>
+      {line.toLowerCase().includes(needle) ? <mark className="otel-mark">{line}</mark> : line}
+      {"\n"}
+    </React.Fragment>
+  ));
 }

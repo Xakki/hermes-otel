@@ -11,7 +11,9 @@ from typing import Any, Dict, List
 import pytest
 
 from hermes_otel.dashboard.backends import signoz as sz
-from hermes_otel.dashboard.backends.base import LogFilter
+from hermes_otel.dashboard.backends.base import BackendError, LogFilter
+from hermes_otel.dashboard.backends.timeconv import ns_from_any
+from hermes_otel.severity import otel_severity
 
 CFG = {
     "type": "signoz",
@@ -145,7 +147,7 @@ class TestCapabilities:
 
     def test_no_api_key_fails_closed(self):
         a = sz.SigNozAdapter({"type": "signoz", "endpoint": "http://localhost:4318/v1/traces"})
-        with pytest.raises(sz.HTTPException):
+        with pytest.raises(BackendError, match="signoz backend entry in hermes_otel.yaml"):
             a.metric_names(0, 1)
 
 
@@ -159,7 +161,9 @@ class TestMetrics:
             "hermes.tool.duration.sum",
         ]
         url, headers = fake_http["get"][0]
-        assert headers == {"SIGNOZ-API-KEY": "k"}
+        # A personal access token is read from SIGNOZ-API-KEY, a login JWT only as
+        # a Bearer; sending both lets either kind of key work (verified on v0.119).
+        assert headers == {"SIGNOZ-API-KEY": "k", "Authorization": "Bearer k"}
         assert "dataSource=metrics" in url
 
     def test_counter_query_asks_for_increase_and_buckets_on_the_shared_grid(
@@ -178,19 +182,119 @@ class TestMetrics:
             "type": "Sum",
             "isColumn": True,
         }
+        # the latest cumulative value per process and step; the increases are
+        # taken by the adapter (SigNoz's own ``increase`` over-counts one-shot
+        # turns that share a step, #297)
         assert (q["timeAggregation"], q["spaceAggregation"], q["stepInterval"]) == (
-            "increase",
+            "latest",
             "sum",
             3600,
         )
-        assert q["groupBy"] == [{"key": "model", "type": "tag", "dataType": "string"}]
+        assert q["groupBy"] == [
+            {"key": "model", "type": "tag", "dataType": "string"},
+            {"key": "service.instance.id", "type": "tag", "dataType": "string"},
+        ]
         assert (body["start"], body["end"], body["step"]) == (start * 1000, end * 1000, 3600)
 
         assert out["name"] == "hermes.token.usage" and out["kind"] == "Sum" and out["agg"] == "sum"
         assert out["bucketS"] == 3600 and len(out["buckets"]) == 4
+        # cumulative per process: a series that starts in the window counts its
+        # first value; a drop (another process, or a restart) counts in full
         assert out["series"]["nvidia/nemotron-3-nano-omni"] == [None, 53739.0, None, None]
         assert out["series"]["nvidia/nemotron-3-super"] == [None, 79423.0, 100.0, None]
-        assert out["points"] == 3
+        assert out["points"] == 3 and out["cumulative"] is True
+
+    def test_points_floored_to_the_step_grid_before_the_window_start_still_count(
+        self, adapter, monkeypatch
+    ):
+        # SigNoz stamps a step's value at the step's start on an epoch-aligned
+        # grid: a window opening at :11 gets its first sample back at :00.
+        start_s, end_s = 1_791_587_951, 1_791_587_997  # 46 s, 11 s past a minute
+        floored_ms = (start_s - start_s % 60) * 1000
+        seen = {}
+
+        def fake_query_range(body):
+            seen["body"] = body
+            return {
+                "data": {
+                    "result": [
+                        {
+                            "series": [
+                                {
+                                    "labels": {"service.instance.id": "p1"},
+                                    "values": [{"timestamp": floored_ms, "value": "4"}],
+                                },
+                                {
+                                    "labels": {"service.instance.id": "p2"},
+                                    "values": [{"timestamp": floored_ms, "value": "2"}],
+                                },
+                            ]
+                        }
+                    ]
+                }
+            }
+
+        monkeypatch.setattr(adapter, "_metric_kind", lambda name: "Sum")
+        monkeypatch.setattr(adapter, "_query_range", fake_query_range)
+        out = adapter.metrics_query("hermes.model.usage", start_s, end_s, 60)
+        assert seen["body"]["start"] == floored_ms  # asked from the grid boundary
+        assert sum(v or 0 for v in out["series"]["_"]) == 6
+        assert out["buckets"][0] == floored_ms * 1_000_000
+
+    def test_two_processes_in_one_step_count_their_own_first_values(self, adapter, monkeypatch):
+        t = 1790294400000
+        data = {
+            "data": {
+                "result": [
+                    {
+                        "series": [
+                            {
+                                "labels": {"service.instance.id": "a"},
+                                "values": [
+                                    {"timestamp": t, "value": "2"},
+                                    {"timestamp": t + 60000, "value": "2"},
+                                ],
+                            },
+                            {
+                                "labels": {"service.instance.id": "b"},
+                                "values": [{"timestamp": t, "value": "4"}],
+                            },
+                        ]
+                    }
+                ]
+            }
+        }
+        monkeypatch.setattr(adapter, "_metric_kind", lambda name: "Sum")
+        monkeypatch.setattr(adapter, "_query_range", lambda body: data)
+        out = adapter.metrics_query(
+            "hermes.model.usage", 1790294400 - 60, 1790294400 + 180, 300, agg="sum"
+        )
+        assert sum(v for v in out["series"]["_"] if v) == 6.0
+
+    def test_list_rows_carry_the_entry_timestamp_and_numeric_tokens(self):
+        rows = sz._extract_v4_list_rows(
+            {
+                "data": {
+                    "result": [
+                        {
+                            "list": [
+                                {
+                                    "timestamp": "2026-10-07T01:01:10.739546Z",
+                                    "data": {"traceID": "t", "gen_ai.usage.total_tokens": 29070},
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+        assert (
+            rows[0]["timestamp"] == "2026-10-07T01:01:10.739546Z"
+            and rows[0]["gen_ai.usage.total_tokens"] == 29070
+        )
+        assert abs(ns_from_any(rows[0]["timestamp"]) - 1791334870739546000) < 1_000  # float µs
+        cols = {c["key"]: c["dataType"] for c in sz._SIGNOZ_SELECT_COLUMNS}
+        assert cols["gen_ai.usage.total_tokens"] == "float64" and cols["llm.model_name"] == "string"
 
     def test_gauge_and_other_aggregates_map_to_builder_verbs(self, adapter, fake_http):
         adapter.metrics_query("hermes.tool.duration.max", 0, 7200, 60, agg="avg")
@@ -205,6 +309,14 @@ class TestMetrics:
     def test_ungrouped_series_use_the_default_label(self, adapter, fake_http):
         out = adapter.metrics_query("hermes.token.usage", 1790294400 - 60, 1790298000 + 60, 3600)
         assert set(out["series"]) == {"_"}
+
+
+def _core(row):
+    """The pre-#268 row keys; the richer fields (span_id, severity_number, event_name, attributes) are asserted separately."""
+    return {
+        k: row.get(k)
+        for k in ("level", "logger", "body", "time_unix_nano", "trace_id", "session_id")
+    }
 
 
 class TestLogs:
@@ -230,7 +342,9 @@ class TestLogs:
         assert items["severity_number"][:2] == (">=", 13)  # WARNING → OTel WARN
         assert items["body"][:2] == ("contains", "finalized")
 
-        assert logs == [
+        assert logs[0]["attributes"]["hermes.session_id"] == "20260924_203458_4a4dea"
+        assert logs[0]["severity_number"] == 9 and logs[0]["event_name"] is None
+        assert [_core(r) for r in logs] == [
             {
                 "level": "INFO",
                 "logger": "hermes_otel",
@@ -248,8 +362,22 @@ class TestLogs:
             == []
         )
 
+    def test_event_filters_use_the_event_name_tag(self, adapter, fake_http):
+        # SigNoz has no column for the OTLP event_name field; the plugin also
+        # sets ``event.name`` as an attribute, which the query builder can filter.
+        adapter.logs_search(LogFilter(event_name="hermes.tool.call"), 0, 60, 10)
+        items = fake_http["post"][-1][1]["compositeQuery"]["builderQueries"]["A"]["filters"][
+            "items"
+        ]
+        assert items == [{"key": sz._tag("event.name"), "op": "=", "value": "hermes.tool.call"}]
+        adapter.logs_search(LogFilter(events_only=True), 0, 60, 10)
+        items = fake_http["post"][-1][1]["compositeQuery"]["builderQueries"]["A"]["filters"][
+            "items"
+        ]
+        assert items == [{"key": sz._tag("event.name"), "op": "exists"}]
+
     def test_severity_floor_per_python_level(self):
-        assert [sz._otel_severity_for(l) for l in (10, 20, 25, 30, 40, 50, 0)] == [
+        assert [otel_severity(l) for l in (10, 20, 25, 30, 40, 50, 0)] == [
             5,
             9,
             9,
@@ -271,7 +399,8 @@ class TestLogs:
 
     def test_missing_fields_do_not_break_a_record(self):
         rec = sz._log_record({"data": {"body": "x"}})
-        assert rec == {
+        assert rec["attributes"] == {} and rec["span_id"] is None and rec["severity_number"] == 9
+        assert _core(rec) == {
             "level": "INFO",
             "logger": "",
             "body": "x",
@@ -279,3 +408,17 @@ class TestLogs:
             "trace_id": None,
             "session_id": None,
         }
+
+
+class TestCumulativeFlag:
+    def test_only_the_counter_fold_marks_a_series_cumulative(self, adapter, fake_http):
+        # ``cumulative`` tells the UI the values are per-bucket increases. That
+        # is true only when the adapter folded the counter itself (sum / count /
+        # last); ``avg`` of a Sum is SigNoz's own aggregate of the raw cumulative
+        # values. A second assignment used to overwrite the flag with
+        # ``kind == "Sum"`` (#413).
+        start, end = 1790294400 - 3600, 1790298000 + 3600
+        folded = adapter.metrics_query("hermes.token.usage", start, end, 3600, agg="sum")
+        raw = adapter.metrics_query("hermes.token.usage", start, end, 3600, agg="avg")
+        assert folded["cumulative"] is True
+        assert raw["cumulative"] is False and raw["kind"] == "Sum"

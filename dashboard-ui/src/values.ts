@@ -3,12 +3,8 @@
 // of tool calls, a JSON object, prose, a command, a list, a number...) and
 // the per-key display rules the trace detail applies.
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 export type MessagePart =
-  | { type: "text"; text: string }
-  | { type: "tool_call"; id: string | null; name: string; args: any }
-  | { type: "other"; label: string; value: any };
+  { type: "text"; text: string } | { type: "tool_call"; id: string | null; name: string; args: any } | { type: "other"; label: string; value: any };
 
 export type Message = {
   role: string; // system | user | assistant | tool | developer | ...
@@ -20,21 +16,7 @@ export type Message = {
 export type ToolCall = { id: string | null; name: string; args: any };
 
 export type ValueKind =
-  | "messages"
-  | "tool_calls"
-  | "json"
-  | "markdown"
-  | "text"
-  | "code"
-  | "list"
-  | "command"
-  | "path"
-  | "url"
-  | "duration"
-  | "count"
-  | "bool"
-  | "id"
-  | "empty";
+  "messages" | "tool_calls" | "json" | "markdown" | "text" | "code" | "list" | "command" | "path" | "url" | "duration" | "count" | "bool" | "id" | "empty";
 
 export type Classified = { kind: ValueKind; value: any; text: string };
 
@@ -57,7 +39,13 @@ export function parsePyRepr(raw: any): any {
   if (!((t.startsWith("[") && t.endsWith("]")) || (t.startsWith("{") && t.endsWith("}")))) return raw;
   if (!t.includes("'")) return raw;
   try {
-    return JSON.parse(t.replace(/'/g, '"').replace(/\bTrue\b/g, "true").replace(/\bFalse\b/g, "false").replace(/\bNone\b/g, "null"));
+    return JSON.parse(
+      t
+        .replace(/'/g, '"')
+        .replace(/\bTrue\b/g, "true")
+        .replace(/\bFalse\b/g, "false")
+        .replace(/\bNone\b/g, "null")
+    );
   } catch {
     return raw;
   }
@@ -89,6 +77,11 @@ function partsOfContent(c: any): MessagePart[] {
     for (const p of c) {
       if (typeof p === "string") out.push({ type: "text", text: p });
       else if (p && typeof p === "object" && typeof p.text === "string") out.push({ type: "text", text: p.text });
+      // OTel GenAI parts schema: {type: "text" | "reasoning", content}, {type: "tool_call_response", response}
+      else if (p && typeof p === "object" && (p.type === "text" || p.type === "reasoning") && typeof p.content === "string")
+        out.push({ type: "text", text: p.content });
+      else if (p && typeof p === "object" && p.type === "tool_call_response")
+        out.push({ type: "text", text: typeof p.response === "string" ? p.response : JSON.stringify(p.response) });
       else if (p && typeof p === "object" && (p.type === "tool_use" || p.type === "tool_call")) {
         const tc = toolCallOf(p);
         if (tc) out.push({ type: "tool_call", ...tc });
@@ -100,9 +93,9 @@ function partsOfContent(c: any): MessagePart[] {
 }
 
 /**
- * Chat messages (OpenAI-style, OpenInference `message.*`, or the Hermes
- * flattened form) → a list the view renders as a conversation. `null` when
- * the value is not a message list.
+ * Chat messages (OpenAI-style, OpenInference `message.*`, the OTel GenAI
+ * `parts` schema, or the Hermes flattened form) → a list the view renders as
+ * a conversation. `null` when the value is not a message list.
  */
 export function parseChat(raw: any): Message[] | null {
   const v = parseJsonish(raw);
@@ -113,7 +106,8 @@ export function parseChat(raw: any): Message[] | null {
     if (!m || typeof m !== "object") return null;
     const role = m.role ?? m["message.role"];
     if (typeof role !== "string") return null;
-    const parts = partsOfContent(m.content ?? m["message.content"]);
+    const parts = partsOfContent(m.content ?? m["message.content"] ?? m.parts);
+    const response = Array.isArray(m.parts) ? m.parts.find((p: any) => p && p.type === "tool_call_response") : null;
     const tcs = m.tool_calls ?? m["message.tool_calls"];
     if (Array.isArray(tcs)) {
       for (const tc of tcs) {
@@ -124,7 +118,7 @@ export function parseChat(raw: any): Message[] | null {
     out.push({
       role,
       parts,
-      toolCallId: m.tool_call_id != null ? String(m.tool_call_id) : null,
+      toolCallId: m.tool_call_id != null ? String(m.tool_call_id) : response && response.id != null ? String(response.id) : null,
       name: typeof m.name === "string" ? m.name : null,
     });
   }
@@ -175,7 +169,7 @@ const PROSE_KEYS = new Set([
 const LIST_KEYS: Record<string, string> = {
   "hermes.turn.tools": ",",
   "hermes.turn.tool_outcomes": ",",
-  "hermes.turn.tool_targets": ",",
+  "hermes.turn.tool_targets": "|",
   "hermes.turn.skills": ",",
   "hermes.turn.tool_commands": "|",
   "hermes.approval.pattern_keys": ",",
@@ -193,6 +187,14 @@ export function splitList(key: string, value: any): string[] | null {
     .split(sep)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+/** A JSON list of OTel GenAI text parts (`gen_ai.system_instructions`) → its text, else null. */
+export function textParts(raw: any): string | null {
+  const v = parseJsonish(raw);
+  if (!Array.isArray(v) || !v.length) return null;
+  if (!v.every((p) => p && typeof p === "object" && p.type === "text" && typeof p.content === "string")) return null;
+  return v.map((p) => p.content).join("\n\n");
 }
 
 /** What an attribute value is, given its key; drives the per-key rendering. */
@@ -216,6 +218,8 @@ export function classify(key: string, raw: any): Classified {
     if (/duration_s$/.test(k)) return { kind: "duration", value: num * 1000, text };
     return { kind: "count", value: num, text };
   }
+  const instructions = textParts(raw);
+  if (instructions != null) return { kind: "markdown", value: instructions, text };
   const chat = parseChat(raw);
   if (chat) return { kind: "messages", value: chat, text };
   const calls = parseToolCalls(raw);
@@ -250,29 +254,28 @@ export function splitToolResult(raw: any): { output: string | null; rest: Record
     rest[k] = val;
   }
   const err = typeof v.error === "string" ? v.error : v.success === false ? "failed" : null;
-  return { output: typeof out === "string" ? out : out == null ? null : JSON.stringify(out, null, 2), rest: Object.keys(rest).length ? rest : null, error: err };
+  return {
+    output: typeof out === "string" ? out : out == null ? null : JSON.stringify(out, null, 2),
+    rest: Object.keys(rest).length ? rest : null,
+    error: err,
+  };
 }
 
-/** The turn's tool calls: `hermes.turn.tools` holds the distinct tool names while
- *  the commands, outcomes and targets are per call, so the rows follow the longest
- *  list and a single tool name repeats. */
-export function turnTools(a: Record<string, any>): { tool: string | null; outcome: string | null; command: string | null; target: string | null }[] {
-  const tools = splitList("hermes.turn.tools", a["hermes.turn.tools"]) || [];
-  const outcomes = splitList("hermes.turn.tool_outcomes", a["hermes.turn.tool_outcomes"]) || [];
-  const commands = splitList("hermes.turn.tool_commands", a["hermes.turn.tool_commands"]) || [];
-  const targets = splitList("hermes.turn.tool_targets", a["hermes.turn.tool_targets"]) || [];
-  const count = Number(a["hermes.turn.tool_count"]) || 0;
-  const rows = Math.max(tools.length, outcomes.length, commands.length, targets.length, count);
-  const out = [];
-  for (let i = 0; i < rows; i++) {
-    out.push({
-      tool: tools[i] ?? (tools.length === 1 ? tools[0] : null),
-      outcome: outcomes[i] ?? (outcomes.length === 1 ? outcomes[0] : null),
-      command: commands[i] ?? null,
-      target: targets[i] ?? null,
-    });
-  }
-  return out;
+/** The turn summary's tool lists (#612). The plugin keeps each as its own set
+ *  (hooks/attributes.py, session_state.TurnSummary): `tools` and `outcomes` are
+ *  the sorted distinct names and outcomes; `commands` and `targets` are the
+ *  distinct commands and paths/URLs in first-use order. Nothing ties the i-th
+ *  entry of one list to the i-th of another, so they are returned apart and
+ *  never zipped into per-call rows. */
+export type TurnTools = { tools: string[]; outcomes: string[]; commands: string[]; targets: string[] };
+
+export function turnTools(a: Record<string, any>): TurnTools {
+  return {
+    tools: splitList("hermes.turn.tools", a["hermes.turn.tools"]) || [],
+    outcomes: splitList("hermes.turn.tool_outcomes", a["hermes.turn.tool_outcomes"]) || [],
+    commands: splitList("hermes.turn.tool_commands", a["hermes.turn.tool_commands"]) || [],
+    targets: splitList("hermes.turn.tool_targets", a["hermes.turn.tool_targets"]) || [],
+  };
 }
 
 export type ViewMode = "structured" | "raw";

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-otel"
-version = "1.18.1"
+version = "1.33.1"
 description = "OpenTelemetry plugin for Hermes Agent — auto-export LLM traces to Phoenix, Langfuse, LangSmith, SigNoz, Jaeger, Tempo, and W&B Weave."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -45,11 +45,15 @@ classifiers = [
 ]
 dependencies = [
     # Upper bounds per Hermes's plugin dependency policy — `hermes plugins
-    # doctor` warns without them. No lower bound: the plugin uses only
-    # long-stable OTel 1.x APIs.
-    "opentelemetry-api<2",
-    "opentelemetry-sdk<2",
-    "opentelemetry-exporter-otlp-proto-http<2",
+    # doctor` warns without them. The floor is measured, not guessed: the
+    # full suite was run against each SDK minor and 1.35.0 is the oldest that
+    # passes (1.34 still has the abstract ``LogRecordProcessor.emit`` that
+    # ``on_emit`` replaced, which breaks the logs pipeline). The
+    # ``test-otel-floor`` CI job keeps it true (#257).
+    "opentelemetry-api>=1.35,<2",
+    "opentelemetry-sdk>=1.35,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.35,<2",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.35,<2",
     # Reads hermes_otel.yaml. Hermes's own runtime ships ruamel.yaml, not
     # PyYAML, so the plugin must declare it (#251).
     "PyYAML>=6,<7",
@@ -62,9 +66,6 @@ Issues = "https://github.com/briancaffey/hermes-otel/issues"
 Changelog = "https://github.com/briancaffey/hermes-otel/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-langsmith = [
-    "langsmith",
-]
 yaml = [
     "pyyaml",
 ]
@@ -94,12 +95,13 @@ e2e = [
     "openai",
 ]
 
-[project.entry-points."hermes.plugin"]
+[project.entry-points."hermes_agent.plugins"]
 hermes_otel = "hermes_otel:register"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests"]
+norecursedirs = [".claude", ".venv", "node_modules", "website", "dist"]
 markers = [
     "unit: fast tests with no external dependencies",
     "integration: tests using InMemorySpanExporter",
@@ -107,8 +109,10 @@ markers = [
     "phoenix: requires Phoenix container",
     "langfuse: requires Langfuse containers",
     "smoke: full-stack tests requiring hermes-agent + observability backend running",
+    "grpc: loads grpcio's native library; run after every other test, since a fork() after that can SIGSEGV on macOS (#469)",
+    "e2e_ci: credential-free end-to-end tier: the real hermes binary against a scripted provider and an in-process OTLP receiver (make ci-e2e)",
 ]
-addopts = "-m 'not e2e and not smoke' -v"
+addopts = "-m 'not e2e and not smoke and not e2e_ci' -v"
 
 [tool.coverage.run]
 source = ["hermes_otel"]
@@ -141,6 +145,7 @@ extend-exclude = '''
     marketing
   | renders
   | hermes_otel\.egg-info
+  | \.claude/worktrees
 )/
 '''
 
@@ -149,6 +154,7 @@ line-length = 100
 target-version = "py39"
 extend-exclude = [
     ".venv",
+    ".claude/worktrees",
     "marketing",
     "renders",
     "hermes_otel.egg-info",
@@ -170,9 +176,11 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests legitimately use `pytest.importorskip(...)` before real imports (E402)
-# and commonly assign results solely for assertion setup (F841).
-"tests/**/*.py" = ["F401", "F811", "E402", "F841"]
+# Tests commonly assign results solely for assertion setup (F841). The live
+# tiers use `pytest.importorskip(...)` before real imports (E402).
+"tests/**/*.py" = ["F841"]
+"tests/smoke/*.py" = ["E402"]
+"tests/e2e/*.py" = ["E402"]
 "__init__.py" = ["F401"]
 
 [tool.setuptools]
@@ -185,9 +193,11 @@ packages = ["hermes_otel", "hermes_otel.hooks"]
 hermes_otel = [
     "plugin.yaml",
     "LICENSE",
+    "after-install.md",
+    "requirements.txt",
     "skills/**/*",
     "dashboard/manifest.json",
-    "dashboard/plugin_api.py",
+    "dashboard/*.py",
     "dashboard/backends/*.py",
     "dashboard/dist/*",
 ]

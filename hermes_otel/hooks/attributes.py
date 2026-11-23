@@ -8,19 +8,22 @@ identity keys) cannot drift between hooks (#104).
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, NamedTuple, Optional, Tuple
 
+from ..coerce import optional_number
+from ..genai_messages import single_message_json, to_genai_message
 from ..helpers import (
+    DEFAULT_SERVICE_NAME,
     clip_joined,
-    optional_number,
+    named_profile,
     package_version,
-    redact_export_text,
-    sanitize_export_value,
     truncate_string,
 )
+from ..instruments import API_IDENTITY_LABELS
+from ..redaction import redact_text
 from ..session_state import TurnSummary
 
-_DEFAULT_AGENT_NAME = "hermes-agent"
+_DEFAULT_AGENT_NAME = DEFAULT_SERVICE_NAME
 
 # Truncation limits for identifiers. One place, so root / llm / api / tool
 # spans agree (they used to mix 120 and 200 for the same id).
@@ -49,15 +52,65 @@ def _session_identity_attributes(
     return attrs
 
 
+# Hermes provider id -> (OTel GenAI ``gen_ai.provider.name``, OpenInference
+# ``llm.provider``) when the conventions have a well-known spelling for it
+# (#475). Ids with no entry pass through unchanged (``openrouter``, ``nvidia``,
+# ``custom``, ``lmstudio`` …): the conventions name no value for them, and an
+# invented one would be worse than the raw id. The raw id always stays in
+# ``hermes.provider``. Sources: ``GenAiProviderNameValues`` in
+# opentelemetry-semantic-conventions, ``OpenInferenceLLMProviderValues`` in
+# openinference-semantic-conventions, ``PROVIDER_REGISTRY`` in Hermes.
+PROVIDER_CANONICAL: Dict[str, Tuple[Optional[str], Optional[str]]] = {
+    "anthropic": ("anthropic", "anthropic"),
+    "openai": ("openai", "openai"),
+    "openai-api": ("openai", "openai"),
+    "openai-codex": ("openai", "openai"),
+    "xai": ("x_ai", "xai"),
+    "xai-oauth": ("x_ai", "xai"),
+    "deepseek": ("deepseek", "deepseek"),
+    "bedrock": ("aws.bedrock", "aws"),
+    "vertex": ("gcp.vertex_ai", "google"),
+    "gemini": ("gcp.gemini", "google"),
+    "azure-foundry": ("azure.ai.inference", "azure"),
+    "groq": ("groq", "groq"),
+    "cohere": ("cohere", "cohere"),
+    "perplexity": ("perplexity", "perplexity"),
+    "mistral": ("mistral_ai", "mistralai"),
+    "minimax": (None, "minimax"),
+    "minimax-cn": (None, "minimax"),
+    "minimax-oauth": (None, "minimax"),
+    "kimi-coding": (None, "moonshot"),
+    "kimi-coding-cn": (None, "moonshot"),
+    "zai": (None, "zai"),
+    "ollama-cloud": (None, "ollama"),
+}
+
+
+def canonical_provider(provider: Any) -> Tuple[str, str, str]:
+    """``(raw, gen_ai, openinference)`` for a Hermes provider id; empty strings when unset.
+
+    ``gen_ai`` is the value for ``gen_ai.provider.name`` / ``gen_ai.system``
+    and the ``provider`` metric label, ``openinference`` the value for
+    ``llm.provider``; each is the raw id when the convention names nothing.
+    """
+    raw = truncate_string(provider, _PROVIDER_MAX) if provider else ""
+    if not raw:
+        return "", "", ""
+    gen_ai, oi = PROVIDER_CANONICAL.get(raw.strip().lower(), (None, None))
+    return raw, gen_ai or raw, oi or raw
+
+
 def _provider_attributes(provider: Any) -> Dict[str, str]:
     """Return current and compatibility provider attributes."""
-    value = truncate_string(provider, _PROVIDER_MAX) if provider else ""
-    if not value:
+    raw, gen_ai, _oi = canonical_provider(provider)
+    if not raw:
         return {}
     return {
-        "gen_ai.provider.name": value,
+        "gen_ai.provider.name": gen_ai,
         # Kept for older OTel drafts and existing dashboards.
-        "gen_ai.system": value,
+        "gen_ai.system": gen_ai,
+        # The Hermes id as configured, whatever the conventions call it.
+        "hermes.provider": raw,
     }
 
 
@@ -75,12 +128,134 @@ def _model_attributes(model: Any, provider: Any = None) -> Dict[str, str]:
         attrs["llm.model_name"] = truncate_string(model, _ID_MAX)
         attrs["gen_ai.request.model"] = truncate_string(model, _ID_MAX)
     if provider:
-        attrs["llm.provider"] = truncate_string(provider, _PROVIDER_MAX)
+        attrs["llm.provider"] = canonical_provider(provider)[2]
         attrs.update(_provider_attributes(provider))
     return attrs
 
 
-def _profile_attributes(tracer: Any) -> Dict[str, str]:
+def session_env(name: str) -> str:
+    """A Hermes session variable: the gateway's per-turn context var when Hermes
+    is importable (it falls back to the environment itself), else ``os.environ``."""
+    try:
+        from gateway.session_context import get_session_env  # type: ignore[import-not-found]
+
+        return str(get_session_env(name) or "")
+    except Exception:
+        import os
+
+        return os.environ.get(name, "")
+
+
+# ``hermes.turn.trigger`` (#394): what started a turn, from what Hermes makes
+# observable at turn start (the hook's ``platform``, the session-context vars
+# and the process environment). A closed set, so a backend can group by it.
+TURN_TRIGGERS = (
+    "user",  # a person: CLI / TUI / desktop / a gateway platform / ACP
+    "cron",  # a scheduled cron job
+    "kanban",  # a kanban worker run (HERMES_KANBAN_TASK)
+    "subagent",  # a delegated child agent
+    "a2a",  # an inbound agent-to-agent call
+    "api",  # the API server (/v1/runs, /v1/chat/completions)
+    "oneshot",  # a single-query run (hermes -z, chat -q) not covered above
+    "curator",  # Hermes's background curator
+    "batch",  # the batch runner
+    "system",  # other host housekeeping (gateway hygiene)
+)
+_PLATFORM_TRIGGERS = {
+    "subagent": "subagent",
+    "cron": "cron",
+    "a2a": "a2a",
+    "api_server": "api",
+    "curator": "curator",
+    "batch": "batch",
+    "gateway_hygiene": "system",
+}
+
+
+def turn_trigger(
+    platform: Any,
+    *,
+    is_subagent: bool = False,
+    env: Callable[[str], str] = lambda _n: "",
+    finite: bool = False,
+) -> str:
+    """Classify what started a turn into one of :data:`TURN_TRIGGERS`.
+
+    ``env(name)`` reads a Hermes session variable (context var first, then the
+    process environment). ``finite`` is whether Hermes admitted the turn as a
+    single-query one (see :func:`finite_turn`). ``/loop``, ``/heartbeat`` and ``/goal`` re-entries
+    and bot-to-bot DMs are not observable as such at turn start (only as a
+    message prefix), so they classify as the turn they ride on.
+    """
+    p = str(platform or "").strip().lower()
+    if is_subagent or p == "subagent":
+        return "subagent"
+    if p == "cron" or env("HERMES_CRON_SESSION").strip() in ("1", "true"):
+        return "cron"
+    if env("HERMES_KANBAN_TASK").strip():
+        return "kanban"
+    if p in _PLATFORM_TRIGGERS:
+        return _PLATFORM_TRIGGERS[p]
+    if env("HERMES_SESSION_SOURCE").strip().lower() == "a2a":
+        return "a2a"
+    if finite or env("HERMES_SINGLE_QUERY_SESSION").strip() in ("1", "true"):
+        return "oneshot"
+    return "user"
+
+
+def finite_turn() -> bool:
+    """Whether Hermes admitted the current turn as a single-query one
+    (``chat -q``, ``-z``). Newer Hermes runs those turns in its gateway, whose
+    environment has no HERMES_SINGLE_QUERY_SESSION; the turn's admission
+    carries the fact instead (#637). False on a Hermes without it."""
+    try:
+        from gateway.session_finite import finite_turn_required  # type: ignore[import-not-found]
+
+        return finite_turn_required() is True
+    except Exception:
+        return False
+
+
+def turn_trigger_attributes(platform: Any, is_subagent: bool = False) -> Dict[str, str]:
+    """``hermes.turn.trigger``: what started the turn (#394), see
+    :func:`turn_trigger`."""
+    return {
+        "hermes.turn.trigger": turn_trigger(
+            platform, is_subagent=is_subagent, env=session_env, finite=finite_turn()
+        )
+    }
+
+
+def configured_default_model() -> str:
+    """The profile's configured main model (``model.default`` in Hermes's
+    config.yaml), or ``""`` when Hermes is not importable or names none."""
+    try:
+        from hermes_cli.config import read_raw_config_readonly  # type: ignore[import-not-found]
+
+        cfg = read_raw_config_readonly()
+    except Exception:
+        return ""
+    m = cfg.get("model") if isinstance(cfg, dict) else None
+    if isinstance(m, str):
+        return m.strip()
+    if isinstance(m, dict):
+        return str(m.get("default") or m.get("model") or m.get("name") or "").strip()
+    return ""
+
+
+def model_override_attributes(model: Any) -> Dict[str, bool]:
+    """``hermes.agent.model_override``: whether the turn runs on a model other
+    than the profile's configured default (a ``delegation.model`` child, a
+    kanban ``--model`` worker, a cron job's own model, ``-m`` or ``/model``).
+    Absent when either side is unknown (#391)."""
+    default = configured_default_model()
+    text = str(model or "").strip()
+    if not default or not text:
+        return {}
+    return {"hermes.agent.model_override": text != default}
+
+
+def profile_attributes(tracer: Any) -> Dict[str, str]:
     """``hermes.profile``: the Hermes profile this plugin instance serves (#70)."""
     name = getattr(tracer, "profile_name", None)
     return {"hermes.profile": truncate_string(str(name), _PROVIDER_MAX)} if name else {}
@@ -106,18 +281,18 @@ def _metric_model_labels(model: Any, provider: Any) -> Dict[str, str]:
     if model:
         labels["model"] = truncate_string(model, _ID_MAX)
     if provider:
-        labels["provider"] = truncate_string(provider, _PROVIDER_MAX)
+        # The same spelling as gen_ai.provider.name on the spans (#475).
+        labels["provider"] = canonical_provider(provider)[1]
     return labels
 
 
-def _credential_identity_attributes(extra_kwargs: dict) -> Dict[str, str]:
-    """Preserve the exact pool-entry identity supplied for this API attempt."""
-    attrs: Dict[str, str] = {}
-    for key in ("credential_id", "account_name"):
-        value = extra_kwargs.get(key)
-        if isinstance(value, str) and value:
-            attrs[key] = value
-    return attrs
+def request_identity(extra: dict) -> Dict[str, str]:
+    """Read only the host's correlation ID and public pool-entry identity."""
+    return {
+        key: truncate_string(redact_text(value), _ID_MAX)
+        for key in ("api_request_id", *API_IDENTITY_LABELS)
+        if isinstance(value := extra.get(key), str) and value
+    }
 
 
 def _gen_ai_attributes(session_id: Optional[str], operation_name: str) -> Dict[str, str]:
@@ -131,10 +306,18 @@ def _gen_ai_attributes(session_id: Optional[str], operation_name: str) -> Dict[s
 def _weave_turn_attributes(
     session_id: Optional[str],
     extra_kwargs: Optional[dict] = None,
+    profile: Any = None,
 ) -> Dict[str, Any]:
-    """Attributes that make raw OTLP spans render cleanly in Weave's Agents UI."""
+    """Attributes that make raw OTLP spans render cleanly in Weave's Agents UI.
+
+    ``gen_ai.agent.name`` is the host's ``agent_name`` when it passes one, else
+    the active named profile (the closest thing Hermes has to a stable agent
+    name, #395), else ``hermes-agent``.
+    """
     kwargs = extra_kwargs or {}
-    agent_name = truncate_string(kwargs.get("agent_name") or _DEFAULT_AGENT_NAME, _ID_MAX)
+    agent_name = truncate_string(
+        kwargs.get("agent_name") or named_profile(profile) or _DEFAULT_AGENT_NAME, _ID_MAX
+    )
     attrs: Dict[str, Any] = {
         "gen_ai.agent.name": agent_name,
         "wandb.is_turn": True,
@@ -174,9 +357,7 @@ def _extract_correlation_id(extra_kwargs: dict) -> str:
     return ""
 
 
-def _correlation_attributes(
-    tracer, session_id: Optional[str], extra_kwargs: dict
-) -> Dict[str, str]:
+def correlation_attributes(tracer, session_id: Optional[str], extra_kwargs: dict) -> Dict[str, str]:
     """``correlation.id`` for a hook callback, only when a host supplied one.
 
     Preference order:
@@ -194,18 +375,11 @@ def _correlation_attributes(
     must not create aggregators (#105). ``_start_session_span`` is the one
     writer of ``correlation_id``.
     """
-    incoming = _extract_correlation_id(extra_kwargs)
-    session_key = str(session_id) if session_id else ""
-    correlation_id = incoming
-
-    if session_key:
-        ps = tracer.sessions.peek(session_key)
-        if incoming:
-            if ps is not None:
-                ps.correlation_id = incoming
-        elif ps is not None and ps.correlation_id:
+    correlation_id = _extract_correlation_id(extra_kwargs)
+    if not correlation_id and session_id:
+        ps = tracer.sessions.peek(str(session_id))
+        if ps is not None and ps.correlation_id:
             correlation_id = ps.correlation_id
-
     if not correlation_id:
         return {}
     return {"correlation.id": truncate_string(correlation_id, _ID_MAX)}
@@ -255,7 +429,7 @@ def _session_context_attributes(tracer, session_id: Optional[str], kwargs: dict)
     if not session_id:
         return {}
     attrs: Dict[str, Any] = {}
-    attrs.update(_correlation_attributes(tracer, session_id, kwargs))
+    attrs.update(correlation_attributes(tracer, session_id, kwargs))
     attrs.update(_session_sender_attributes(tracer, session_id))
     attrs.update(_turn_attributes(tracer, session_id))
     return attrs
@@ -271,13 +445,9 @@ def _summary_attributes(summary: TurnSummary) -> Dict[str, Any]:
         attrs["hermes.turn.tool_count"] = len(summary.tool_names)
         attrs["hermes.turn.tools"] = clip_joined(sorted(summary.tool_names), ",")
     if summary.tool_targets:
-        attrs["hermes.turn.tool_targets"] = clip_joined(
-            [redact_export_text(item) for item in summary.tool_targets], "|"
-        )
+        attrs["hermes.turn.tool_targets"] = clip_joined(summary.tool_targets, "|")
     if summary.tool_commands:
-        attrs["hermes.turn.tool_commands"] = clip_joined(
-            [redact_export_text(item) for item in summary.tool_commands], "|"
-        )
+        attrs["hermes.turn.tool_commands"] = clip_joined(summary.tool_commands, "|")
     if summary.tool_outcomes:
         attrs["hermes.turn.tool_outcomes"] = clip_joined(sorted(summary.tool_outcomes), ",")
     if summary.skill_names:
@@ -285,8 +455,6 @@ def _summary_attributes(summary: TurnSummary) -> Dict[str, Any]:
         attrs["hermes.turn.skills"] = clip_joined(sorted(summary.skill_names), ",")
     if summary.api_call_count:
         attrs["hermes.turn.api_call_count"] = summary.api_call_count
-    if summary.final_status:
-        attrs["hermes.turn.final_status"] = summary.final_status
     return attrs
 
 
@@ -303,11 +471,11 @@ def _tool_host_utilization_attributes(tracer, started_at: float, ended_at: float
     unless the tool itself drives the GPU. Empty when host metrics are off or
     the tool finished between two samples.
     """
-    sampler = tracer.host_metrics
-    if sampler is None:
+    host = tracer.host_metrics
+    if host is None:
         return {}
     try:
-        stats = sampler.window(started_at, ended_at)
+        stats = host.window(started_at, ended_at)
     except Exception:  # pragma: no cover — never break the hook
         return {}
     if stats is None:
@@ -326,40 +494,136 @@ def _tool_host_utilization_attributes(tracer, started_at: float, ended_at: float
 
 
 def _message_json(role: str, content: Any) -> Optional[str]:
-    """One-message ``gen_ai.*.messages`` payload, or None for empty content."""
+    """One-message ``gen_ai.*.messages`` payload in the GenAI ``parts`` schema,
+    or None for empty content."""
     if content is None or content == "":
         return None
-    try:
-        safe_content = sanitize_export_value(content)
-        return json.dumps([{"role": role, "content": str(safe_content)}], ensure_ascii=False)
-    except Exception:
-        return None
+    return single_message_json(role, str(content))
 
 
-def _serialize_conversation_history(history: Any, max_chars: int) -> Optional[str]:
-    """Render ``conversation_history`` as a JSON string, clipped to ``max_chars``.
+class FittedHistory(NamedTuple):
+    """``conversation_history`` rendered for one ``llm.*`` span."""
 
-    Returns None when the history is empty or cannot be serialised so the
-    caller can fall back to the simple ``user_message`` input.
+    input_value: str  # Hermes's own message shape, for ``input.value``
+    genai_messages: str  # GenAI parts schema, for ``gen_ai.input.messages``
+    dropped: int  # messages left out (replaced by one placeholder message)
+    original_chars: Optional[int]  # full ``input_value`` length when anything was cut
+
+
+def _dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _dropped_placeholders(dropped: int) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """The message standing in for ``dropped`` older messages, in both shapes."""
+    text = f"[{dropped} earlier message{'s' if dropped != 1 else ''} dropped by hermes-otel]"
+    return (
+        {"role": "system", "content": text},
+        {"role": "system", "parts": [{"type": "text", "content": text}]},
+    )
+
+
+def _clip_strings(value: Any, cap: int) -> Any:
+    """``value`` with every string longer than ``cap`` clipped (dict keys kept)."""
+    if isinstance(value, str):
+        if len(value) <= cap:
+            return value
+        return value[: cap - 3] + "..." if cap > 3 else value[:cap]
+    if isinstance(value, dict):
+        return {k: _clip_strings(v, cap) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_clip_strings(v, cap) for v in value]
+    return value
+
+
+def _clip_to_fit(hermes: Any, genai: Any, max_chars: int) -> Optional[Tuple[str, str]]:
+    """Both payloads with their strings clipped to the largest common cap that
+    keeps each serialisation within ``max_chars`` — still valid JSON — or None
+    when not even empty strings fit."""
+    best = None
+    lo, hi = 0, max(len(_dumps(hermes)), len(_dumps(genai)))
+    while lo <= hi:
+        cap = (lo + hi) // 2
+        h, g = _dumps(_clip_strings(hermes, cap)), _dumps(_clip_strings(genai, cap))
+        if len(h) <= max_chars and len(g) <= max_chars:
+            best, lo = (h, g), cap + 1
+        else:
+            hi = cap - 1
+    return best
+
+
+def _json_list(parts: list) -> str:
+    """Pre-serialised items joined exactly as ``json.dumps`` joins a list."""
+    return "[" + ", ".join(parts) + "]"
+
+
+def _fit_conversation_history(history: Any, max_chars: int) -> Optional[FittedHistory]:
+    """Render ``conversation_history`` for ``input.value`` and
+    ``gen_ai.input.messages``, each within ``max_chars`` and valid JSON.
+
+    Over the cap, the oldest whole messages go first (leading system messages
+    are kept while they fit) and one placeholder message says how many were
+    left out; both attributes drop the same messages. Only when the newest
+    message alone is still too big are string values clipped. Returns None
+    when the history is empty or nothing fits, so the caller falls back to the
+    plain ``user_message`` input.
     """
     if not history:
         return None
-    try:
-        safe_history = sanitize_export_value(history)
-    except Exception:
+    if not isinstance(history, list):
+        history = [history]
+    n = len(history)
+    h_parts = [_dumps(m) for m in history]
+    g_msgs = [to_genai_message(m) for m in history]
+    g_parts = [_dumps(m) if m is not None else "" for m in g_msgs]
+    full_h, full_g = _json_list(h_parts), _json_list([p for p in g_parts if p])
+    if len(full_h) <= max_chars and len(full_g) <= max_chars:
+        return FittedHistory(full_h, full_g, 0, None)
+    original_chars = len(full_h)
+
+    head = 0
+    while (
+        head < n - 1 and isinstance(history[head], dict) and history[head].get("role") == "system"
+    ):
+        head += 1
+
+    # Suffix totals: chars and item counts of messages i..n-1 in each shape.
+    h_suf, g_suf, g_cnt = [0] * (n + 1), [0] * (n + 1), [0] * (n + 1)
+    for i in range(n - 1, -1, -1):
+        h_suf[i] = h_suf[i + 1] + len(h_parts[i])
+        g_suf[i] = g_suf[i + 1] + len(g_parts[i])
+        g_cnt[i] = g_cnt[i + 1] + (1 if g_parts[i] else 0)
+
+    def fits(chars: int, count: int) -> bool:
+        return 2 + chars + 2 * max(count - 1, 0) <= max_chars
+
+    # Kept head + the newest messages from k on; then, if that never fits,
+    # the newest messages alone.
+    candidates = [(head, k) for k in range(head + 1, n)]
+    candidates += [(0, k) for k in range(1, n)] if head else []
+    for kept, k in candidates:
+        dropped = k - kept
+        ph, pg = (_dumps(m) for m in _dropped_placeholders(dropped))
+        h_chars = len(ph) + (h_suf[0] - h_suf[kept]) + h_suf[k]
+        g_head = g_cnt[0] - g_cnt[kept]
+        g_chars = len(pg) + (g_suf[0] - g_suf[kept]) + g_suf[k]
+        if fits(h_chars, 1 + kept + n - k) and fits(g_chars, 1 + g_head + g_cnt[k]):
+            hs = h_parts[:kept] + [ph] + h_parts[k:]
+            gs = [p for p in g_parts[:kept] if p] + [pg] + [p for p in g_parts[k:] if p]
+            return FittedHistory(_json_list(hs), _json_list(gs), dropped, original_chars)
+
+    # The newest message alone is too big: clip its strings.
+    dropped = n - 1
+    hermes_last = [history[-1]]
+    genai_last = [m for m in g_msgs[-1:] if m is not None]
+    if dropped:
+        ph, pg = _dropped_placeholders(dropped)
+        hermes_last.insert(0, ph)
+        genai_last.insert(0, pg)
+    clipped = _clip_to_fit(hermes_last, genai_last, max_chars)
+    if clipped is None:
         return None
-    try:
-        text = json.dumps(safe_history, ensure_ascii=False, default=str)
-    except (TypeError, ValueError):
-        try:
-            text = redact_export_text(str(safe_history))
-        except Exception:
-            return None
-    if len(text) <= max_chars:
-        return text
-    if max_chars <= 3:
-        return "." * max_chars
-    return text[: max_chars - 3] + "..."
+    return FittedHistory(clipped[0], clipped[1], dropped, original_chars)
 
 
 def _gen_ai_request_param_attributes(kwargs: dict) -> Dict[str, Any]:

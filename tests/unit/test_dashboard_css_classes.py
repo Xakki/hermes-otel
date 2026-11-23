@@ -21,14 +21,19 @@ PLUGIN_CSS = ROOT / "hermes_otel" / "dashboard" / "dist" / "style.css"
 _MAP_VALUE = re.compile(r'"((?:text|bg|border)-[a-z]+(?:-[a-z]+)*(?:-\d{2,3})?(?:/\d+)?)"')
 
 
+_CLASS_SITES = re.compile(r"className\s*[=:]\s*")
+
+
 def _class_attr_literals(text: str):
-    """Yield the string literals of every ``className=`` attribute."""
+    """Yield the string literals of every ``className=`` attribute, and of a
+    ``className:`` property (the ``React.createElement`` form ``sdk.ts`` uses
+    for the host-component wrappers, #289)."""
     i = 0
     while True:
-        i = text.find("className=", i)
-        if i < 0:
+        m = _CLASS_SITES.search(text, i)
+        if m is None:
             return
-        i += len("className=")
+        i = m.end()
         if text[i] == '"':
             j = text.index('"', i + 1)
             yield text[i + 1 : j]
@@ -97,3 +102,20 @@ def test_plugin_classes_are_defined_in_the_plugin_stylesheet():
 def test_host_list_is_pinned_to_a_hermes_version():
     head = HOST_LIST.read_text(encoding="utf-8").splitlines()[:3]
     assert any("hermes version" in line for line in head), head
+
+
+def test_every_plugin_class_in_the_stylesheet_is_used():
+    """Dead ``otel-*`` rules are debt: a class nobody sets must not linger."""
+    plugin_css = PLUGIN_CSS.read_text(encoding="utf-8")
+    defined = {
+        m.group(1)
+        for m in re.finditer(r"\.(otel-[A-Za-z0-9_-]+)", plugin_css)
+        if not m.group(1).startswith("otel-md-")  # markdown renderer classes, set in markdown.tsx
+    }
+    used = used_classes() | {"otel-md"}
+    # Class families set by string composition in the TSX (prefix + variable).
+    composed = {
+        c for c in defined if re.match(r"otel-(msg|role|src|pill|chip|tone|c|level|row)-", c)
+    }
+    unused = sorted(defined - used - composed)
+    assert not unused, f"otel-* classes defined in dist/style.css but never used: {unused}"

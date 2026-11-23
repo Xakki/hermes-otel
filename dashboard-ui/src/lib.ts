@@ -2,7 +2,17 @@
 // Trace (backend) data is OTLP/Tempo-shaped; live data is the compact dict the
 // in-process store emits. Both flow through the same rendering.
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import {
+  CARD_SESSION_KEYS,
+  COST_KEYS,
+  COST_STATUS_KEY,
+  KIND_OVERRIDES,
+  KIND_OVERRIDE_ATTR,
+  KIND_RULES,
+  MODEL_KEYS,
+  TOTAL_TOKEN_KEYS,
+  TURN_TOTAL_KEYS as TURN_TOTAL_KEY_LIST,
+} from "./semconv.generated";
 
 // ── OTLP attribute decoding (backend traces) ─────────────────────────────
 export function decodeAttrValue(v: any): any {
@@ -31,10 +41,40 @@ export function fmtDurationMs(ms: number | null | undefined): string {
   const m = Math.floor(ms / 60000);
   return `${m}m ${Math.round((ms % 60000) / 1000)}s`;
 }
+const TIME_FMT: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+};
+const CLOCK_FMT: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false };
+/** Local time as `YYYY-MM-DD HH:MM:SS` (one shape in every locale, #289). */
 export function fmtAbsTime(unixNano: number): string {
   if (!unixNano) return "";
   try {
-    return new Date(unixNano / 1e6).toLocaleString();
+    const d = new Date(unixNano / 1e6);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  } catch {
+    return "";
+  }
+}
+/** Local clock time `HH:MM:SS` (chart axes). */
+export function fmtClock(unixNano: number): string {
+  if (!unixNano) return "";
+  try {
+    return new Date(unixNano / 1e6).toLocaleTimeString(undefined, CLOCK_FMT);
+  } catch {
+    return "";
+  }
+}
+/** The browser's timezone name, shown once per page next to absolute times. */
+export function localTimezone(): string {
+  try {
+    return Intl.DateTimeFormat(undefined, TIME_FMT).resolvedOptions().timeZone || "";
   } catch {
     return "";
   }
@@ -52,80 +92,61 @@ export function fmtTokens(n: any): string | null {
   if (n == null || isNaN(Number(n))) return null;
   const num = Number(n);
   if (num >= 10000) return `${(num / 1000).toFixed(num >= 100000 ? 0 : 1)}k`;
-  return num.toLocaleString();
+  return num.toLocaleString("en-US");
 }
+/** A cost for a tile: unknown reads as an em dash, never `$0` (#280). */
 export function fmtCost(usd: number | null | undefined): string {
-  if (!usd) return "$0";
+  if (usd == null || isNaN(Number(usd))) return "—";
+  if (usd === 0) return "$0.00";
   if (usd < 0.01) return `$${usd.toFixed(4)}`;
   return `$${usd.toFixed(2)}`;
 }
+/** A cost on a card or header: four decimals, unknown as em dash. */
+export function fmtCostExact(usd: number | null | undefined): string {
+  if (usd == null || isNaN(Number(usd))) return "—";
+  return `$${Number(usd).toFixed(4)}`;
+}
 export function fmtInt(n: number | null | undefined): string {
-  return n == null ? "0" : n.toLocaleString();
+  return n == null ? "—" : n.toLocaleString("en-US");
 }
 export function clip(s: any, max: number): string | null {
   if (s == null) return null;
-  let str = (typeof s === "string" ? s : String(s)).replace(/\s+/g, " ").trim();
+  const str = (typeof s === "string" ? s : String(s)).replace(/\s+/g, " ").trim();
   if (!str) return null;
   return str.length <= max ? str : str.slice(0, max - 1) + "…";
 }
 
 // ── span-kind classification (drives icon + accent) ──────────────────────
-export type Kind =
-  | "agent"
-  | "llm"
-  | "api"
-  | "tool"
-  | "skill"
-  | "approval"
-  | "subagent"
-  | "session"
-  | "cron"
-  | "other";
+export type Kind = "agent" | "llm" | "api" | "tool" | "skill" | "approval" | "human_input" | "subagent" | "session" | "cron" | "other";
 
+// The table is generated from hermes_otel/semconv.py (#404); the vitest in
+// test/semconv.test.ts replays Python's answers through this function.
 export function kindOf(name: string, attrs?: Record<string, any>): Kind {
   const a = attrs || {};
-  if (a["hermes.span_kind"] === "skill") return "skill";
-  if (a["hermes.span_kind"] === "approval") return "approval";
+  const override = a[KIND_OVERRIDE_ATTR];
+  if (typeof override === "string" && KIND_OVERRIDES.includes(override)) return override as Kind;
   const n = (name || "").toLowerCase();
-  if (n === "agent" || n.startsWith("agent.")) return "agent";
-  if (n === "cron" || n.startsWith("cron")) return "cron";
-  if (n.startsWith("session")) return "session";
-  if (n.startsWith("skill.")) return "skill";
-  if (n.startsWith("approval")) return "approval";
-  if (n.startsWith("subagent")) return "subagent";
-  if (n.startsWith("llm.")) return "llm";
-  if (n.startsWith("api.")) return "api";
-  if (n.startsWith("tool.")) return "tool";
+  for (const rule of KIND_RULES) {
+    if (rule.exact.includes(n) || rule.prefixes.some((p) => n.startsWith(p))) return rule.kind as Kind;
+  }
   return "other";
 }
 
-// Text-colour class per kind; defined in dist/style.css (the host ships only some of these hues, #180).
-export const KIND_TEXT: Record<Kind, string> = {
-  agent: "otel-c-agent",
-  llm: "otel-c-llm",
-  api: "otel-c-api",
-  tool: "otel-c-tool",
-  skill: "otel-c-skill",
-  approval: "otel-c-approval",
-  subagent: "otel-c-subagent",
-  session: "otel-c-session",
-  cron: "otel-c-cron",
-  other: "text-muted-foreground",
-};
-// Bar fill (currentColor via the text class won't reach SVG fill cleanly, so a
-// CSS-var map is used for waterfall/stream accents). Values reference the same
-// hues but are concrete so they render inside <svg>/inline style.
-export const KIND_HEX: Record<Kind, string> = {
-  agent: "#34d399",
-  llm: "#38bdf8",
-  api: "#22d3ee",
-  tool: "#fbbf24",
-  skill: "#6ee7b7",
-  approval: "#f472b6",
-  subagent: "#a78bfa",
-  session: "#34d399",
-  cron: "#a78bfa",
-  other: "#94a3b8",
+// Kind colours are CSS custom properties defined in dist/style.css (with a
+// light-scheme block), so SVG fills, inline styles and the `otel-c-*` text
+// classes cannot drift apart and follow the host theme (#289).
+export const KIND_COLOR: Record<Kind, string> = {
+  agent: "var(--otel-kind-agent)",
+  llm: "var(--otel-kind-llm)",
+  api: "var(--otel-kind-api)",
+  tool: "var(--otel-kind-tool)",
+  skill: "var(--otel-kind-skill)",
+  approval: "var(--otel-kind-approval)",
+  human_input: "var(--otel-kind-approval)", // a wait on the person, like an approval
+  subagent: "var(--otel-kind-subagent)",
+  session: "var(--otel-kind-agent)",
+  cron: "var(--otel-kind-cron)",
+  other: "var(--otel-kind-other)",
 };
 
 // ── trace-level attribute merge (backend: TraceQL select across spanSet) ──
@@ -148,14 +169,28 @@ export function traceAttrs(trace: any): Record<string, any> {
       if (d !== null && d !== undefined && d !== "") out[a.key] = d;
     }
   }
+  // Turn totals live on the root: when the matched spans include both the
+  // root and an api span (a free-text search on Tempo matches every span
+  // whose input or output mentions the text), the api span's per-call usage
+  // must not pass for the turn's total.
+  const root = spans.find((s: any) => priority(s) === 3);
+  if (root && spans.length > 1) {
+    for (const a of root.attributes || []) {
+      if (!a.key || !TURN_TOTAL_KEYS.has(a.key)) continue;
+      const d = decodeAttrValue(a.value);
+      if (d !== null && d !== undefined && d !== "") out[a.key] = d;
+    }
+  }
   return out;
 }
+const TURN_TOTAL_KEYS = new Set<string>(TURN_TOTAL_KEY_LIST);
 // Whole-trace span count. Adapters that know it send ``spanCount``; Tempo
 // sends per-service stats. ``spanSets[0].spans`` is the MATCHED spans (one
 // per trace in roots-only mode), never the trace size, so it is not a
 // fallback (#179): no number beats a wrong one.
 export function traceSpanCount(trace: any): number | null {
   if (typeof trace.spanCount === "number" && trace.spanCount > 0) return trace.spanCount;
+  if (typeof trace.span_count === "number" && trace.span_count > 0) return trace.span_count;
   if (trace.serviceStats) {
     let total = 0;
     for (const k in trace.serviceStats) total += trace.serviceStats[k].spanCount || 0;
@@ -240,6 +275,10 @@ export function buildSpanTree(batches: any[]): { roots: TreeSpan[]; all: TreeSpa
       }
     }
   }
+  return linkTree(all);
+}
+/** Parent/child links from a flat list; orphans become roots, siblings sort by start. */
+export function linkTree(all: TreeSpan[]): { roots: TreeSpan[]; all: TreeSpan[] } {
   const byId: Record<string, TreeSpan> = {};
   all.forEach((s) => (byId[s.spanId] = s));
   const roots: TreeSpan[] = [];
@@ -284,6 +323,15 @@ export type LiveSpan = {
   attributes: Record<string, any>;
   seq: number;
 };
+// First non-empty value of the keys, in order (``semconv.first`` in Python).
+export function firstAttr(a: Record<string, any>, keys: readonly string[]): any {
+  for (const k of keys) {
+    const v = a[k];
+    if (v !== null && v !== undefined && v !== "") return v;
+  }
+  return null;
+}
+
 export function attrNum(a: Record<string, any>, ...keys: string[]): number | null {
   for (const k of keys) {
     const v = a[k];
@@ -292,18 +340,19 @@ export function attrNum(a: Record<string, any>, ...keys: string[]): number | nul
   }
   return null;
 }
-export const liveTokens = (s: LiveSpan) =>
-  attrNum(s.attributes, "gen_ai.usage.total_tokens", "llm.token_count.total");
+export const liveTokens = (s: LiveSpan) => attrNum(s.attributes, "gen_ai.usage.total_tokens", "llm.token_count.total");
 export const liveCost = (s: LiveSpan) => attrNum(s.attributes, "hermes.cost.usage");
 // The requested model is the one shown everywhere (cards, header, metrics);
 // the response model appears next to it in the header when it differs (#185).
 export const liveModel = (s: LiveSpan) =>
-  s.attributes["gen_ai.request.model"] ||
-  s.attributes["llm.model_name"] ||
-  s.attributes["gen_ai.response.model"] ||
-  null;
-export const sessionOf = (s: LiveSpan) =>
-  s.attributes["hermes.session_id"] || s.attributes["session_id"] || s.attributes["session.id"] || null;
+  s.attributes["gen_ai.request.model"] || s.attributes["llm.model_name"] || s.attributes["gen_ai.response.model"] || null;
+export const sessionOf = (s: LiveSpan) => s.attributes["hermes.session_id"] || s.attributes["session_id"] || s.attributes["session.id"] || null;
+
+/** The root of a flat span list: the first span whose parent is absent, else null (a trace still in flight). */
+export function findRoot<T extends { span_id?: string; spanId?: string; parent_span_id?: string | null; parentSpanId?: string | null }>(spans: T[]): T | null {
+  const ids = new Set(spans.map((s) => s.span_id ?? s.spanId));
+  return spans.find((s) => !(s.parent_span_id ?? s.parentSpanId) || !ids.has((s.parent_span_id ?? s.parentSpanId) as string)) || null;
+}
 
 // ── assemble TRACES from flat live spans (so the live store powers a real ──
 // trace browser + waterfall, no external backend needed) ──────────────────
@@ -328,7 +377,92 @@ export type LiveTrace = {
   spans?: LiveSpan[];
   turn?: number | null;
   platform?: string | null;
+  /** contract §4/§8: the root span has not finished yet */
+  partial?: boolean;
+  /** the turn's top-level delegations (#447); set only when the root carries the turn's own totals */
+  subagents?: SubagentTotals | null;
 };
+
+/** What a turn's top-level delegations cost (#447): the parent's root keeps only its own calls. */
+export type SubagentTotals = { count: number; tokens: number | null; calls: number | null; cost: number | null };
+
+/** One row shape for the trace list, whatever the source (#281). */
+export type TraceRow = {
+  traceId: string;
+  rootName: string;
+  rootKind: Kind;
+  service: string | null;
+  startNs: number;
+  endNs: number;
+  durationMs: number;
+  spanCount: number | null;
+  model: string | null;
+  tokens: number | null;
+  cost: number | null;
+  error: boolean;
+  session: string | null;
+  partial: boolean;
+  toolName: string | null;
+  inPreview: string | null;
+  outPreview: string | null;
+  /** the source's own record, for the detail view */
+  raw: any;
+  /** live rows only: the delegations next to the turn's own figures (#447) */
+  subagents: SubagentTotals | null;
+};
+
+export function rowFromLive(t: LiveTrace): TraceRow {
+  return {
+    traceId: String(t.traceId),
+    rootName: t.rootName,
+    rootKind: t.rootKind || kindOf(t.rootName),
+    service: t.service || null,
+    startNs: t.startNs,
+    endNs: t.endNs || t.startNs,
+    durationMs: t.durationMs,
+    spanCount: t.spanCount ?? null,
+    model: t.model,
+    tokens: t.tokens,
+    cost: t.cost,
+    error: !!t.error,
+    session: t.session,
+    partial: !!t.partial,
+    toolName: null,
+    inPreview: null,
+    outPreview: null,
+    raw: t,
+    subagents: t.subagents || null,
+  };
+}
+
+export function rowFromBackend(t: any): TraceRow {
+  const attrs = traceAttrs(t);
+  const startNs = t.startTimeUnixNano ? Number(t.startTimeUnixNano) : 0;
+  const durationMs = Number(t.durationMs || 0);
+  const name = t.rootTraceName || "";
+  return {
+    traceId: String(t.traceID || t.traceId || ""),
+    rootName: name || "—",
+    rootKind: kindOf(name, attrs),
+    service: t.rootServiceName || null,
+    startNs,
+    endNs: startNs + durationMs * 1e6,
+    durationMs,
+    spanCount: traceSpanCount(t),
+    model: firstAttr(attrs, MODEL_KEYS),
+    tokens: attrNum(attrs, ...TOTAL_TOKEN_KEYS),
+    cost: attrNum(attrs, ...COST_KEYS),
+    error: attrs["status"] === "error" || !!attrs["error.type"],
+    session: sessionOfCard(t),
+    partial: false,
+    toolName: attrs["tool.name"] ? String(attrs["tool.name"]) : null,
+    inPreview: clip(extractInputPreview(attrs), 140),
+    outPreview: clip(extractOutputPreview(attrs), 140),
+    raw: t,
+    // A backend card is the root alone; the split needs the spans (trace detail).
+    subagents: null,
+  };
+}
 
 // ── sessions: group trace rows by session id (#187) ──────────────────────
 export type SessionRow = {
@@ -344,12 +478,15 @@ export type SessionRow = {
   model: string | null;
   platform: string | null;
   traceIds: string[];
+  /** live sessions: tokens of the turns' top-level delegations, on top of `tokens` (#447) */
+  subagentTokens?: number | null;
 };
 
 // Session id of a BACKEND card (adapters put it on the card attributes).
 export function sessionOfCard(trace: any): string | null {
   const a = traceAttrs(trace);
-  return a["hermes.session_id"] || a["langfuse.sessionId"] || a["session.id"] || a["session_id"] || null;
+  const sid = firstAttr(a, CARD_SESSION_KEYS);
+  return sid == null ? null : String(sid);
 }
 
 // Group backend search results client-side. Tokens/cost come from each card's
@@ -395,30 +532,38 @@ export function groupBySession(traces: any[]): SessionRow[] {
 // turn's totals and every ``api.*`` span carries its own call, so summing all
 // spans counted each turn twice (#178). Use the root's figure when it has one;
 // otherwise sum the ``api.*`` spans only (``llm.*`` spans mirror the API spans).
+// The same rule serves the header (#283): `sumApiSpans` is the one fallback.
+export type NamedAttrs = { name: string; attributes: Record<string, any> };
+export function sumApiSpans(spans: NamedAttrs[], ...keys: string[]): number | null {
+  let sum = 0;
+  let seen = false;
+  for (const s of spans) {
+    if (!(s.name || "").startsWith("api.")) continue;
+    // Auxiliary attempts (#389) are reported on the root as
+    // hermes.turn.auxiliary.*, never inside the turn's totals.
+    if ((s.attributes || {})["hermes.query_source"] === "auxiliary") continue;
+    const v = attrNum(s.attributes || {}, ...keys);
+    if (v != null) {
+      sum += v;
+      seen = true;
+    }
+  }
+  return seen ? sum : null;
+}
 export function traceTotals(spans: LiveSpan[]): { tokens: number | null; cost: number | null } {
-  const ids = new Set(spans.map((s) => s.span_id));
-  const root = spans.find((s) => !s.parent_span_id || !ids.has(s.parent_span_id)) || null;
-  const pick = (get: (s: LiveSpan) => number | null): number | null => {
+  const root = findRoot(spans);
+  const named = spans.map((s) => ({ name: s.name, attributes: s.attributes }));
+  const pick = (keys: string[], get: (s: LiveSpan) => number | null): number | null => {
     if (root) {
       const v = get(root);
       if (v != null) return v;
     }
-    let sum = 0;
-    let seen = false;
-    for (const s of spans) {
-      if (!s.name.startsWith("api.")) continue;
-      const v = get(s);
-      if (v != null) {
-        sum += v;
-        seen = true;
-      }
-    }
-    return seen ? sum : null;
+    return sumApiSpans(named, ...keys);
   };
   // A root that reports a cost status without an amount (unknown, included or
   // partial pricing) means "no total": never fall back to a subtotal (#252).
-  const noCostTotal = root != null && root.attributes["hermes.cost.status"] != null && liveCost(root) == null;
-  return { tokens: pick(liveTokens), cost: noCostTotal ? null : pick(liveCost) };
+  const noCostTotal = root != null && root.attributes[COST_STATUS_KEY] != null && liveCost(root) == null;
+  return { tokens: pick([...TOTAL_TOKEN_KEYS], liveTokens), cost: noCostTotal ? null : pick([...COST_KEYS], liveCost) };
 }
 
 export function groupLiveTraces(spans: LiveSpan[]): LiveTrace[] {
@@ -427,8 +572,8 @@ export function groupLiveTraces(spans: LiveSpan[]): LiveTrace[] {
   const out: LiveTrace[] = [];
   for (const tid in byTrace) {
     const ss = byTrace[tid];
-    const ids = new Set(ss.map((s) => s.span_id));
-    const root = ss.find((s) => !s.parent_span_id || !ids.has(s.parent_span_id)) || ss[0];
+    const found = findRoot(ss);
+    const root = found || ss[0];
     const startNs = Math.min(...ss.map((s) => s.start_time_unix_nano || 0));
     const endNs = Math.max(...ss.map((s) => s.end_time_unix_nano || s.start_time_unix_nano || 0));
     const totals = traceTotals(ss);
@@ -454,6 +599,7 @@ export function groupLiveTraces(spans: LiveSpan[]): LiveTrace[] {
       error,
       session: sessionOf(root),
       spans: ss,
+      partial: !found,
     });
   }
   return out.sort((a, b) => b.startNs - a.startNs);
@@ -481,69 +627,10 @@ export function liveTreeFromSpans(spans: LiveSpan[]): { roots: TreeSpan[]; all: 
     _attrs: s.attributes || {},
     children: [],
   }));
-  const byId: Record<string, TreeSpan> = {};
-  all.forEach((s) => (byId[s.spanId] = s));
-  const roots: TreeSpan[] = [];
-  all.forEach((s) => {
-    if (s.parentSpanId && byId[s.parentSpanId]) byId[s.parentSpanId].children.push(s);
-    else roots.push(s);
-  });
-  const sortRec = (list: TreeSpan[]) => {
-    list.sort((a, b) => a.startNs - b.startNs);
-    list.forEach((n) => sortRec(n.children));
-  };
-  sortRec(roots);
-  return { roots, all };
+  return linkTree(all);
 }
-
 
 // ── trace detail helpers (#185) ──────────────────────────────────────────
-
-export type ChatMessage = { role: string; text: string };
-
-// Messages JSON (OpenInference input.value / llm.input_messages) → a list the
-// detail view renders as a conversation. Anything else → one "user" message.
-export function parseMessages(raw: any): ChatMessage[] {
-  if (raw == null) return [];
-  let value: any = raw;
-  if (typeof raw === "string") {
-    const t = raw.trim();
-    if (!(t.startsWith("[") || t.startsWith("{"))) return [{ role: "user", text: raw }];
-    try {
-      value = JSON.parse(t);
-    } catch {
-      return [{ role: "user", text: raw }];
-    }
-  }
-  if (!Array.isArray(value)) value = [value];
-  const out: ChatMessage[] = [];
-  for (const m of value) {
-    if (!m || typeof m !== "object") continue;
-    const role = String(m.role || m["message.role"] || "user");
-    const c = m.content ?? m["message.content"];
-    let text: string;
-    if (typeof c === "string") text = c;
-    else if (Array.isArray(c)) text = c.map((p: any) => (typeof p === "string" ? p : p?.text ?? JSON.stringify(p))).join("\n");
-    else if (c == null && m.tool_calls) text = JSON.stringify(m.tool_calls, null, 2);
-    else text = c == null ? "" : JSON.stringify(c, null, 2);
-    out.push({ role, text });
-  }
-  return out;
-}
-
-export function prettyJson(raw: any): string {
-  if (raw == null) return "";
-  if (typeof raw !== "string") return JSON.stringify(raw, null, 2);
-  const t = raw.trim();
-  if (t.startsWith("{") || t.startsWith("[")) {
-    try {
-      return JSON.stringify(JSON.parse(t), null, 2);
-    } catch {
-      return raw;
-    }
-  }
-  return raw;
-}
 
 // The duplicate conventions the plugin emits for one fact. The first key
 // present is shown; the others are folded under it in "all attributes".
@@ -596,6 +683,8 @@ export type HeaderFacts = {
   cacheReadTokens: number | null;
   totalTokens: number | null;
   cost: number | null;
+  /** true when the root says a cost status without an amount (#252): show "no pricing data", not a subtotal */
+  costUnknown: boolean;
   tools: string[];
   exitReason: string | null;
   finalStatus: string | null;
@@ -605,42 +694,41 @@ export type HeaderFacts = {
 };
 
 // Facts for the trace header, read from the ROOT span's attributes (the
-// turn's totals live there), with the api spans as a fallback for tokens.
-export function headerFacts(root: Record<string, any>, spansAttrs: Record<string, any>[] = []): HeaderFacts {
+// turn's totals live there), with the api.* spans as the fallback for tokens
+// and cost (never llm.* spans, which mirror them, #283).
+export function headerFacts(root: Record<string, any>, spans: NamedAttrs[] = []): HeaderFacts {
   const a = root || {};
   const num = (...keys: string[]) => attrNum(a, ...keys);
   let totalTokens = num("gen_ai.usage.total_tokens", "llm.token_count.total");
   let inputTokens = num("gen_ai.usage.input_tokens", "llm.token_count.prompt");
   let outputTokens = num("gen_ai.usage.output_tokens", "llm.token_count.completion");
   if (totalTokens == null) {
-    let t = 0;
-    let i = 0;
-    let o = 0;
-    let seen = false;
-    for (const s of spansAttrs) {
-      const v = attrNum(s, "gen_ai.usage.total_tokens", "llm.token_count.total");
-      if (v != null) {
-        t += v;
-        i += attrNum(s, "gen_ai.usage.input_tokens", "llm.token_count.prompt") || 0;
-        o += attrNum(s, "gen_ai.usage.output_tokens", "llm.token_count.completion") || 0;
-        seen = true;
-      }
-    }
-    if (seen) {
+    const t = sumApiSpans(spans, "gen_ai.usage.total_tokens", "llm.token_count.total");
+    if (t != null) {
       totalTokens = t;
-      inputTokens = inputTokens ?? i;
-      outputTokens = outputTokens ?? o;
+      inputTokens = inputTokens ?? sumApiSpans(spans, "gen_ai.usage.input_tokens", "llm.token_count.prompt");
+      outputTokens = outputTokens ?? sumApiSpans(spans, "gen_ai.usage.output_tokens", "llm.token_count.completion");
     }
   }
+  const costUnknown = a["hermes.cost.status"] != null && num("hermes.cost.usage") == null;
+  const cost = costUnknown ? null : (num("hermes.cost.usage") ?? sumApiSpans(spans, "hermes.cost.usage"));
   const toolsRaw = a["hermes.turn.tools"];
   let tools: string[] = [];
   if (Array.isArray(toolsRaw)) tools = toolsRaw.map(String);
   else if (typeof toolsRaw === "string" && toolsRaw.trim()) {
     try {
       const parsed = JSON.parse(toolsRaw);
-      tools = Array.isArray(parsed) ? parsed.map(String) : toolsRaw.split(",").map((s) => s.trim()).filter(Boolean);
+      tools = Array.isArray(parsed)
+        ? parsed.map(String)
+        : toolsRaw
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
     } catch {
-      tools = toolsRaw.split(",").map((s) => s.trim()).filter(Boolean);
+      tools = toolsRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
     }
   }
   const requestModel = a["gen_ai.request.model"] || a["llm.model_name"] || null;
@@ -653,7 +741,8 @@ export function headerFacts(root: Record<string, any>, spansAttrs: Record<string
     reasoningTokens: num("gen_ai.usage.reasoning.output_tokens", "llm.token_count.completion_details.reasoning"),
     cacheReadTokens: num("gen_ai.usage.cache_read.input_tokens", "gen_ai.usage.cache_read_input_tokens", "llm.token_count.prompt_details.cache_read"),
     totalTokens,
-    cost: num("hermes.cost.usage"),
+    cost,
+    costUnknown,
     tools,
     exitReason: a["hermes.turn.exit_reason"] || null,
     finalStatus: a["hermes.turn.final_status"] || null,
@@ -663,9 +752,87 @@ export function headerFacts(root: Record<string, any>, spansAttrs: Record<string
   };
 }
 
+// ── cost and tokens per agent (#447) ─────────────────────────────────────
+// The parent's root keeps only the parent's own calls; each subagent.* span
+// carries its child's WHOLE subtree (hermes.subagent.usage.* / cost.*). The
+// run is the root plus the top-level delegations, never the root plus every
+// span (#178). A delegation is nested when its parent session is another
+// delegation's child session. Mirrors live_summary.top_level_subagents.
+export function topLevelSubagents(spans: NamedAttrs[]): NamedAttrs[] {
+  const subs = spans.filter((s) => kindOf(s.name || "", s.attributes) === "subagent");
+  const children = new Set(
+    subs
+      .map((s) => s.attributes?.["hermes.subagent.child_session_id"])
+      .filter((v) => v != null && v !== "")
+      .map(String)
+  );
+  return subs.filter((s) => !children.has(String(s.attributes?.["hermes.subagent.parent_session_id"] ?? "")));
+}
+
+export type AgentRow = {
+  /** "main" for the turn's own loop, else the delegation's role */
+  label: string;
+  main: boolean;
+  model: string | null;
+  tokens: number | null;
+  calls: number | null;
+  cost: number | null;
+  error: boolean;
+};
+export type AgentBreakdown = { rows: AgentRow[]; total: { tokens: number | null; calls: number | null; cost: number | null } };
+
+// hooks/subagent.py _SUBAGENT_ERROR_STATUSES: the child statuses the plugin marks ERROR (#392)
+const SUBAGENT_ERROR_STATUSES = new Set(["error", "errored", "failed", "failure", "cancelled", "canceled", "timeout", "timed_out", "stalled"]);
+
+const sumKnown = (vals: (number | null)[]): number | null => {
+  const known = vals.filter((v): v is number => v != null);
+  return known.length ? known.reduce((a, b) => a + b, 0) : null;
+};
+
+/** One row for the turn's own calls and one per top-level delegation, or null
+ *  when the turn delegated nothing. The cost total is an amount only when every
+ *  row has one (the turn root's pricing rule), never a partial sum. */
+export function agentBreakdown(rootAttrs: Record<string, any>, spans: NamedAttrs[]): AgentBreakdown | null {
+  const top = topLevelSubagents(spans);
+  if (!top.length) return null;
+  const f = headerFacts(rootAttrs, spans);
+  const main: AgentRow = {
+    label: "main",
+    main: true,
+    model: f.requestModel,
+    tokens: f.totalTokens,
+    calls: attrNum(rootAttrs || {}, "hermes.turn.api_call_count"),
+    cost: f.cost,
+    error: false,
+  };
+  const subs: AgentRow[] = top.map((s) => {
+    const a = s.attributes || {};
+    const role = a["hermes.subagent.role"] || a["gen_ai.agent.name"] || (s.name.startsWith("subagent.") ? s.name.slice("subagent.".length) : "");
+    return {
+      label: role ? String(role) : "subagent",
+      main: false,
+      model: a["gen_ai.request.model"] || null,
+      tokens: attrNum(a, "hermes.subagent.usage.total_tokens"),
+      calls: attrNum(a, "hermes.subagent.api_call_count"),
+      cost: attrNum(a, "hermes.subagent.cost.usage"),
+      error: SUBAGENT_ERROR_STATUSES.has(String(a["hermes.subagent.status"] || "").toLowerCase()),
+    };
+  });
+  const rows = [main, ...subs];
+  return {
+    rows,
+    total: {
+      tokens: sumKnown(rows.map((r) => r.tokens)),
+      calls: sumKnown(rows.map((r) => r.calls)),
+      cost: rows.every((r) => r.cost != null) ? sumKnown(rows.map((r) => r.cost)) : null,
+    },
+  };
+}
 
 /** A Prometheus-style metric name (hermes_tool_duration_sum) as the OTLP name
- *  the plugin emits (hermes.tool.duration). OTLP names pass through. */
+ *  the plugin emits (hermes.tool.duration). OTLP names pass through (a dotted
+ *  ``.count`` can be a real instrument, ``hermes.session.count``; SigNoz's
+ *  histogram parts are told apart by the catalogue, see resolveInstrument). */
 export function metricOtlpName(n: string): string {
   if (n.includes(".")) return n;
   const base = n.replace(/_(sum|count|bucket|total)$/, "");

@@ -20,9 +20,11 @@ Put the settings in `$HERMES_HOME/hermes_otel.yaml` (not Hermes' main `config.ya
 
 ```yaml
 enabled: true
-level: info                # request/response previews, INFO+ Hermes Python logs
-metrics:
-  enabled: true            # explicit global opt-in; a metrics-capable backend is not enough
+level: info                # at most request/response previews
+logs:
+  events:
+    enabled: true
+    content: preview
 dashboard_live: false      # optional: do not retain a local copy of telemetry
 backends:
   - type: otlp
@@ -35,7 +37,7 @@ backends:
 
 The OTLP backend derives `/v1/metrics` and `/v1/logs` from the `/v1/traces` URL. `traces: false` prevents span export but does not disable logs or metrics. A Collector that exports traces only to its `debug` exporter would otherwise write captured prompts to Collector logs.
 
-`level: debug` includes sanitized model-facing request options, messages, and response bodies, capped at 128,000 characters per event with truncation metadata. Large bodies are split into UTF-8-safe parts of at most 8,192 bytes, each with the same `api_request_id` and `body_part_index` / `body_part_count` (1-based), so Graylog retains them; concatenate the body field in part order to reconstruct it. The non-message options come from Hermes's bounded `request_options` hook field; if the host lacks it or its own cap is exceeded, `request_truncated` is true. `level: info` sends short previews with original length and a truncation flag. `level: notice` sends only Hermes Python WARNING/ERROR/CRITICAL records, **not** request/response events; account attribution remains available in metrics when enabled. See [OTel logs](/configuration/logs). The selected credential-pool entry contributes `credential_id` and the unmodified account label `account_name` to request events and API metrics when available. No credential token is used as an identity label.
+Metrics are enabled by default; `metrics.enabled: false` disables the metrics route without disabling events. `level: debug` permits redacted message content only where the capture policy allows it; it does not include raw request options or transport headers. `level: info` permits previews, and `level: notice` keeps events but omits their content. Python logging is configured independently. See [Logs and events](/configuration/logs#provider-request-events) for per-backend narrowing and account-label privacy. If you want a local copy, leave `dashboard_live` enabled (the default).
 
 ## Collector prerequisites
 
@@ -50,6 +52,6 @@ Do not infer a working route from TCP connectivity. A Collector `debug` exporter
 
 ## Manual verification
 
-After configuring the route, send **synthetic** non-secret API request/response events and a metric. Search Graylog for the unique `api_request_id` and inspect `provider`, `model`, `credential_id`, `account_name`, severity, and mode-specific body/truncation fields. Query Prometheus for `hermes_api_request_count_total` and `hermes_token_usage_total` with the same non-secret account labels. An exporter success response is not a substitute for reading each destination back.
+After configuring the route, send **synthetic** non-secret API request/response events and a metric. Search Graylog for the unique `api_request_id` and inspect `provider`, `model`, and the pool-entry labels where available. Verify that the `hermes.api.request` and `hermes.api.response` events carry no more content than configured. Query Prometheus for `hermes_api_request_count_total` and `hermes_token_usage_total` with the same non-secret account labels. An exporter success response is not a substitute for reading each destination back.
 
 For a starting visualization, [download the portable Grafana dashboard](/dashboards/hermes-request-observability.json) and import its JSON manually, selecting your Prometheus datasource. A [provisioning snapshot with expanded metric coverage](/dashboards/hermes-request-observability-provisioned.json) is also available, but it binds panels to one deployment's Prometheus datasource UID; replace that UID for your own installation. The snapshots share a dashboard UID, so do not import both into the same Grafana organization. Their PromQL panels use aggregate metrics; use Graylog's `api_request_id` for per-request investigation. Neither JSON file is evidence that your live pipelines have ingested data.

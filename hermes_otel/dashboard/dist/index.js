@@ -1,10 +1,4432 @@
 /* hermes-otel dashboard — built from dashboard-ui/src (esbuild). Edit the TSX, not this file. */
-"use strict";(()=>{var ne=window.__HERMES_PLUGIN_SDK__||{},Xe=window.__HERMES_PLUGINS__||{},t=ne.React,Ze=ne.hooks||{},f=Ze.useState,T=Ze.useEffect,j=Ze.useCallback,oe=Ze.useMemo,Fe=Ze.useRef,bs=ne.components||{},{Card:_e,CardHeader:ut,CardTitle:Ir,CardContent:Se,Badge:L,Button:O,Input:le,Label:Gt,Select:H,SelectOption:w,Separator:$r,Tabs:Mr,TabsList:Er,TabsTrigger:Or,Checkbox:Br}=bs,P=ne.fetchJSON||(e=>fetch(e).then(n=>n.json())),Pr=ne.buildWsUrl,Ar=ne.utils&&ne.utils.timeAgo||String,_=ne.utils&&ne.utils.cn||((...e)=>e.filter(Boolean).join(" "));function Yt(e,n){Xe&&typeof Xe.register=="function"?Xe.register(e,n):console.error("[hermes_otel] dashboard plugin registry unavailable")}var B="/api/plugins/hermes_otel",Qt=!!(ne&&ne.React&&Xe&&Xe.register);function Nt(e){return e==null?null:typeof e!="object"?e:"stringValue"in e?e.stringValue:"intValue"in e?Number(e.intValue):"doubleValue"in e?e.doubleValue:"boolValue"in e?e.boolValue:"arrayValue"in e?(e.arrayValue.values||[]).map(Nt):"kvlistValue"in e?Zt(e.kvlistValue.values):JSON.stringify(e)}function Zt(e){let n={};for(let s of e||[])s&&s.key&&(n[s.key]=Nt(s.value));return n}function F(e){return e==null?"\u2014":e<1?`${(e*1e3).toFixed(0)}\xB5s`:e<1e3?`${e.toFixed(e<10?1:0)}ms`:e<6e4?`${(e/1e3).toFixed(2)}s`:`${Math.floor(e/6e4)}m ${Math.round(e%6e4/1e3)}s`}function K(e){if(!e)return"";try{return new Date(e/1e6).toLocaleString()}catch{return""}}function se(e){if(!e)return"";let n=Date.now()-e/1e6;return n<1500?"just now":n<6e4?`${Math.round(n/1e3)}s ago`:n<36e5?`${Math.round(n/6e4)}m ago`:n<864e5?`${Math.round(n/36e5)}h ago`:`${Math.round(n/864e5)}d ago`}function D(e){if(e==null||isNaN(Number(e)))return null;let n=Number(e);return n>=1e4?`${(n/1e3).toFixed(n>=1e5?0:1)}k`:n.toLocaleString()}function Re(e){return e?e<.01?`$${e.toFixed(4)}`:`$${e.toFixed(2)}`:"$0"}function Q(e){return e==null?"0":e.toLocaleString()}function _t(e,n){if(e==null)return null;let s=(typeof e=="string"?e:String(e)).replace(/\s+/g," ").trim();return s?s.length<=n?s:s.slice(0,n-1)+"\u2026":null}function we(e,n){let s=n||{};if(s["hermes.span_kind"]==="skill")return"skill";if(s["hermes.span_kind"]==="approval")return"approval";let r=(e||"").toLowerCase();return r==="agent"||r.startsWith("agent.")?"agent":r==="cron"||r.startsWith("cron")?"cron":r.startsWith("session")?"session":r.startsWith("skill.")?"skill":r.startsWith("approval")?"approval":r.startsWith("subagent")?"subagent":r.startsWith("llm.")?"llm":r.startsWith("api.")?"api":r.startsWith("tool.")?"tool":"other"}var Te={agent:"#34d399",llm:"#38bdf8",api:"#22d3ee",tool:"#fbbf24",skill:"#6ee7b7",approval:"#f472b6",subagent:"#a78bfa",session:"#34d399",cron:"#a78bfa",other:"#94a3b8"};function Le(e){let n={},s=e.spanSets||(e.spanSet?[e.spanSet]:[]);if(!s.length)return n;let r=s[0].spans||[],o=l=>{let a=(l.name||"").toLowerCase();return a.startsWith("api.")?0:a.startsWith("tool.")?1:a.startsWith("llm.")?2:3};for(let l of r.slice().sort((a,i)=>o(a)-o(i)))for(let a of l.attributes||[]){if(!a.key||n[a.key]!=null)continue;let i=Nt(a.value);i!=null&&i!==""&&(n[a.key]=i)}return n}function St(e){if(typeof e.spanCount=="number"&&e.spanCount>0)return e.spanCount;if(e.serviceStats){let n=0;for(let s in e.serviceStats)n+=e.serviceStats[s].spanCount||0;if(n)return n}return null}function Rt(e){let n=e["input.value"];if(n==null)return null;if(typeof n=="string"){let s=n.trim();if(s[0]==="["||s[0]==="{")try{let r=JSON.parse(s);if(Array.isArray(r)){for(let o=r.length-1;o>=0;o--){let l=r[o];if(l&&l.role==="user"){let a=l.content;if(typeof a=="string")return a;if(Array.isArray(a)){let i=[];for(let d of a)typeof d=="string"?i.push(d):d&&typeof d.text=="string"&&i.push(d.text);if(i.length)return i.join(" ")}if(a!=null)return JSON.stringify(a)}}for(let o of r)if(o&&typeof o.content=="string")return o.content}return s}catch{return n}return n}return String(n)}function en(e){return e["llm.output.content"]||e["output.value"]||null}function tn(e){if(!e||!e.length)return{roots:[],all:[]};let n=[];for(let l of e){let a=l.scopeSpans||l.scope_spans||l.instrumentationLibrarySpans||[];for(let i of a)for(let d of i.spans||[]){let m=Number(d.startTimeUnixNano||d.start_time_unix_nano||0),u=Number(d.endTimeUnixNano||d.end_time_unix_nano||0);n.push({spanId:d.spanId||d.span_id,parentSpanId:d.parentSpanId||d.parent_span_id||null,name:d.name,startNs:m,endNs:u,durationMs:u&&m?(u-m)/1e6:0,status:d.status||null,_attrs:Zt(d.attributes),children:[]})}}let s={};n.forEach(l=>s[l.spanId]=l);let r=[];n.forEach(l=>{l.parentSpanId&&s[l.parentSpanId]?s[l.parentSpanId].children.push(l):r.push(l)});let o=l=>{l.sort((a,i)=>a.startNs-i.startNs),l.forEach(a=>o(a.children))};return o(r),{roots:r,all:n}}function nn(e){let n=[],s=(r,o)=>{n.push({span:r,depth:o}),r.children.forEach(l=>s(l,o+1))};return e.forEach(r=>s(r,0)),n}function sn(e){var s;if(!e)return null;let n=(s=e.code)!=null?s:e.statusCode;return n===2||n==="STATUS_CODE_ERROR"||e==="ERROR"?"error":n===1||n==="STATUS_CODE_OK"||e==="OK"?"ok":null}function ve(e,...n){for(let s of n){let r=e[s];if(typeof r=="number")return r;if(typeof r=="string"&&r.trim()&&!isNaN(Number(r)))return Number(r)}return null}var xs=e=>ve(e.attributes,"gen_ai.usage.total_tokens","llm.token_count.total"),Xt=e=>ve(e.attributes,"hermes.cost.usage"),ys=e=>e.attributes["gen_ai.request.model"]||e.attributes["llm.model_name"]||e.attributes["gen_ai.response.model"]||null,wt=e=>e.attributes["hermes.session_id"]||e.attributes.session_id||e.attributes["session.id"]||null;function ks(e){let n=Le(e);return n["hermes.session_id"]||n["langfuse.sessionId"]||n["session.id"]||n.session_id||null}function rn(e){let n={};for(let s of e){let r=ks(s);if(!r)continue;let o=Le(s),l=Number(s.startTimeUnixNano||0),a=l+Number(s.durationMs||0)*1e6,i=ve(o,"gen_ai.usage.total_tokens","llm.token_count.total"),d=ve(o,"hermes.cost.usage"),m=St(s),u=n[r]||(n[r]={session:r,turns:0,spans:0,errors:0,tokens:null,cost:null,toolCalls:null,startNs:l,endNs:a,model:o["llm.model_name"]||o["gen_ai.request.model"]||null,platform:o["hermes.platform"]||null,traceIds:[]});u.turns+=1,u.spans=m==null||u.spans==null?null:u.spans+m,(o.status==="error"||o["error.type"])&&(u.errors+=1),i!=null&&(u.tokens=(u.tokens||0)+i),d!=null&&(u.cost=(u.cost||0)+d),u.startNs=Math.min(u.startNs,l),u.endNs=Math.max(u.endNs,a),u.traceIds.push(s.traceID||s.traceId)}return Object.values(n).sort((s,r)=>r.endNs-s.endNs)}function Ns(e){let n=new Set(e.map(l=>l.span_id)),s=e.find(l=>!l.parent_span_id||!n.has(l.parent_span_id))||null,r=l=>{if(s){let d=l(s);if(d!=null)return d}let a=0,i=!1;for(let d of e){if(!d.name.startsWith("api."))continue;let m=l(d);m!=null&&(a+=m,i=!0)}return i?a:null},o=s!=null&&s.attributes["hermes.cost.status"]!=null&&Xt(s)==null;return{tokens:r(xs),cost:o?null:r(Xt)}}function Tt(e){var r;let n={};for(let o of e)(n[r=o.trace_id]||(n[r]=[])).push(o);let s=[];for(let o in n){let l=n[o],a=new Set(l.map(g=>g.span_id)),i=l.find(g=>!g.parent_span_id||!a.has(g.parent_span_id))||l[0],d=Math.min(...l.map(g=>g.start_time_unix_nano||0)),m=Math.max(...l.map(g=>g.end_time_unix_nano||g.start_time_unix_nano||0)),u=Ns(l),c=null,p=!1;for(let g of l)c||(c=ys(g)),g.status==="ERROR"&&(p=!0);s.push({traceId:o,root:i,rootName:i.name,rootKind:we(i.name,i.attributes),service:i.attributes["service.name"]||"hermes",startNs:d,endNs:m,durationMs:(m-d)/1e6,spanCount:l.length,model:c,tokens:u.tokens,cost:u.cost,error:p,session:wt(i),spans:l})}return s.sort((o,l)=>l.startNs-o.startNs)}var _s="MCP send ping";function De(e,n){return e===_s&&!n}function dt(e){let n=e.map(l=>({spanId:l.span_id,parentSpanId:l.parent_span_id||null,name:l.name,startNs:l.start_time_unix_nano||0,endNs:l.end_time_unix_nano||l.start_time_unix_nano||0,durationMs:l.duration_ms||0,status:l.status==="ERROR"?{code:2}:null,_attrs:l.attributes||{},children:[]})),s={};n.forEach(l=>s[l.spanId]=l);let r=[];n.forEach(l=>{l.parentSpanId&&s[l.parentSpanId]?s[l.parentSpanId].children.push(l):r.push(l)});let o=l=>{l.sort((a,i)=>a.startNs-i.startNs),l.forEach(a=>o(a.children))};return o(r),{roots:r,all:n}}var Ss=[["gen_ai.request.model","llm.model_name"],["gen_ai.usage.input_tokens","llm.token_count.prompt"],["gen_ai.usage.output_tokens","llm.token_count.completion"],["gen_ai.usage.total_tokens","llm.token_count.total"],["gen_ai.usage.reasoning.output_tokens","llm.token_count.completion_details.reasoning"],["gen_ai.usage.cache_read.input_tokens","gen_ai.usage.cache_read_input_tokens","llm.token_count.prompt_details.cache_read"],["gen_ai.provider.name","gen_ai.system","llm.provider"],["hermes.session_id","session.id","session_id","gen_ai.conversation.id","wandb.thread_id"],["openinference.span.kind","traceloop.span.kind"]];function on(e){let n=new Set,s={};for(let l of Ss){let a=l.filter(i=>e[i]!==void 0&&e[i]!==null&&e[i]!=="");a.length>1&&(s[a[0]]=a.slice(1),a.slice(1).forEach(i=>n.add(i)))}let r={};for(let l of Object.keys(e).sort()){if(n.has(l))continue;let a=l.includes(".")?l.split(".")[0]:"other";(r[a]||(r[a]={prefix:a,entries:[]})).entries.push({key:l,value:e[l],aliases:s[l]||[]})}let o=["hermes","gen_ai","llm","tool","input","output","session","openinference"];return Object.values(r).sort((l,a)=>{let i=o.indexOf(l.prefix),d=o.indexOf(a.prefix);return(i<0?99:i)-(d<0?99:d)||l.prefix.localeCompare(a.prefix)})}function ct(e,n=[]){let s=e||{},r=(...c)=>ve(s,...c),o=r("gen_ai.usage.total_tokens","llm.token_count.total"),l=r("gen_ai.usage.input_tokens","llm.token_count.prompt"),a=r("gen_ai.usage.output_tokens","llm.token_count.completion");if(o==null){let c=0,p=0,g=0,b=!1;for(let k of n){let I=ve(k,"gen_ai.usage.total_tokens","llm.token_count.total");I!=null&&(c+=I,p+=ve(k,"gen_ai.usage.input_tokens","llm.token_count.prompt")||0,g+=ve(k,"gen_ai.usage.output_tokens","llm.token_count.completion")||0,b=!0)}b&&(o=c,l=l!=null?l:p,a=a!=null?a:g)}let i=s["hermes.turn.tools"],d=[];if(Array.isArray(i))d=i.map(String);else if(typeof i=="string"&&i.trim())try{let c=JSON.parse(i);d=Array.isArray(c)?c.map(String):i.split(",").map(p=>p.trim()).filter(Boolean)}catch{d=i.split(",").map(c=>c.trim()).filter(Boolean)}let m=s["gen_ai.request.model"]||s["llm.model_name"]||null,u=s["gen_ai.response.model"]||null;return{requestModel:m,responseModel:u&&u!==m?u:null,inputTokens:l,outputTokens:a,reasoningTokens:r("gen_ai.usage.reasoning.output_tokens","llm.token_count.completion_details.reasoning"),cacheReadTokens:r("gen_ai.usage.cache_read.input_tokens","gen_ai.usage.cache_read_input_tokens","llm.token_count.prompt_details.cache_read"),totalTokens:o,cost:r("hermes.cost.usage"),tools:d,exitReason:s["hermes.turn.exit_reason"]||null,finalStatus:s["hermes.turn.final_status"]||null,session:s["hermes.session_id"]||s["session.id"]||s.session_id||null,turn:r("hermes.turn.number"),platform:s["hermes.platform"]||null}}function ln(e){if(e.includes("."))return e;let n=e.replace(/_(sum|count|bucket|total)$/,"");return n.startsWith("hermes_prompt_cache_")?"hermes.prompt_cache."+n.slice(20):n.replace(/_/g,".")}function X(e){return t.createElement("span",{className:"text-[11px] font-medium uppercase tracking-wide text-muted-foreground"},e.children)}function J({error:e}){return t.createElement("div",{className:"border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"},e)}function q({label:e,value:n,sub:s,accent:r}){return t.createElement("div",{className:"otel-card-bg border border-border px-3 py-2.5"},t.createElement("div",{className:_("text-xl font-semibold tabular-nums tracking-tight",r==="cost"?"text-emerald-400":r==="error"?"text-destructive":"text-foreground")},n),t.createElement("div",{className:"text-[11px] uppercase tracking-wide text-muted-foreground"},e),s!=null?t.createElement("div",{className:"mt-0.5 text-[11px] text-muted-foreground"},s):null)}function an({active:e}){return t.createElement("span",{className:_("inline-block h-2.5 w-2.5 rounded-full",e?"otel-pulse-dot otel-pulse":"bg-muted-foreground/40")})}function un({values:e,height:n=30,color:s}){let r=Math.max(1,...e),o=e.length||1,l=100/o,a=s||"var(--color-primary, #34d399)";return t.createElement("svg",{viewBox:`0 0 100 ${n}`,preserveAspectRatio:"none",style:{width:"100%",height:n}},e.map((i,d)=>{let m=i/r*(n-2);return t.createElement("rect",{key:d,x:d*l+.25,y:n-m,width:Math.max(.5,l-.5),height:m||.5,fill:a,opacity:.3+.7*(d/o)})}))}function dn({series:e,height:n=120,labels:s,fmt:r}){let o=Math.max(1,...e.map(u=>u.points.length)),l=Math.max(...e.flatMap(u=>u.points),0),a=l>0?l:1,i=u=>r?r(u):u>=1e3?`${(u/1e3).toFixed(u>=1e4?0:1)}k`:u.toFixed(u<10&&u!==Math.round(u)?2:0),d=100,m=u=>u.map((c,p)=>`${p===0?"M":"L"} ${p/Math.max(1,o-1)*d} ${n-c/a*(n-6)-3}`).join(" ");return t.createElement("div",null,t.createElement("svg",{viewBox:`0 0 ${d} ${n}`,preserveAspectRatio:"none",style:{width:"100%",height:n}},[.25,.5,.75].map(u=>t.createElement("line",{key:u,x1:0,x2:d,y1:n*u,y2:n*u,stroke:"var(--color-border)",strokeWidth:.3})),e.map(u=>t.createElement("path",{key:u.label,d:m(u.points),fill:"none",stroke:u.color,strokeWidth:1,vectorEffect:"non-scaling-stroke"}))),t.createElement("div",{className:"mt-1 flex flex-wrap items-center gap-3"},t.createElement("span",{className:"text-[10px] tabular-nums text-muted-foreground/70",title:"y-axis maximum"},"max ",i(l)),s&&s.length?t.createElement("span",{className:"text-[10px] tabular-nums text-muted-foreground/70"},s.join(" \xB7 ")):null,e.map(u=>t.createElement("span",{key:u.label,className:"inline-flex items-center gap-1.5 text-[11px] text-muted-foreground"},t.createElement("span",{className:"otel-w-2 inline-block h-2 rounded-full",style:{background:u.color}}),u.label))))}function U(e,n,s){return t.createElement("svg",{width:e||16,height:e||16,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round",className:n||"","aria-hidden":!0},s)}var ws=e=>U(e.size,e.className,t.createElement("polygon",{points:"13 2 3 14 12 14 11 22 21 10 12 10 13 2"})),Ts=e=>U(e.size,e.className,t.createElement("path",{d:"M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"})),Ls=e=>U(e.size,e.className,[t.createElement("polyline",{key:"a",points:"4 17 10 11 4 5"}),t.createElement("line",{key:"b",x1:12,x2:20,y1:19,y2:19})]),Cs=e=>U(e.size,e.className,[t.createElement("circle",{key:"a",cx:12,cy:12,r:10}),t.createElement("polyline",{key:"b",points:"12 6 12 12 16 14"})]),Lt=e=>U(e.size,e.className,t.createElement("polyline",{points:"22 12 18 12 15 21 9 3 6 12 2 12"})),mt=e=>U(e.size,e.className,t.createElement("path",{d:"m9 18 6-6-6-6"})),cn=e=>U(e.size,e.className,[t.createElement("circle",{key:"a",cx:8,cy:8,r:6}),t.createElement("path",{key:"b",d:"M18.09 10.37A6 6 0 1 1 10.34 18"}),t.createElement("path",{key:"c",d:"M7 6h1v4"}),t.createElement("path",{key:"d",d:"m16.71 13.88.7.71-2.82 2.82"})]),Is=e=>U(e.size,e.className,t.createElement("path",{d:"M9.94 14.06 7 21l-2.94-6.94L-.94 12 7 9.06 9.94 3l2.94 6.06L19.94 12zM18 5l1 2.5L21.5 8 19 9l-1 2.5L17 9l-2.5-1L17 7z"})),$s=e=>U(e.size,e.className,t.createElement("path",{d:"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"})),Ms=e=>U(e.size,e.className,[t.createElement("path",{key:"a",d:"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"}),t.createElement("circle",{key:"b",cx:9,cy:7,r:4}),t.createElement("path",{key:"c",d:"M22 21v-2a4 4 0 0 0-3-3.87"}),t.createElement("path",{key:"d",d:"M16 3.13a4 4 0 0 1 0 7.75"})]),mn=e=>U(e.size,e.className,[t.createElement("path",{key:"a",d:"M3 3v16a2 2 0 0 0 2 2h16"}),t.createElement("path",{key:"b",d:"m19 9-5 5-4-4-3 3"})]),Ct=e=>U(e.size,e.className,[t.createElement("line",{key:"a",x1:8,x2:21,y1:6,y2:6}),t.createElement("line",{key:"b",x1:8,x2:21,y1:12,y2:12}),t.createElement("line",{key:"c",x1:8,x2:21,y1:18,y2:18}),t.createElement("line",{key:"d",x1:3,x2:3.01,y1:6,y2:6}),t.createElement("line",{key:"e",x1:3,x2:3.01,y1:12,y2:12}),t.createElement("line",{key:"f",x1:3,x2:3.01,y1:18,y2:18})]),ae={llm:{Icon:ws,color:"otel-c-llm",label:"llm"},tool:{Icon:Ts,color:"otel-c-tool",label:"tool"},agent:{Icon:Ls,color:"otel-c-agent",label:"agent"},cron:{Icon:Cs,color:"otel-c-cron",label:"cron"},skill:{Icon:Is,color:"otel-c-skill",label:"skill"},approval:{Icon:$s,color:"otel-c-approval",label:"approval"},subagent:{Icon:Ms,color:"otel-c-subagent",label:"subagent"},other:{Icon:Lt,color:"text-muted-foreground",label:null}};function pn(e){return(ae[e]||ae.other).Icon}function gn(e){let n=(e||"").toLowerCase();return n.startsWith("api.")||n.startsWith("llm.")?ae.llm:n.startsWith("skill.")?ae.skill:n.startsWith("approval")?ae.approval:n.startsWith("subagent")?ae.subagent:n.startsWith("tool.")?ae.tool:n==="agent"||n.startsWith("agent.")?ae.agent:n==="cron"||n.startsWith("cron")?ae.cron:ae.other}var fn=e=>U(e.size,e.className,t.createElement(t.Fragment,null,t.createElement("path",{d:"M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"}),t.createElement("circle",{cx:"12",cy:"12",r:"3"}))),vn=e=>U(e.size,e.className,t.createElement(t.Fragment,null,t.createElement("path",{d:"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"}),t.createElement("path",{d:"M21 3v5h-5"}),t.createElement("path",{d:"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"}),t.createElement("path",{d:"M8 16H3v5"}))),hn=e=>U(e.size,e.className,t.createElement(t.Fragment,null,t.createElement("rect",{width:"14",height:"14",x:"8",y:"8",rx:"2",ry:"2"}),t.createElement("path",{d:"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"}))),bn=e=>U(e.size,e.className,t.createElement("path",{d:"M20 6 9 17l-5-5"})),xn=e=>U(e.size,e.className,t.createElement(t.Fragment,null,t.createElement("path",{d:"M15 3h6v6"}),t.createElement("path",{d:"M10 14 21 3"}),t.createElement("path",{d:"M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"})));var Es=/^(https?:\/\/|mailto:|#|\/)/i;function ie(e){let n=[],s="",r=()=>{s&&n.push({t:"text",v:s}),s=""},o=0;for(;o<e.length;){let l=e[o];if(l==="`"){let a=e.indexOf("`",o+1);if(a>o){r(),n.push({t:"code",v:e.slice(o+1,a)}),o=a+1;continue}}if(l==="*"&&e[o+1]==="*"){let a=e.indexOf("**",o+2);if(a>o+2){r(),n.push({t:"strong",children:ie(e.slice(o+2,a))}),o=a+2;continue}}if((l==="*"||l==="_")&&e[o+1]!==l&&e[o+1]!==" "){let a=e.indexOf(l,o+1);if(a>o+1&&e[a-1]!==" "){r(),n.push({t:"em",children:ie(e.slice(o+1,a))}),o=a+1;continue}}if(l==="["){let a=e.indexOf("](",o+1),i=a>0?e.indexOf(")",a+2):-1;if(a>o&&i>a){let d=e.slice(a+2,i).trim();if(Es.test(d)){r(),n.push({t:"link",href:d,children:ie(e.slice(o+1,a))}),o=i+1;continue}}}if(l==="h"&&/^https?:\/\/\S+/.test(e.slice(o))){let a=/^https?:\/\/[^\s<>)]+/.exec(e.slice(o));r(),n.push({t:"link",href:a[0],children:[{t:"text",v:a[0]}]}),o+=a[0].length;continue}s+=l,o++}return r(),n}function yn(e){return e.trim().replace(/^\|/,"").replace(/\|$/,"").split("|").map(n=>n.trim())}var Os=e=>/^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(e);function kn(e){let n=e.replace(/\r\n?/g,`
-`).split(`
-`),s=[],r=[],o=()=>{r.length&&s.push({t:"paragraph",children:ie(r.join(`
-`))}),r=[]},l=0;for(;l<n.length;){let a=n[l],i=/^\s*```\s*(\S*)\s*$/.exec(a);if(i){o();let c=[];for(l++;l<n.length&&!/^\s*```\s*$/.test(n[l]);)c.push(n[l++]);l++,s.push({t:"code",lang:i[1]||"",text:c.join(`
-`)});continue}let d=/^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(a);if(d){o(),s.push({t:"heading",level:d[1].length,children:ie(d[2])}),l++;continue}if(/^\s*([-*_])(\s*\1){2,}\s*$/.test(a)){o(),s.push({t:"rule"}),l++;continue}let m=/^\s*[-*+]\s+(.*)$/.exec(a),u=/^\s*\d+[.)]\s+(.*)$/.exec(a);if(m||u){o();let c=!!u,p=[],g=c?/^\s*\d+[.)]\s+(.*)$/:/^\s*[-*+]\s+(.*)$/;for(;l<n.length;){let b=g.exec(n[l]);if(b)p.push(ie(b[1])),l++;else if(/^\s{2,}\S/.test(n[l])&&p.length)p[p.length-1].push({t:"text",v:" "},...ie(n[l].trim())),l++;else break}s.push({t:"list",ordered:c,items:p});continue}if(/^\s*>\s?/.test(a)){o();let c=[];for(;l<n.length&&/^\s*>\s?/.test(n[l]);)c.push(n[l++].replace(/^\s*>\s?/,""));s.push({t:"quote",children:ie(c.join(`
-`))});continue}if(a.includes("|")&&l+1<n.length&&Os(n[l+1])){o();let c=yn(a).map(ie);l+=2;let p=[];for(;l<n.length&&n[l].includes("|")&&n[l].trim();)p.push(yn(n[l++]).map(ie));s.push({t:"table",header:c,rows:p});continue}if(!a.trim()){o(),l++;continue}r.push(a),l++}return o(),s}function ge({nodes:e}){return t.createElement(t.Fragment,null,e.map((n,s)=>n.t==="text"?t.createElement(t.Fragment,{key:s},n.v):n.t==="code"?t.createElement("code",{key:s,className:"otel-code"},n.v):n.t==="strong"?t.createElement("strong",{key:s},t.createElement(ge,{nodes:n.children})):n.t==="em"?t.createElement("em",{key:s},t.createElement(ge,{nodes:n.children})):t.createElement("a",{key:s,className:"otel-link",href:n.href,target:"_blank",rel:"noreferrer noopener"},t.createElement(ge,{nodes:n.children}))))}function Bs({b:e}){switch(e.t){case"heading":{let n=`h${Math.min(6,e.level)}`;return t.createElement(n,{className:`otel-md-h otel-md-h${Math.min(4,e.level)}`},t.createElement(ge,{nodes:e.children}))}case"paragraph":return t.createElement("p",{className:"otel-md-p"},t.createElement(ge,{nodes:e.children}));case"code":return t.createElement("pre",{className:"otel-pre otel-md-code","data-lang":e.lang||void 0},e.text);case"list":{let n=e.ordered?"ol":"ul";return t.createElement(n,{className:e.ordered?"otel-md-ol":"otel-md-ul"},e.items.map((s,r)=>t.createElement("li",{key:r},t.createElement(ge,{nodes:s}))))}case"quote":return t.createElement("blockquote",{className:"otel-md-quote"},t.createElement(ge,{nodes:e.children}));case"table":return t.createElement("div",{className:"otel-md-tablewrap"},t.createElement("table",{className:"otel-md-table"},t.createElement("thead",null,t.createElement("tr",null,e.header.map((n,s)=>t.createElement("th",{key:s},t.createElement(ge,{nodes:n}))))),t.createElement("tbody",null,e.rows.map((n,s)=>t.createElement("tr",{key:s},n.map((r,o)=>t.createElement("td",{key:o},t.createElement(ge,{nodes:r}))))))));default:return t.createElement("hr",{className:"otel-md-rule"})}}function It({text:e}){let n=kn(e||"");return t.createElement("div",{className:"otel-md"},n.map((s,r)=>t.createElement(Bs,{key:r,b:s})))}function Ie(e){if(typeof e!="string")return e;let n=e.trim();if(!(n.startsWith("[")||n.startsWith("{")))return e;try{return JSON.parse(n)}catch{return e}}function Nn(e){if(typeof e!="string")return e;let n=e.trim();if(!(n.startsWith("[")&&n.endsWith("]")||n.startsWith("{")&&n.endsWith("}"))||!n.includes("'"))return e;try{return JSON.parse(n.replace(/'/g,'"').replace(/\bTrue\b/g,"true").replace(/\bFalse\b/g,"false").replace(/\bNone\b/g,"null"))}catch{return e}}function $t(e){var o,l,a,i,d;if(!e||typeof e!="object")return null;let n=e.function&&typeof e.function=="object"?e.function:e,s=(o=n.name)!=null?o:e.name;if(typeof s!="string"||!s)return null;let r=(d=(i=(a=(l=n.arguments)!=null?l:e.arguments)!=null?a:e.args)!=null?i:e.input)!=null?d:null;return typeof r=="string"&&(r=Ie(r)),{id:e.id!=null?String(e.id):null,name:s,args:r}}function Ps(e){let n=Ie(e);if(!Array.isArray(n)||!n.length)return null;let s=n.map($t);return s.every(r=>r!==null)?s:null}function As(e){if(e==null||e==="")return[];if(typeof e=="string")return[{type:"text",text:e}];if(Array.isArray(e)){let n=[];for(let s of e)if(typeof s=="string")n.push({type:"text",text:s});else if(s&&typeof s=="object"&&typeof s.text=="string")n.push({type:"text",text:s.text});else if(s&&typeof s=="object"&&(s.type==="tool_use"||s.type==="tool_call")){let r=$t(s);r&&n.push({type:"tool_call",...r})}else n.push({type:"other",label:s&&s.type||"part",value:s});return n}return[{type:"other",label:"content",value:e}]}function Fs(e){var o,l,a;let n=Ie(e),s=Array.isArray(n)?n:n&&typeof n=="object"&&(n.role||n["message.role"])?[n]:null;if(!s||!s.length)return null;let r=[];for(let i of s){if(!i||typeof i!="object")return null;let d=(o=i.role)!=null?o:i["message.role"];if(typeof d!="string")return null;let m=As((l=i.content)!=null?l:i["message.content"]),u=(a=i.tool_calls)!=null?a:i["message.tool_calls"];if(Array.isArray(u))for(let c of u){let p=$t(c);p&&m.push({type:"tool_call",...p})}r.push({role:d,parts:m,toolCallId:i.tool_call_id!=null?String(i.tool_call_id):null,name:typeof i.name=="string"?i.name:null})}return r}var Ds=/(^|\n)(#{1,6} |\s*[-*] |\s*\d+\. |```|> )|\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\)/;function Mt(e){let n=e.trim();return/^[[{]/.test(n)||/\\n.*\\n/.test(n)}function Ve(e){return typeof e=="string"&&e.length>0&&Ds.test(e)}var Vs=new Set(["hermes.tool.command","hermes.approval.command","hermes.turn.tool_commands"]),zs=new Set(["hermes.skill.path","hermes.tool.target","hermes.turn.tool_targets","code.file.path"]),js=new Set(["hermes.session_id","session.id","session_id","gen_ai.conversation.id","wandb.thread_id","gen_ai.tool.call.id","gen_ai.response.id","hermes.session.previous_id","hermes.subagent.child_session_id","hermes.subagent.child_id","hermes.subagent.parent_session_id","hermes.subagent.parent_turn_id","hermes.subagent.parent_id","hermes.cron.job_id","correlation.id"]),qs=new Set(["gen_ai.system_instructions","hermes.subagent.goal","hermes.subagent.summary","hermes.approval.description","llm.output.content","error.message"]),_n={"hermes.turn.tools":",","hermes.turn.tool_outcomes":",","hermes.turn.tool_targets":",","hermes.turn.skills":",","hermes.turn.tool_commands":"|","hermes.approval.pattern_keys":",","gen_ai.request.stop_sequences":","};function Ce(e,n){if(typeof n!="string")return Array.isArray(n)?n.map(String):null;let s=_n[e],r=Nn(n);return Array.isArray(r)?r.map(String):s?n.split(s).map(o=>o.trim()).filter(Boolean):null}function Sn(e,n){if(n==null||n==="")return{kind:"empty",value:n,text:""};let s=typeof n=="string"?n:JSON.stringify(n),r=e.toLowerCase();if(typeof n=="boolean"||/^(true|false)$/i.test(s.trim()))return{kind:"bool",value:/^true$/i.test(s.trim())||n===!0,text:s};if(Vs.has(e)&&e!=="hermes.turn.tool_commands")return{kind:"command",value:s,text:s};let o=Ce(e,n),l=typeof n=="string"&&Array.isArray(Nn(n));if(o&&(o.length>1||e in _n||l))return{kind:"list",value:o,text:s};if(js.has(e))return{kind:"id",value:s,text:s};if(zs.has(e))return{kind:"path",value:s,text:s};if(/^https?:\/\/\S+$/.test(s.trim()))return{kind:"url",value:s.trim(),text:s};let a=typeof n=="number"?n:/^-?\d+(\.\d+)?$/.test(s.trim())?Number(s):null;if(a!=null&&Number.isFinite(a))return/(_ms|\.ms|duration_ms|latency_ms)$/.test(r)?{kind:"duration",value:a,text:s}:/duration_s$/.test(r)?{kind:"duration",value:a*1e3,text:s}:{kind:"count",value:a,text:s};let i=Fs(n);if(i)return{kind:"messages",value:i,text:s};let d=Ps(n);if(d)return{kind:"tool_calls",value:d,text:s};let m=Ie(n);return m&&typeof m=="object"?{kind:"json",value:m,text:s}:Mt(s)?{kind:"code",value:s,text:s}:qs.has(e)||Ve(s)?{kind:"markdown",value:s,text:s}:{kind:"text",value:s,text:s}}function wn(e){if(e==null)return"";let n=Ie(e);return typeof n=="string"?n:JSON.stringify(n,null,2)}function pt(e){return Number.isInteger(e)?e.toLocaleString("en-US"):String(e)}function Tn(e){var d,m,u,c;let n=Ce("hermes.turn.tools",e["hermes.turn.tools"])||[],s=Ce("hermes.turn.tool_outcomes",e["hermes.turn.tool_outcomes"])||[],r=Ce("hermes.turn.tool_commands",e["hermes.turn.tool_commands"])||[],o=Ce("hermes.turn.tool_targets",e["hermes.turn.tool_targets"])||[],l=Number(e["hermes.turn.tool_count"])||0,a=Math.max(n.length,s.length,r.length,o.length,l),i=[];for(let p=0;p<a;p++)i.push({tool:(d=n[p])!=null?d:n.length===1?n[0]:null,outcome:(m=s[p])!=null?m:s.length===1?s[0]:null,command:(u=r[p])!=null?u:null,target:(c=o[p])!=null?c:null});return i}var Ln="hermes_otel.attr_view";function Cn(){try{return localStorage.getItem(Ln)==="raw"?"raw":"structured"}catch{return"structured"}}function In(e){try{localStorage.setItem(Ln,e)}catch{}}var $n=1600,Mn=Cn(),Et=new Set;function Ks(e){Mn=e,In(e),Et.forEach(n=>n(e))}function Us(){let[e,n]=f(Mn);return T(()=>(Et.add(n),()=>{Et.delete(n)}),[]),[e,Ks]}function $e({text:e,mono:n,markdown:s}){let[r,o]=f(!1),l=e.length>$n,a=l&&!r?e.slice(0,$n):e;return t.createElement("div",{className:"otel-longtext"},s?t.createElement(It,{text:a}):t.createElement("pre",{className:_("otel-pre",n?"":"otel-prose")},a),l?t.createElement("button",{type:"button",className:"otel-link otel-more",onClick:()=>o(i=>!i)},r?"show less":`show all (${pt(e.length)} chars)`):null)}function Ws({v:e}){return t.createElement("span",{className:typeof e!="string"?"font-mono":""},String(e))}function Ot({value:e}){let n=Object.entries(e||{});return n.length?t.createElement("dl",{className:"otel-attr-table otel-kv-table text-xs"},n.map(([s,r])=>t.createElement(t.Fragment,{key:s},t.createElement("dt",{className:"text-muted-foreground"},s),t.createElement("dd",{className:"min-w-0 break-words"},r&&typeof r=="object"?t.createElement("pre",{className:"otel-pre otel-pre-inline"},JSON.stringify(r,null,2)):typeof r=="string"&&r.includes(`
-`)?t.createElement($e,{text:r,mono:!0}):t.createElement(Ws,{v:r}))))):t.createElement("span",{className:"otel-unset"},"empty")}function Bt({items:e,mono:n}){return t.createElement("span",{className:"otel-chips"},e.map((s,r)=>t.createElement("span",{key:r,className:_("otel-chip",n?"font-mono":"")},s)))}function En({call:e}){let n=e.args;return t.createElement("div",{className:"otel-toolcall"},t.createElement("div",{className:"otel-toolcall-head"},t.createElement("span",{className:"otel-chip otel-chip-tool font-mono"},e.name),e.id?t.createElement("span",{className:"font-mono text-[10px] text-muted-foreground",title:"tool call id"},e.id):null),n&&typeof n=="object"&&!Array.isArray(n)?t.createElement(Ot,{value:n}):n!=null?t.createElement("pre",{className:"otel-pre otel-pre-inline"},typeof n=="string"?n:JSON.stringify(n,null,2)):null)}function Hs({calls:e}){return t.createElement("div",{className:"otel-toolcalls"},e.map((n,s)=>t.createElement(En,{key:n.id||s,call:n})))}var Js={system:"system",user:"user",assistant:"assistant",tool:"tool result",developer:"developer"};function Gs({messages:e}){let[n,s]=f(!1);return t.createElement("div",{className:"otel-chat"},e.map((r,o)=>{let l=r.role.toLowerCase(),a=r.parts.filter(m=>m.type==="text").map(m=>m.text).join(`
-`),d=(l==="system"||l==="developer")&&!n&&a.length>400;return t.createElement("div",{key:o,className:_("otel-msg",`otel-msg-${l}`)},t.createElement("div",{className:"otel-msg-head"},t.createElement("span",{className:_("otel-role",`otel-role-${l}`)},Js[l]||l),r.name?t.createElement("span",{className:"font-mono text-[10px] text-muted-foreground"},r.name):null,r.toolCallId?t.createElement("span",{className:"font-mono text-[10px] text-muted-foreground",title:"answers this tool call"},"\u21B3 ",r.toolCallId):null,d?t.createElement("button",{type:"button",className:"otel-link text-[10px]",onClick:()=>s(!0)},"show all (",pt(a.length)," chars)"):null),r.parts.map((m,u)=>{if(m.type==="text"){let c=d?m.text.slice(0,400)+" \u2026":m.text;return l==="tool"?t.createElement(Ys,{key:u,raw:c}):Ve(c)||l==="assistant"?t.createElement(It,{key:u,text:c}):t.createElement("pre",{key:u,className:"otel-pre otel-prose"},c)}return m.type==="tool_call"?t.createElement(En,{key:u,call:m}):t.createElement("div",{key:u,className:"text-[11px] text-muted-foreground"},t.createElement("span",{className:"otel-chip"},m.label),t.createElement("pre",{className:"otel-pre otel-pre-inline"},JSON.stringify(m.value,null,2)))}))}))}function Ys({raw:e}){var o,l,a;let n=Ie(e);if(n&&typeof n=="object"&&!Array.isArray(n)){let i=(a=(l=(o=n.output)!=null?o:n.result)!=null?l:n.content)!=null?a:n.stdout,d={};for(let[m,u]of Object.entries(n))["output","result","content","stdout"].includes(m)||(d[m]=u);return t.createElement("div",{className:"otel-toolresult"},typeof i=="string"?t.createElement($e,{text:i,mono:!Ve(i),markdown:Ve(i)}):i!=null?t.createElement("pre",{className:"otel-pre"},JSON.stringify(i,null,2)):null,Object.keys(d).length?t.createElement(Ot,{value:d}):null)}if(Array.isArray(n))return t.createElement("pre",{className:"otel-pre"},JSON.stringify(n,null,2));let s=String(n!=null?n:""),r=Ve(s)&&!Mt(s);return t.createElement($e,{text:s,mono:!r,markdown:r})}function Qs({mode:e,onChange:n}){let s=({id:r,label:o})=>t.createElement("button",{type:"button",onClick:()=>n(r),className:_("otel-toggle otel-mode-btn",e===r?"otel-toggle-active text-foreground":"text-muted-foreground hover:text-foreground")},o);return t.createElement("span",{className:"otel-mode"},t.createElement(s,{id:"structured",label:"structured"}),t.createElement(s,{id:"raw",label:"raw"}))}function et({attrKey:e,value:n,label:s,onSessionClick:r}){let[o,l]=Us(),a=Sn(e,n),i=a.kind==="messages"||a.kind==="tool_calls"||a.kind==="json"||a.kind==="markdown",d=s||i?t.createElement("div",{className:"otel-value-head"},s?t.createElement("span",{className:"text-[11px] font-medium uppercase tracking-wide text-muted-foreground"},s):null,i?t.createElement(Qs,{mode:o,onChange:l}):null):null,m;if(i&&o==="raw")m=t.createElement($e,{text:wn(n),mono:!0});else switch(a.kind){case"empty":m=t.createElement("span",{className:"otel-unset"},"unset");break;case"messages":m=t.createElement(Gs,{messages:a.value});break;case"tool_calls":m=t.createElement(Hs,{calls:a.value});break;case"json":m=Array.isArray(a.value)?t.createElement("pre",{className:"otel-pre"},JSON.stringify(a.value,null,2)):t.createElement(Ot,{value:a.value});break;case"markdown":m=t.createElement($e,{text:a.value,markdown:!0});break;case"code":m=t.createElement($e,{text:a.value,mono:!0});break;case"command":m=t.createElement("pre",{className:"otel-pre otel-cmd"},"$ ",a.value);break;case"list":m=t.createElement(Bt,{items:a.value,mono:e.includes("command")||e.includes("target")});break;case"path":m=t.createElement("span",{className:"font-mono break-all"},a.value);break;case"url":m=t.createElement("a",{className:"otel-link font-mono break-all",href:a.value,target:"_blank",rel:"noreferrer noopener"},a.value);break;case"duration":m=t.createElement("span",{className:"tabular-nums"},F(a.value));break;case"count":m=t.createElement("span",{className:"tabular-nums"},pt(a.value));break;case"bool":m=t.createElement("span",{className:_("otel-chip",a.value?"otel-chip-yes":"otel-chip-no")},a.value?"yes":"no");break;case"id":m=r&&/session|conversation|thread/.test(e)?t.createElement("button",{type:"button",className:"otel-link font-mono",title:"show this session's turns",onClick:()=>r(a.value)},a.value):t.createElement("span",{className:"font-mono break-all"},a.value);break;default:m=a.text.length>200||a.text.includes(`
-`)?t.createElement($e,{text:a.text}):t.createElement("span",{className:"break-words"},a.text)}return t.createElement("div",{className:_("otel-value",e==="error.message"?"otel-value-error":"")},d,m)}function he({items:e}){let n=e.filter(s=>s.value!=null&&s.value!==""&&s.value!==!1);return n.length?t.createElement("div",{className:"otel-factrow"},n.map((s,r)=>t.createElement("span",{key:r,className:"otel-fact"},t.createElement("span",{className:"otel-fact-label"},s.label),t.createElement("span",{className:_("otel-fact-value",s.mono?"font-mono":"",s.tone?`otel-tone-${s.tone}`:"")},String(s.value))))):null}function ze({value:e}){if(e==null||e==="")return null;let n=String(e).toLowerCase(),s=/error|fail|denied|timed?_?out|cancel/.test(n);return t.createElement(L,{variant:s?"destructive":"secondary",className:"text-[10px]"},String(e))}var de="live";function ee(e,n){return n&&n!==de&&e.set("backend",n),e}var ue={lookback:1,status:"",kind:"",tool:"",model:"",session:"",minDurationMs:"",text:"",traceId:"",q:"",service:"",rootsOnly:!0};function Pt(e){return Object.keys(ue).every(n=>ue[n]===e[n])}var Bn=["agent","cron","subagent","tool","llm","api","approval","skill"],On={agent:"^agent",cron:"^cron",subagent:"^subagent",tool:"^tool\\.",llm:"^llm\\.",api:"^api\\.",approval:"^approval",skill:"^skill\\."};function tt(e,n=100){let s=new URLSearchParams({lookback_hours:String(e.lookback),limit:String(n)});return e.status&&s.set("status",e.status),e.kind&&s.set("kind",e.kind),e.tool.trim()&&s.set("tool",e.tool.trim()),e.model.trim()&&s.set("model",e.model.trim()),e.session.trim()&&s.set("session",e.session.trim()),Number(e.minDurationMs)>0&&s.set("min_duration_ms",String(Math.floor(Number(e.minDurationMs)))),e.text.trim()&&s.set("text",e.text.trim()),e.traceId.trim()&&s.set("trace_id",e.traceId.trim()),s}function At(e,n,s=50){let r=ee(new URLSearchParams({lookback_hours:String(e.lookback),limit:String(s)}),n),o=e.rootsOnly&&!e.kind&&!e.tool.trim();return r.set("roots_only",String(o)),e.status&&r.set("status",e.status),e.kind&&On[e.kind]&&r.set("name_regex",On[e.kind]),e.tool.trim()&&r.set("tool",e.tool.trim()),e.model.trim()&&r.set("model",e.model.trim()),e.session.trim()&&r.set("session",e.session.trim()),Number(e.minDurationMs)>0&&r.set("min_duration_ms",String(Math.floor(Number(e.minDurationMs)))),e.text.trim()&&r.set("free_text",e.text.trim()),e.q.trim()&&r.set("q",e.q.trim()),e.service.trim()&&r.set("service",e.service.trim()),r}var je={minLevel:"0",logger:"",session:"",traceId:"",text:"",lookback:1},Ft=[100,200,500,1e3],Xs=200;function Pn(e,n,s,r){let o=ee(new URLSearchParams({lookback_hours:String(e.lookback),limit:String(s)}),n);return Number(e.minLevel)>0&&o.set("min_level",e.minLevel),e.logger.trim()&&o.set("logger",e.logger.trim()),e.session.trim()&&o.set("session",e.session.trim()),e.traceId.trim()&&o.set("trace_id",e.traceId.trim()),e.text.trim()&&o.set("text",e.text.trim()),r&&/^\d+$/.test(r)&&o.set("before_ns",r),o}function Dt(e){let n=Number(e.lookback);return{minLevel:e.level&&/^\d+$/.test(e.level)?e.level:je.minLevel,logger:e.logger||"",session:e.session||"",traceId:e.trace||"",text:e.text||"",lookback:n>0?n:je.lookback}}function An(e){return{level:Number(e.minLevel)>0?e.minLevel:"",logger:e.logger.trim(),session:e.session.trim(),trace:e.traceId.trim(),text:e.text.trim(),lookback:e.lookback!==je.lookback?String(e.lookback):""}}function Fn(e){let n=Number(e);return Ft.includes(n)?n:Xs}var Vn="hermes_otel.source";function Zs(){try{return localStorage.getItem(Vn)||de}catch{return de}}function Dn(e){try{localStorage.setItem(Vn,e)}catch{}}function qe(){let[e,n]=f(Zs()),[s,r]=f(null),o=j(()=>{let a=ee(new URLSearchParams,e);P(`${B}/status?${a}`).then(i=>{r(i),e!==de&&!(i.available||[]).some(d=>d.name===e)&&(n(de),Dn(de))}).catch(()=>r({configured:!1,active:null,available:[],reason:"status unavailable"}))},[e]);T(()=>{o()},[o]);let l=j(a=>{Dn(a),n(a)},[]);return{source:e,setSource:l,status:s,refresh:o,isLive:e===de}}var zn=["tab","source","view","trace","session","level","logger","text","lookback","size","before"],Me="hermes_otel:navigate";function be(e){let n=new URLSearchParams(e!=null?e:typeof window!="undefined"?window.location.search:""),s={};for(let r of zn){let o=n.get(r);o&&(s[r]=o)}return s}function Rs(e,n){let s=new URLSearchParams(n!=null?n:typeof window!="undefined"?window.location.search:"");for(let o of zn){if(!(o in e))continue;let l=e[o];l?s.set(o,l):s.delete(o)}let r=s.toString();return r?`?${r}`:""}function ce(e){var n;if(!(typeof window=="undefined"||!((n=window.history)!=null&&n.replaceState)))try{let s=`${window.location.pathname}${Rs(e)}${window.location.hash}`;window.history.replaceState(window.history.state,"",s)}catch{}}function Ke(e){ce(e),typeof window!="undefined"&&window.dispatchEvent(new CustomEvent(Me,{detail:e}))}function xe(e,n,s){T(()=>{if(!s)return;let o=setInterval(()=>{document.hidden||e()},n),l=()=>{document.hidden||e()};return document.addEventListener("visibilitychange",l),()=>{clearInterval(o),document.removeEventListener("visibilitychange",l)}},[e,n,s])}function er(e,n){return e.supported?n==="metrics"?e.metrics:n==="logs"?e.logs:!0:!1}function Ue({source:e,onChange:n,status:s,need:r,className:o}){let l=(s==null?void 0:s.available)||[];return t.createElement("div",{className:_("inline-flex items-center gap-2",o)},t.createElement("span",{className:"text-[11px] font-medium uppercase tracking-wide text-muted-foreground"},"source"),t.createElement(H,{value:e,onValueChange:n,className:"otel-w-56 h-8"},t.createElement(w,{value:de},"\u26A1 Live (in-process)"),l.map(a=>{let i=er(a,r),d=a.supported?r==="metrics"&&!a.metrics?"this backend does not serve metrics to the tab":r==="logs"&&!a.logs?"this backend does not serve logs to the tab":"":"no dashboard adapter for this type";return t.createElement(w,{key:a.name,value:a.name,disabled:!i,title:d},"\u{1F5C4} ",a.name,a.type!==a.name?` (${a.type})`:"",i?"":" \xB7 unavailable")})))}var tr=3e3,nr={ERROR:"text-destructive",CRITICAL:"text-destructive",WARNING:"otel-c-tool",WARN:"otel-c-tool",INFO:"otel-c-llm",DEBUG:"text-muted-foreground"};function Vt({l:e,absolute:n,onTrace:s}){let r=(e.level||"INFO").toUpperCase(),o=e.time_unix_nano||0;return t.createElement("div",{className:"flex items-start gap-2 border-b border-border/60 px-3 py-1 last:border-b-0"},t.createElement("span",{className:_("shrink-0 text-muted-foreground/70",n?"otel-w-40":"otel-w-14"),title:o?K(o):""},o?n?K(o):se(o):""),t.createElement("span",{className:_("otel-w-12 shrink-0 font-semibold",nr[r]||"text-muted-foreground")},r),e.logger?t.createElement("span",{className:"otel-w-40 shrink-0 truncate text-muted-foreground",title:e.logger},e.logger):null,t.createElement("span",{className:"min-w-0 flex-1 whitespace-pre-wrap break-words text-foreground/90"},e.body),e.trace_id?t.createElement("button",{type:"button",className:"otel-link shrink-0 font-mono text-[10px] text-muted-foreground/70",title:`open trace ${e.trace_id}`,onClick:()=>s==null?void 0:s(String(e.trace_id))},String(e.trace_id).slice(0,8)):null)}function jn(){let{source:e,setSource:n,status:s,isLive:r}=qe(),o=be(),[l,a]=f(()=>Dt(o)),[i,d]=f(()=>Dt(o)),[m,u]=f(()=>Fn(o.size)),[c,p]=f(()=>o.before&&/^\d+$/.test(o.before)?[o.before]:[]),[g,b]=f([]),[k,I]=f(null),[Y,M]=f(!1),[G,A]=f([]),[V,N]=f(!1),[C,E]=f(!1),[z,$]=f(null),[W,h]=f(null),v=Fe(!1),S=c.length?c[c.length-1]:null,te=c.length===0,ke=r?`${B}/live`:B,fe=r||!!(s!=null&&s.logs);T(()=>{ce({...An(i),size:m!==200?String(m):"",before:S||""})},[i,m,S]);let Je=j(async()=>{if(!(!fe||v.current)){v.current=!0;try{if(r){let R=await P(`${B}/live/status`);if(h(R&&R.live!==!1),!R||R.live===!1)return}let x=await P(`${ke}/logs/search?${Pn(i,e,m,S)}`);b(sr(x.logs||[])),I(x.next_before_ns!=null?String(x.next_before_ns):null),M(!!x.has_more),$(null)}catch(x){$(String((x==null?void 0:x.message)||x))}finally{v.current=!1}}},[i,ke,S,fe,r,m,e]);T(()=>{Je()},[Je]),xe(Je,tr,!C&&fe&&te),T(()=>{if(!fe)return;let x=ee(new URLSearchParams,e);P(`${ke}/loggers?${x}`).then(R=>A(R.loggers||[])).catch(()=>A([]))},[ke,fe,e]);let pe=(x,R)=>a({...l,[x]:R}),Ge=x=>{d(x),p([])},Be=()=>{k&&p(x=>[...x,k])},Pe=()=>p(x=>x.slice(0,-1)),Ae=()=>p([]),rt=x=>Ke({tab:"traces",source:e,trace:x,view:"turns"}),ot=g.length&&g[g.length-1].time_unix_nano||0,lt=g.length&&g[0].time_unix_nano||0,Ye=t.createElement("div",{className:"flex flex-wrap items-center justify-between gap-2"},t.createElement("div",{className:"flex flex-wrap items-center gap-3"},t.createElement(Ue,{source:e,onChange:n,status:s,need:"logs"}),t.createElement("span",{className:"text-xs text-muted-foreground"},g.length," line",g.length===1?"":"s",c.length?` \xB7 page ${c.length+1}`:"",te?C?" \xB7 paused":" \xB7 following":" \xB7 older page, not following")),t.createElement("div",{className:"flex items-center gap-2"},t.createElement("label",{className:"inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"},t.createElement("input",{type:"checkbox",checked:V,onChange:x=>N(x.target.checked)}),"absolute times"),t.createElement(H,{value:String(m),onValueChange:x=>{u(Number(x)),p([])},className:"h-8"},Ft.map(x=>t.createElement(w,{key:x,value:String(x)},x," / page"))),t.createElement(O,{variant:"outline",size:"sm",onClick:()=>E(x=>!x),disabled:!te},C?"\u25B6 Resume":"\u23F8 Pause")));if(!fe)return t.createElement("div",{className:"space-y-3"},Ye,t.createElement("div",{className:"border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground"},t.createElement("div",{className:"mb-1 text-base font-medium text-foreground"},"This source does not serve logs"),"Pick the Live source, or a backend whose adapter serves logs (OpenObserve, SigNoz, Uptrace, LGTM)."));let Qe=t.createElement("div",{className:"flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"},t.createElement("span",null,g.length?`${K(ot)} \u2192 ${K(lt)}`:""),t.createElement("div",{className:"flex items-center gap-2"},t.createElement(O,{variant:"outline",size:"sm",onClick:Ae,disabled:te},"\u23EE Newest"),t.createElement(O,{variant:"outline",size:"sm",onClick:Pe,disabled:te},"\u2190 Newer"),t.createElement(O,{variant:"outline",size:"sm",onClick:Be,disabled:!Y||!k},"Older \u2192")));return t.createElement("div",{className:"space-y-3"},Ye,t.createElement("form",{className:"otel-search-grid",onSubmit:x=>{x.preventDefault(),Ge(l)}},t.createElement(H,{value:l.minLevel,onValueChange:x=>pe("minLevel",x),className:"h-8"},t.createElement(w,{value:"0"},"All levels"),t.createElement(w,{value:"20"},"Info+"),t.createElement(w,{value:"30"},"Warn+"),t.createElement(w,{value:"40"},"Error")),t.createElement(H,{value:l.logger,onValueChange:x=>pe("logger",x),className:"h-8"},t.createElement(w,{value:""},"Any logger"),l.logger&&!G.some(x=>x.logger===l.logger)?t.createElement(w,{value:l.logger},l.logger):null,G.map(x=>t.createElement(w,{key:x.logger,value:x.logger},x.logger," (",x.count,")"))),t.createElement(le,{className:"h-8",placeholder:"session id",value:l.session,onChange:x=>pe("session",x.target.value)}),t.createElement(le,{className:"h-8",placeholder:"trace id",value:l.traceId,onChange:x=>pe("traceId",x.target.value)}),t.createElement(le,{className:"h-8",placeholder:"text\u2026",value:l.text,onChange:x=>pe("text",x.target.value)}),t.createElement(H,{value:String(l.lookback),onValueChange:x=>pe("lookback",Number(x)),className:"h-8"},t.createElement(w,{value:"0.25"},"15m"),t.createElement(w,{value:"1"},"1h"),t.createElement(w,{value:"6"},"6h"),t.createElement(w,{value:"24"},"24h"),t.createElement(w,{value:"168"},"7d"),t.createElement(w,{value:"720"},"30d")),t.createElement("div",{className:"flex items-center gap-2"},t.createElement(O,{type:"submit",size:"sm"},"Search"),t.createElement(O,{type:"button",variant:"outline",size:"sm",onClick:()=>{a(je),Ge(je)}},"Clear"))),z?t.createElement(J,{error:z}):null,r&&W===!1?t.createElement("div",{className:"border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground"},t.createElement("div",{className:"mb-1 text-base font-medium text-foreground"},"Live mode is off"),"Set ",t.createElement("span",{className:"font-mono"},"dashboard_live: true")," and ",t.createElement("span",{className:"font-mono"},"capture_logs: true"),", then run a turn."):g.length===0?t.createElement("div",{className:"border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground"},t.createElement("div",{className:"mb-1 text-base font-medium text-foreground"},te?"No log lines":"No older lines"),te?r?t.createElement(t.Fragment,null,"Set ",t.createElement("span",{className:"font-mono"},"capture_logs: true")," in the plugin config and run a turn \u2014 the agent's log lines stream here. Lines written while a turn is in flight carry its trace and session id."):"Nothing matched in this window.":t.createElement(O,{variant:"outline",size:"sm",onClick:Pe},"\u2190 Back to the newer page")):t.createElement(t.Fragment,null,Qe,t.createElement("div",{className:"otel-card-bg overflow-hidden border border-border font-mono text-xs"},g.map((x,R)=>{var y;return t.createElement(Vt,{key:(y=x.seq)!=null?y:`${x.time_unix_nano||0}:${R}`,l:x,absolute:V,onTrace:rt})})),Qe))}function sr(e){let n=new Set,s=[];for(let r of e){let o=`${r.time_unix_nano||0}|${r.logger||""}|${r.body||""}`;n.has(o)||(n.add(o),s.push(r))}return s}function rr({text:e,label:n}){let[s,r]=f(!1);return t.createElement("button",{type:"button",className:"otel-link text-[10px] text-muted-foreground",title:`copy ${e}`,onClick:o=>{var l;o.stopPropagation();try{(l=navigator.clipboard)==null||l.writeText(e),r(!0),setTimeout(()=>r(!1),1200)}catch{}}},s?"copied":n||"copy")}function Ee({label:e,children:n}){return n==null||n===""||n===!1?null:t.createElement("div",{className:"min-w-0"},t.createElement("div",{className:"text-[10px] uppercase tracking-wide text-muted-foreground"},e),t.createElement("div",{className:"truncate text-sm text-foreground"},n))}function gt({title:e,traceId:n,service:s,durationMs:r,rootAttrs:o,spansAttrs:l,error:a,uiUrl:i,uiLabel:d,source:m,onBack:u}){var g,b;let c=ct(o,l||[]),p=c.totalTokens!=null?`${D(c.totalTokens)}${c.inputTokens!=null||c.outputTokens!=null?` (in ${D((g=c.inputTokens)!=null?g:0)} \xB7 out ${D((b=c.outputTokens)!=null?b:0)}${c.reasoningTokens?` \xB7 reasoning ${D(c.reasoningTokens)}`:""}${c.cacheReadTokens?` \xB7 cache read ${D(c.cacheReadTokens)}`:""})`:""}`:null;return t.createElement("div",{className:"space-y-3"},t.createElement("div",{className:"flex flex-wrap items-start justify-between gap-3"},t.createElement("div",{className:"min-w-0 space-y-1"},t.createElement("div",{className:"flex flex-wrap items-center gap-2"},t.createElement("span",{className:"text-lg font-semibold uppercase tracking-tight"},e),a?t.createElement(L,{variant:"destructive",className:"text-[10px]"},"error"):null,c.platform?t.createElement(L,{variant:"secondary",className:"text-[10px]"},c.platform):null,c.turn!=null?t.createElement(L,{variant:"secondary",className:"text-[10px]"},"turn ",c.turn):null),t.createElement("div",{className:"flex flex-wrap items-center gap-2 text-xs text-muted-foreground"},s?t.createElement("span",null,s):null,t.createElement("span",{className:"font-mono"},n),t.createElement(rr,{text:n,label:"copy id"}),i?t.createElement("a",{className:"otel-link",href:i,target:"_blank",rel:"noreferrer"},"open in ",d||"backend"," \u2197"):null)),t.createElement(O,{variant:"ghost",size:"sm",onClick:u},"\u2190 Back")),t.createElement("div",{className:"otel-facts-grid"},t.createElement(Ee,{label:"duration"},F(r)),t.createElement(Ee,{label:"model"},c.requestModel?t.createElement("span",{className:"font-mono"},c.requestModel):null,c.responseModel?t.createElement("span",{className:"ml-1 text-xs text-muted-foreground",title:"the model named in the response, when it differs from the request"},"(served: ",c.responseModel,")"):null),t.createElement(Ee,{label:"tokens"},p),t.createElement(Ee,{label:"cost"},c.cost!=null?t.createElement("span",{className:"text-emerald-400"},"$",c.cost.toFixed(4)):t.createElement("span",{className:"text-muted-foreground"},"no pricing data")),t.createElement(Ee,{label:"tools"},c.tools.length?c.tools.join(", "):null),t.createElement(Ee,{label:"outcome"},c.finalStatus||c.exitReason?`${c.finalStatus||""}${c.finalStatus&&c.exitReason?" \xB7 ":""}${c.exitReason||""}`:null),t.createElement(Ee,{label:"session"},c.session?t.createElement("button",{type:"button",className:"otel-link font-mono",title:"show this session's turns",onClick:()=>Ke({tab:"traces",source:m,view:"sessions",session:String(c.session),trace:""})},c.session):null)))}function qn({label:e,children:n}){return n==null?null:t.createElement("div",{className:"space-y-1"},t.createElement(X,null,e),n)}var me=(e,...n)=>{for(let s of n)if(e[s]!=null&&e[s]!=="")return e[s];return null};function Z({a:e,label:n,keys:s,source:r}){let o=s.find(l=>e[l]!=null&&e[l]!=="");return o?t.createElement(et,{attrKey:o,value:e[o],label:n,onSessionClick:r?l=>Ke({tab:"traces",source:r,view:"sessions",session:l,trace:""}):void 0}):null}function Kn({span:e,source:n}){var a,i,d,m;let s=e._attrs||{},r=we(e.name,s),o=(a=s["error.message"])!=null?a:s["exception.message"],l=o?t.createElement(et,{attrKey:"error.message",value:o,label:s["error.type"]?`error \xB7 ${s["error.type"]}`:"error"}):null;if(r==="tool"){let u=String(s["hermes.preview.output.truncated"])==="true";return t.createElement("div",{className:"space-y-2"},t.createElement("div",{className:"flex flex-wrap items-center gap-2 text-xs"},me(s,"tool.name","gen_ai.tool.name")?t.createElement(L,{variant:"secondary",className:"font-mono text-[10px]"},String(me(s,"tool.name","gen_ai.tool.name"))):null,t.createElement(ze,{value:s["hermes.tool.outcome"]||s.status}),s["hermes.tool.blocked_by"]?t.createElement(L,{variant:"destructive",className:"text-[10px]"},"blocked by ",String(s["hermes.tool.blocked_by"])):null,s["hermes.tool.decided_by"]?t.createElement("span",{className:"text-muted-foreground"},"decided by ",String(s["hermes.tool.decided_by"])):null),t.createElement(he,{items:[{label:"target",value:s["hermes.tool.target"],mono:!0},{label:"call id",value:s["gen_ai.tool.call.id"],mono:!0},{label:"cpu avg / peak",value:s["hermes.tool.cpu.utilization.avg"]!=null?`${s["hermes.tool.cpu.utilization.avg"]} / ${(i=s["hermes.tool.cpu.utilization.peak"])!=null?i:"?"}`:null},{label:"gpu avg / peak",value:s["hermes.tool.gpu.utilization.avg"]!=null?`${s["hermes.tool.gpu.utilization.avg"]} / ${(d=s["hermes.tool.gpu.utilization.peak"])!=null?d:"?"}`:null}]}),l,t.createElement(Z,{a:s,label:"command",keys:["hermes.tool.command"]}),t.createElement(Z,{a:s,label:"arguments",keys:["input.value","gen_ai.tool.call.arguments"]}),t.createElement(Z,{a:s,label:u?`result \xB7 preview of ${D(s["hermes.preview.output.original_chars"])||"?"} chars`:"result",keys:["output.value","gen_ai.tool.call.result"]}))}if(r==="llm"||r==="api"){let u=ct(s);return t.createElement("div",{className:"space-y-2"},t.createElement(he,{items:[{label:"model",value:u.requestModel,mono:!0},{label:"served by",value:u.responseModel,mono:!0},{label:"tokens",value:u.totalTokens!=null?`${D(u.totalTokens)}${u.inputTokens!=null?` (in ${D(u.inputTokens)} \xB7 out ${D((m=u.outputTokens)!=null?m:0)}${u.reasoningTokens?` \xB7 reasoning ${D(u.reasoningTokens)}`:""}${u.cacheReadTokens?` \xB7 cache ${D(u.cacheReadTokens)}`:""})`:""}`:null},{label:"finish",value:me(s,"llm.response.finish_reason","gen_ai.response.finish_reasons")},{label:"latency",value:s["llm.response.duration_ms"]!=null?F(Number(s["llm.response.duration_ms"])):null},{label:"messages",value:s["llm.request.message_count"]},{label:"mode",value:s["llm.api_mode"]},{label:"tool calls",value:s["llm.response.tool_calls"]},{label:"http",value:me(s,"http.response.status_code","gen_ai.response.status_code"),tone:Number(me(s,"http.response.status_code","gen_ai.response.status_code"))>=400?"bad":void 0},{label:"retries",value:s["hermes.retry.count"]!=null?`${s["hermes.retry.count"]}${s["hermes.max_retries"]!=null?` of ${s["hermes.max_retries"]}`:""}`:null}]}),l,t.createElement(Z,{a:s,label:r==="llm"?"input":"prompt",keys:["llm.input_messages","input.value","gen_ai.input.messages"]}),t.createElement(Z,{a:s,label:"response",keys:["llm.output.content","output.value","gen_ai.output.messages"]}),s["gen_ai.system_instructions"]&&!s["input.value"]?t.createElement(Z,{a:s,label:"system instructions",keys:["gen_ai.system_instructions"]}):null)}if(r==="agent"||r==="session"){let u=ct(s),c=Tn(s),p=Ce("hermes.turn.skills",s["hermes.turn.skills"]);return t.createElement("div",{className:"space-y-2"},t.createElement("div",{className:"flex flex-wrap items-center gap-2 text-xs"},t.createElement(ze,{value:s["hermes.turn.final_status"]}),s["hermes.session.kind"]?t.createElement(L,{variant:"secondary",className:"text-[10px]"},String(s["hermes.session.kind"])):null,String(s["hermes.session.is_subagent"])==="true"?t.createElement(L,{variant:"secondary",className:"text-[10px]"},"sub-agent"):null,String(s["hermes.session.interrupted"])==="true"?t.createElement(L,{variant:"destructive",className:"text-[10px]"},"interrupted"):null,String(s["hermes.session.failed"])==="true"?t.createElement(L,{variant:"destructive",className:"text-[10px]"},"failed"):null,String(s["hermes.session.synthesized"])==="true"?t.createElement(L,{variant:"secondary",className:"text-[10px]",title:"root recreated by the plugin after a restart"},"synthesized"):null),t.createElement(he,{items:[{label:"exit",value:s["hermes.turn.exit_reason"]},{label:"api calls",value:s["hermes.turn.api_call_count"]},{label:"tokens",value:u.totalTokens!=null?D(u.totalTokens):null},{label:"platform",value:s["hermes.platform"]},{label:"profile",value:s["hermes.profile"]},{label:"turn",value:s["hermes.turn.number"]},{label:"previous session",value:s["hermes.session.previous_id"],mono:!0}]}),l,t.createElement(Z,{a:s,label:"user message",keys:["input.value","gen_ai.input.messages"],source:n}),t.createElement(Z,{a:s,label:"final response",keys:["output.value","gen_ai.output.messages"]}),c.length?t.createElement(qn,{label:`tools \xB7 ${c.length}`},t.createElement("dl",{className:"otel-attr-table otel-kv-table text-xs"},c.map((g,b)=>t.createElement(t.Fragment,{key:b},t.createElement("dt",{className:"font-mono"},g.tool||"\xB7"),t.createElement("dd",{className:"min-w-0 break-words"},t.createElement(ze,{value:g.outcome}),g.command?t.createElement("code",{className:"otel-code ml-1"},g.command):null,g.target?t.createElement("span",{className:"ml-1 font-mono text-muted-foreground"},g.target):null))))):null,p&&p.length?t.createElement(qn,{label:"skills"},t.createElement(Bt,{items:p,mono:!0})):null)}return r==="skill"?t.createElement("div",{className:"space-y-2"},t.createElement("div",{className:"flex flex-wrap items-center gap-2 text-xs"},me(s,"hermes.skill.name","gen_ai.skill.name")?t.createElement(L,{variant:"secondary",className:"font-mono text-[10px]"},String(me(s,"hermes.skill.name","gen_ai.skill.name"))):null,t.createElement(ze,{value:s["hermes.skill.result_status"]}),s["hermes.skill.source"]?t.createElement("span",{className:"text-muted-foreground"},"loaded via ",String(s["hermes.skill.source"])):null),t.createElement(he,{items:[{label:"path",value:s["hermes.skill.path"],mono:!0}]}),l):r==="approval"?t.createElement("div",{className:"space-y-2"},t.createElement("div",{className:"flex flex-wrap items-center gap-2 text-xs"},s["hermes.approval.choice"]?t.createElement(L,{variant:"secondary",className:"text-[10px]"},"\u{1F464} ",String(s["hermes.approval.choice"])):null,s["hermes.approval.granted"]!=null?t.createElement(L,{variant:String(s["hermes.approval.granted"])==="true"?"secondary":"destructive",className:"text-[10px]"},String(s["hermes.approval.granted"])==="true"?"granted":"denied"):null,String(s["hermes.approval.timed_out"])==="true"?t.createElement(L,{variant:"destructive",className:"text-[10px]"},"timed out"):null),t.createElement(he,{items:[{label:"decided by",value:s["hermes.approval.decided_by"]},{label:"surface",value:s["hermes.approval.surface"]},{label:"waited",value:s["hermes.approval.duration_ms"]!=null?F(Number(s["hermes.approval.duration_ms"])):null},{label:"pattern",value:me(s,"hermes.approval.pattern_key","hermes.approval.pattern_keys"),mono:!0}]}),t.createElement(Z,{a:s,label:"command",keys:["hermes.approval.command"]}),t.createElement(Z,{a:s,label:"description",keys:["hermes.approval.description"]})):r==="subagent"?t.createElement("div",{className:"space-y-2"},t.createElement("div",{className:"flex flex-wrap items-center gap-2 text-xs"},s["hermes.subagent.role"]?t.createElement(L,{variant:"secondary",className:"text-[10px]"},String(s["hermes.subagent.role"])):null,t.createElement(ze,{value:s["hermes.subagent.status"]})),t.createElement(he,{items:[{label:"duration",value:s["hermes.subagent.duration_ms"]!=null?F(Number(s["hermes.subagent.duration_ms"])):null},{label:"child session",value:me(s,"hermes.subagent.child_session_id","hermes.subagent.child_id"),mono:!0},{label:"parent session",value:me(s,"hermes.subagent.parent_session_id","hermes.subagent.parent_id"),mono:!0}]}),l,t.createElement(Z,{a:s,label:"goal",keys:["hermes.subagent.goal","input.value"]}),t.createElement(Z,{a:s,label:"summary",keys:["hermes.subagent.summary","output.value"]})):r==="cron"?t.createElement("div",{className:"space-y-2"},t.createElement(he,{items:[{label:"job",value:s["hermes.cron.job_id"],mono:!0}]}),l,t.createElement(Z,{a:s,label:"input",keys:["input.value"]}),t.createElement(Z,{a:s,label:"output",keys:["output.value"]})):l?t.createElement("div",{className:"space-y-2"},l):null}var or=new Set(["input.value","output.value","gen_ai.input.messages","gen_ai.output.messages","llm.input_messages","llm.output.content","gen_ai.tool.call.arguments","gen_ai.tool.call.result","gen_ai.system_instructions","hermes.conversation.history"]);function Un({attrs:e,source:n}){let s=on(e||{});if(!s.length)return t.createElement("div",{className:"text-xs text-muted-foreground"},"(no attributes)");let r=n?o=>Ke({tab:"traces",source:n,view:"sessions",session:o,trace:""}):void 0;return t.createElement("div",{className:"space-y-3"},s.map(o=>t.createElement("div",{key:o.prefix},t.createElement(X,null,o.prefix),t.createElement("dl",{className:"otel-attr-table text-xs"},o.entries.map(l=>t.createElement(t.Fragment,{key:l.key},t.createElement("dt",{className:"text-muted-foreground",title:l.aliases.length?`also: ${l.aliases.join(", ")}`:""},l.key,l.aliases.length?t.createElement("span",{className:"ml-1 text-[10px] text-muted-foreground/60"},"+",l.aliases.length):null),t.createElement("dd",{className:"min-w-0 break-words text-foreground"},or.has(l.key)?t.createElement("details",{className:"otel-details"},t.createElement("summary",{className:"cursor-pointer text-[11px] text-muted-foreground"},String(l.value).length.toLocaleString("en-US")," chars"),t.createElement("div",{className:"mt-1"},t.createElement(et,{attrKey:l.key,value:l.value}))):t.createElement(et,{attrKey:l.key,value:l.value,onSessionClick:r}))))))))}function ft({traceId:e,source:n,logsAvailable:s,spans:r,raw:o}){let[l,a]=f("spans"),[i,d]=f(null),[m,u]=f(null);T(()=>{if(l!=="logs"||i!==null)return;let p=n==="live"?`${B}/live`:B,g=ee(new URLSearchParams({trace_id:e,limit:"500",lookback_hours:"8760"}),n);P(`${p}/logs/search?${g}`).then(b=>d(b.logs||[])).catch(b=>{u(String((b==null?void 0:b.message)||b)),d([])})},[l,i,n,e]);let c=({id:p,label:g})=>t.createElement("button",{type:"button",onClick:()=>a(p),className:_("otel-toggle px-3 py-1 text-xs font-medium transition-colors",l===p?"otel-toggle-active text-foreground":"text-muted-foreground hover:text-foreground")},g);return t.createElement("div",{className:"space-y-3"},t.createElement("div",{className:"otel-card-bg inline-flex border border-border p-0.5"},t.createElement(c,{id:"spans",label:"Spans"}),s?t.createElement(c,{id:"logs",label:"Logs"}):null,t.createElement(c,{id:"raw",label:"Raw"})),l==="spans"?r:null,l==="logs"?m?t.createElement(J,{error:m}):i===null?t.createElement("div",{className:"text-xs text-muted-foreground"},"Loading\u2026"):i.length===0?t.createElement("div",{className:"border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground"},"No log lines carry this trace id."):t.createElement("div",{className:"otel-card-bg overflow-hidden border border-border font-mono text-xs"},i.map((p,g)=>{var b;return t.createElement(Vt,{key:(b=p.seq)!=null?b:g,l:p,absolute:!0})})):null,l==="raw"?t.createElement("pre",{className:"otel-pre otel-raw"},JSON.stringify(o,null,2)):null)}function lr({span:e,depth:n,open:s,onToggle:r,startMs:o,offsetPct:l,durPct:a,hasKids:i}){let d=we(e.name,e._attrs),m=Te[d],u=sn(e.status)==="error",c=e._attrs["hermes.cost.usage"],p=e._attrs["gen_ai.usage.total_tokens"]||e._attrs["llm.token_count.total"],g=e._attrs["hermes.approval.choice"],b=Math.min(100-l,Math.max(.8,a));return t.createElement("div",{className:_("otel-card-bg otel-hoverable overflow-hidden border transition-colors",u?"border-destructive/40":"border-border")},t.createElement("div",{className:"otel-track relative h-1.5 w-full",title:`+${F(o)} \xB7 ${F(e.durationMs)}`},t.createElement("div",{className:"absolute inset-y-0",style:{left:`${l}%`,width:`${b}%`,minWidth:2,background:m}})),t.createElement("div",{className:"flex cursor-pointer items-center gap-2 px-3 py-2",style:{paddingLeft:12+n*20},onClick:r},t.createElement("span",{className:"w-3 shrink-0 text-xs text-muted-foreground"},i?s?"\u25BE":"\u25B8":""),t.createElement("span",{className:"otel-w-2 inline-block h-2 shrink-0 rounded-full",style:{background:m}}),t.createElement("span",{className:"truncate font-mono text-sm",title:e.name},e.name),u?t.createElement(L,{variant:"destructive",className:"shrink-0 text-[10px]"},"error"):null,g?t.createElement(L,{variant:"secondary",className:"shrink-0 text-[10px]"},"\u{1F464} ",g):null,t.createElement("div",{className:"ml-auto flex shrink-0 items-center gap-3 text-[11px] text-muted-foreground"},p?t.createElement("span",{className:"tabular-nums"},D(p)," tok"):null,c?t.createElement("span",{className:"tabular-nums text-emerald-400"},"$",Number(c).toFixed(4)):null,o>.5?t.createElement("span",{className:"tabular-nums",title:"start offset from trace begin"},"+",F(o)):null,t.createElement("span",{className:"otel-w-14 text-right font-medium tabular-nums text-foreground"},F(e.durationMs)))),s?t.createElement("div",{className:"space-y-3 border-t border-border/60 bg-muted/20 px-3 py-3"},t.createElement(Kn,{span:e}),t.createElement("details",{className:"otel-details"},t.createElement("summary",{className:"cursor-pointer text-[11px] font-medium uppercase tracking-wide text-muted-foreground"},"all attributes"),t.createElement("div",{className:"mt-2"},t.createElement(Un,{attrs:e._attrs})))):null)}function zt({roots:e,defaultOpen:n}){let s=oe(()=>nn(e),[e]),[r,o]=f(()=>n?Object.fromEntries(s.map(u=>[u.span.spanId,!0])):{});if(!s.length)return t.createElement("div",{className:"py-6 text-center text-sm text-muted-foreground"},"No spans.");let l=Math.min(...s.map(u=>u.span.startNs)),a=Math.max(...s.map(u=>u.span.endNs))-l||1,i=u=>o(c=>({...c,[u]:!c[u]})),d=()=>o(Object.fromEntries(s.map(u=>[u.span.spanId,!0]))),m=()=>o({});return t.createElement("div",{className:"space-y-2"},t.createElement("div",{className:"flex items-center justify-between"},t.createElement("span",{className:"text-[11px] text-muted-foreground"},s.length," span",s.length===1?"":"s"," \xB7 ",F(a/1e6)," total"),t.createElement("div",{className:"flex gap-2"},t.createElement(O,{variant:"outline",size:"sm",onClick:d},"Expand all"),t.createElement(O,{variant:"outline",size:"sm",onClick:m},"Collapse"))),t.createElement("div",{className:"flex flex-col gap-1.5"},s.map(u=>t.createElement(lr,{key:u.span.spanId,span:u.span,depth:u.depth,open:!!r[u.span.spanId],onToggle:()=>i(u.span.spanId),startMs:(u.span.startNs-l)/1e6,offsetPct:(u.span.startNs-l)/a*100,durPct:u.span.durationMs*1e6*100/a,hasKids:u.span.children.length>0}))))}function We({trace:e,onSelect:n}){let s=pn(e.rootKind);return t.createElement("div",{className:_("otel-card-bg otel-hover-parent flex cursor-pointer items-start gap-3 border p-3 transition-colors hover:bg-secondary/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",e.error?"otel-error-bg border-destructive/30":"border-border"),role:"button",tabIndex:0,onClick:()=>n(e),onKeyDown:r=>{(r.key==="Enter"||r.key===" ")&&(r.preventDefault(),n(e))},title:e.traceId},t.createElement("div",{className:"shrink-0 pt-0.5",style:{color:Te[e.rootKind]}},t.createElement(s,{size:16})),t.createElement("div",{className:"min-w-0 flex-1 space-y-1"},t.createElement("div",{className:"flex min-w-0 items-center gap-2"},t.createElement("span",{className:"truncate font-mono text-sm"},e.rootName),e.error?t.createElement(L,{variant:"destructive",className:"shrink-0 text-[10px]"},"error"):null),t.createElement("div",{className:"flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"},e.model?t.createElement("span",{className:"font-mono text-foreground/80"},e.model):null,t.createElement("span",{className:"tabular-nums"},e.spanCount," span",e.spanCount===1?"":"s"),t.createElement("span",{className:"text-border"},"\xB7"),t.createElement("span",{className:"tabular-nums"},F(e.durationMs)),e.tokens?t.createElement(t.Fragment,null,t.createElement("span",{className:"text-border"},"\xB7"),t.createElement("span",{className:"tabular-nums"},D(e.tokens)," tok")):null,e.cost?t.createElement("span",{className:"tabular-nums text-emerald-400"},"$",e.cost.toFixed(4)):null,t.createElement("span",{className:"text-border"},"\xB7"),t.createElement("span",{title:K(e.startNs)},se(e.endNs||e.startNs)))),t.createElement("div",{className:"otel-self-center otel-reveal shrink-0 text-muted-foreground transition-opacity"},t.createElement(mt,{size:16})))}function vt({trace:e,roots:n,onBack:s,source:r="live"}){let o=e.spans||[],l=new Set(o.map(i=>i.span_id)),a=o.find(i=>!i.parent_span_id||!l.has(i.parent_span_id))||o[0];return t.createElement(_e,null,t.createElement(ut,{className:"otel-space-y-0"},t.createElement(gt,{title:e.rootName,traceId:String(e.traceId),service:e.service,durationMs:e.durationMs,rootAttrs:(a==null?void 0:a.attributes)||{},spansAttrs:o.map(i=>i.attributes||{}),error:e.error,source:r,onBack:s})),t.createElement(Se,null,t.createElement(ft,{traceId:String(e.traceId),source:r,logsAvailable:!0,spans:t.createElement(zt,{roots:n,defaultOpen:!0}),raw:o})))}var ar=1500,ir=1500;function ur(e,n){let s=0,r=0,o=0,l={};for(let a of e)s+=a.cost||0,r+=a.tokens||0;for(let a of n){a.status==="ERROR"&&o++;let i=we(a.name,a.attributes);l[i]=(l[i]||0)+1}return{cost:s,tokens:r,errors:o,traces:e.length,byKind:l}}function Wn(){let[e,n]=f([]),[s,r]=f(null),[o,l]=f(null),[a,i]=f(!1),[d,m]=f(null),[u,c]=f(!1),p=Fe(0),g=j(async()=>{var N;try{let C=await P(`${B}/live/status`);if(r(C),!C||C.live===!1)return;let E=await P(`${B}/live/spans?since=${p.current}&limit=2000`);p.current=Math.max(E.cursor||0,p.current),(N=E.spans)!=null&&N.length&&n(z=>[...z,...E.spans].slice(-ir)),l(null)}catch(C){l(String((C==null?void 0:C.message)||C))}},[]);T(()=>{g()},[g]),xe(g,ar,!a&&!d);let b=Tt(e),k=u?b:b.filter(N=>!De(N.rootName,N.error)),I=b.length-k.length,Y=u?e:k.flatMap(N=>N.spans),M=ur(k,Y),G=e.length?wt(e[e.length-1]):null,A=Date.now(),V=new Array(50).fill(0);for(let N of Y){let C=(N.end_time_unix_nano||N.start_time_unix_nano)/1e6,E=49-Math.floor((A-C)/2e3);E>=0&&E<50&&V[E]++}if(s&&s.live===!1)return t.createElement("div",{className:"border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground"},t.createElement("div",{className:"mb-1 text-base font-medium text-foreground"},"Live mode is off"),s.reason||"Set dashboard_live: true in the plugin config (it's on by default), then run a turn.");if(d){let N=Tt(e).find(E=>E.traceId===d.traceId)||d,{roots:C}=dt(N.spans);return t.createElement("div",{className:"space-y-3"},t.createElement(vt,{trace:N,roots:C,onBack:()=>m(null)}))}return t.createElement("div",{className:"space-y-3"},t.createElement("div",{className:"flex items-center justify-between"},t.createElement("div",{className:"flex items-center gap-2.5"},t.createElement(an,{active:!a&&((s==null?void 0:s.spans)||0)>0}),t.createElement("span",{className:"text-base font-semibold tracking-tight"},"Live agent activity"),t.createElement("span",{className:"text-xs text-muted-foreground"},Q(s==null?void 0:s.spans)," spans buffered",G?t.createElement(t.Fragment,null," ","\xB7 session ",t.createElement("span",{className:"font-mono"},String(G).slice(0,12))):null)),t.createElement(O,{variant:"outline",size:"sm",onClick:()=>i(N=>!N)},a?"\u25B6 Resume":"\u23F8 Pause")),o?t.createElement(J,{error:o}):null,t.createElement("div",{className:"otel-kpi-grid"},t.createElement(q,{label:"Cost",value:Re(M.cost),accent:"cost"}),t.createElement(q,{label:"Tokens",value:Q(M.tokens)}),t.createElement(q,{label:"Turns",value:Q(M.traces)}),t.createElement(q,{label:"Spans",value:Q(Y.length)}),t.createElement(q,{label:"Errors",value:Q(M.errors),accent:M.errors?"error":void 0})),t.createElement("div",{className:"otel-card-bg flex items-center gap-4 border border-border px-3 py-2"},t.createElement(X,null,"activity \xB7 spans per 2 s \xB7 last 100 s"),t.createElement("div",{className:"otel-w-44"},t.createElement(un,{values:V})),t.createElement("div",{className:"ml-auto flex flex-wrap gap-3"},Object.keys(M.byKind).sort((N,C)=>M.byKind[C]-M.byKind[N]).slice(0,7).map(N=>t.createElement("span",{key:N,className:"inline-flex items-center gap-1.5 text-[11px] text-muted-foreground"},t.createElement("span",{className:"otel-w-2 inline-block h-2 rounded-full",style:{background:Te[N]}}),N," ",M.byKind[N])))),t.createElement("div",{className:"flex items-center justify-between pt-1"},t.createElement(X,null,"recent turns"),t.createElement("div",{className:"flex items-center gap-3 text-[11px] text-muted-foreground"},t.createElement("label",{className:"inline-flex cursor-pointer items-center gap-1.5"},t.createElement("input",{type:"checkbox",checked:u,onChange:N=>c(N.target.checked)}),"show MCP keepalive pings",I?` (${I} hidden)`:""),t.createElement("span",null,"click a turn to open its span waterfall"))),t.createElement("div",{className:"flex flex-col gap-2"},k.length===0?t.createElement("div",{className:"border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground"},t.createElement("div",{className:"mb-1 text-base font-medium text-foreground"},"Waiting for activity\u2026"),"Run a Hermes turn (CLI, Telegram, anything). Each turn appears here as a card \u2014 open it to see every span, timing and attribute. No backend required."):k.map(N=>t.createElement(We,{key:N.traceId,trace:N,onSelect:m}))))}function re({label:e,children:n,className:s}){return t.createElement("div",{className:_("space-y-1",s)},t.createElement(Gt,{className:"text-[10px] uppercase tracking-wide text-muted-foreground"},e),n)}function jt({filters:e,onChange:n,onSubmit:s,backend:r,status:o,busy:l}){let a=(u,c)=>n({...e,[u]:c}),i=(u,c,p="text")=>{var g;return t.createElement(le,{className:"h-8",type:p,placeholder:c,value:String((g=e[u])!=null?g:""),onChange:b=>a(u,b.target.value)})},d=(o==null?void 0:o.query_lang_label)||"",m=d?/filter$/i.test(d.trim())?d:`${d} query`:"native query";return t.createElement("form",{className:"space-y-2",onSubmit:u=>{u.preventDefault(),s()}},t.createElement("div",{className:"otel-search-grid"},t.createElement(re,{label:"status"},t.createElement(H,{value:e.status,onValueChange:u=>a("status",u),className:"h-8"},t.createElement(w,{value:""},"any"),t.createElement(w,{value:"ok"},"ok"),t.createElement(w,{value:"error"},"error"))),t.createElement(re,{label:"kind"},t.createElement(H,{value:e.kind,onValueChange:u=>a("kind",u),className:"h-8"},t.createElement(w,{value:""},"any"),Bn.map(u=>t.createElement(w,{key:u,value:u},u)))),t.createElement(re,{label:"tool"},i("tool","terminal")),t.createElement(re,{label:"model"},i("model",r?"exact model name":"substring")),t.createElement(re,{label:"session id"},i("session","20260920_0814\u2026")),t.createElement(re,{label:"min duration (ms)"},i("minDurationMs","0","number")),t.createElement(re,{label:"text"},i("text",r?"in the prompt":"anywhere in attributes")),t.createElement(re,{label:"trace id"},i("traceId","32 hex chars")),t.createElement(re,{label:"lookback"},t.createElement(H,{value:String(e.lookback),onValueChange:u=>a("lookback",Number(u)),className:"h-8"},t.createElement(w,{value:"0.25"},"15m"),t.createElement(w,{value:"1"},"1h"),t.createElement(w,{value:"6"},"6h"),t.createElement(w,{value:"24"},"24h"),t.createElement(w,{value:"72"},"3d"),t.createElement(w,{value:"168"},"7d"),t.createElement(w,{value:"720"},"30d")))),r?t.createElement("div",{className:"otel-search-grid"},t.createElement(re,{label:m,className:"otel-span-2"},i("q",(o==null?void 0:o.raw_placeholder)||"")),t.createElement(re,{label:"service"},i("service","any")),t.createElement("label",{className:"otel-self-end inline-flex cursor-pointer items-center gap-1.5 pb-2 text-xs text-muted-foreground"},t.createElement("input",{type:"checkbox",checked:e.rootsOnly,onChange:u=>a("rootsOnly",u.target.checked)}),"roots only")):null,t.createElement("div",{className:"flex items-center gap-2"},t.createElement(O,{type:"submit",size:"sm",disabled:!!l},l?"Searching\u2026":"Search"),t.createElement(O,{type:"button",variant:"outline",size:"sm",onClick:()=>n({...ue,lookback:e.lookback,rootsOnly:e.rootsOnly})},"Clear")))}function Hn({row:e,open:n,onToggle:s,children:r}){return t.createElement("div",{className:_("otel-card-bg border",e.errors?"border-destructive/30":"border-border")},t.createElement("div",{className:"flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2",onClick:s,role:"button",tabIndex:0},t.createElement("span",{className:"w-3 shrink-0 text-xs text-muted-foreground"},n?"\u25BE":"\u25B8"),t.createElement("span",{className:"font-mono text-sm",title:e.session},e.session),e.platform?t.createElement(L,{variant:"secondary",className:"text-[10px]"},e.platform):null,e.errors?t.createElement(L,{variant:"destructive",className:"text-[10px]"},e.errors," error",e.errors===1?"":"s"):null,t.createElement("span",{className:"ml-auto flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground"},e.model?t.createElement("span",{className:"font-mono text-foreground/80"},e.model):null,t.createElement("span",{className:"tabular-nums"},e.turns," turn",e.turns===1?"":"s"),e.spans!=null?t.createElement("span",{className:"tabular-nums"},e.spans," spans"):null,e.toolCalls!=null?t.createElement("span",{className:"tabular-nums"},e.toolCalls," tool calls"):null,e.tokens!=null?t.createElement("span",{className:"tabular-nums"},D(e.tokens)," tok"):null,e.cost!=null?t.createElement("span",{className:"tabular-nums text-emerald-400"},"$",e.cost.toFixed(4)):null,t.createElement("span",{className:"tabular-nums"},F((e.endNs-e.startNs)/1e6)),t.createElement("span",{title:`${K(e.startNs)} \u2192 ${K(e.endNs)}`},se(e.endNs)))),n?t.createElement("div",{className:"border-t border-border/60 px-3 py-2"},r):null)}function Jn({filters:e,onSelectTrace:n}){let[s,r]=f([]),[o,l]=f(null),[a,i]=f(null),[d,m]=f({}),u=j(async()=>{try{let p=await P(`${B}/live/sessions?lookback_hours=${e.lookback}&limit=100`);r(p.sessions||[]),l(null)}catch(p){l(String((p==null?void 0:p.message)||p))}},[e.lookback]);T(()=>{u()},[u]);let c=async p=>{if(a===p)return i(null);if(i(p),!d[p]){let g=tt({...e,session:p},200);try{let b=await P(`${B}/live/traces?${g}`);m(k=>({...k,[p]:b.traces||[]}))}catch{m(b=>({...b,[p]:[]}))}}};return o?t.createElement(J,{error:o}):s.length?t.createElement("div",{className:"flex flex-col gap-2"},t.createElement("div",{className:"text-xs text-muted-foreground"},s.length," session",s.length===1?"":"s"," \xB7 click one to see its turns in order"),s.map(p=>t.createElement(Hn,{key:p.session,row:p,open:a===p.session,onToggle:()=>c(p.session)},d[p.session]?d[p.session].length?t.createElement("div",{className:"flex flex-col gap-1.5"},d[p.session].slice().sort((g,b)=>g.startNs-b.startNs).map(g=>t.createElement(We,{key:g.traceId,trace:g,onSelect:n}))):t.createElement("div",{className:"text-xs text-muted-foreground"},"No turns matched the current filters."):t.createElement("div",{className:"text-xs text-muted-foreground"},"Loading\u2026")))):t.createElement("div",{className:"border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground"},"No sessions in the last ",e.lookback,"h. Turns carry ",t.createElement("span",{className:"font-mono"},"hermes.session_id"),"; sessions group them.")}function Gn({traces:e,renderTrace:n}){let[s,r]=f(null),o=rn(e),l=e.length-o.reduce((i,d)=>i+d.turns,0);if(!e.length)return null;if(!o.length)return t.createElement("div",{className:"border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground"},"None of the ",e.length," results carries a session id, so they cannot be grouped. The Turns view lists them.");let a={};for(let i of e)a[i.traceID||i.traceId]=i;return t.createElement("div",{className:"flex flex-col gap-2"},t.createElement("div",{className:"text-xs text-muted-foreground"},o.length," session",o.length===1?"":"s"," from ",e.length," results",l?` \xB7 ${l} without a session id`:""),o.map(i=>t.createElement(Hn,{key:i.session,row:i,open:s===i.session,onToggle:()=>r(s===i.session?null:i.session)},t.createElement("div",{className:"flex flex-col gap-1.5"},i.traceIds.map(d=>a[d]).filter(Boolean).sort((d,m)=>Number(d.startTimeUnixNano||0)-Number(m.startTimeUnixNano||0)).map(d=>n(d))))))}function Yn({view:e,onChange:n}){let s=({id:r,label:o})=>t.createElement("button",{type:"button",onClick:()=>n(r),className:_("otel-toggle px-3 py-1 text-xs font-medium transition-colors",e===r?"otel-toggle-active text-foreground":"text-muted-foreground hover:text-foreground")},o);return t.createElement("div",{className:"otel-card-bg inline-flex border border-border p-0.5"},t.createElement(s,{id:"turns",label:"Turns"}),t.createElement(s,{id:"sessions",label:"Sessions"}))}var dr=3e3,Qn="hermes_otel.tracesView";function cr(){try{return localStorage.getItem(Qn)==="sessions"?"sessions":"turns"}catch{return"turns"}}function mr({view:e,wanted:n}){let s={...ue,session:n.session||"",lookback:n.session||n.trace?168:ue.lookback},[r,o]=f(s),[l,a]=f(s),[i,d]=f([]),[m,u]=f(0),[c,p]=f(!1),[g,b]=f(null),[k,I]=f(null),[Y,M]=f(null),[G,A]=f(!1),[V,N]=f(!1),C=Fe(!1),E=j(async()=>{if(!C.current){C.current=!0;try{let h=await P(`${B}/live/traces?${tt(l)}`);d(h.traces||[]),u(h.total||0),b(null)}catch(h){b(String((h==null?void 0:h.message)||h))}finally{C.current=!1,p(!1)}}},[l]);T(()=>{p(!0),E()},[E]),xe(E,dr,!V&&!k&&e==="turns"),T(()=>{k&&(M(null),P(`${B}/live/traces/${k.traceId}`).then(h=>M(h.spans||[])).catch(()=>M([])))},[k]),T(()=>{n.trace&&P(`${B}/live/traces/${n.trace}`).then(h=>{h.trace&&I({...h.trace,spans:h.spans})}).catch(()=>b(`Trace ${n.trace} is not in the live store`))},[n.trace]),T(()=>{ce({trace:k?String(k.traceId):""})},[k]);let z=()=>a(r);if(k){let h=Y||[],{roots:v}=dt(h),S={...k,spans:h};return t.createElement("div",{className:"space-y-2"},Y===null?t.createElement("div",{className:"text-xs text-muted-foreground"},"Loading spans\u2026"):null,t.createElement(vt,{trace:S,roots:v,onBack:()=>I(null)}))}let $=i.filter(h=>De(h.rootName,h.error)).length,W=G?i:i.filter(h=>!De(h.rootName,h.error));return t.createElement("div",{className:"space-y-3"},t.createElement(_e,null,t.createElement(Se,{className:"space-y-3 pt-4"},t.createElement(jt,{filters:r,onChange:o,onSubmit:z,backend:!1,busy:c}))),g?t.createElement(J,{error:g}):null,e==="sessions"?t.createElement(Jn,{filters:l,onSelectTrace:I}):t.createElement(t.Fragment,null,t.createElement("div",{className:"flex flex-wrap items-center gap-3 text-xs text-muted-foreground"},t.createElement("span",null,W.length," of ",m," trace",m===1?"":"s",Pt(l)?"":" matching"," in the last ",l.lookback,"h"),t.createElement("label",{className:"inline-flex cursor-pointer items-center gap-1.5"},t.createElement("input",{type:"checkbox",checked:G,onChange:h=>A(h.target.checked)}),"show MCP keepalive pings",$?` (${$})`:""),t.createElement(O,{variant:"outline",size:"sm",className:"ml-auto",onClick:()=>N(h=>!h)},V?"\u25B6 Resume":"\u23F8 Pause")),W.length===0?t.createElement("div",{className:"border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground"},t.createElement("div",{className:"mb-1 text-base font-medium text-foreground"},m?"Nothing matched":"No traces yet"),m?"Widen the lookback or clear a filter.":"Run a Hermes turn \u2014 each turn appears here as a trace you can open into a span waterfall. No backend needed."):t.createElement("div",{className:"flex flex-col gap-2"},W.map(h=>t.createElement(We,{key:h.traceId,trace:h,onSelect:I})))))}function pr({status:e,onRefresh:n}){if(!e)return null;let s=e.configured,r=[s?"traces":null,e.metrics?"metrics":null,e.logs?"logs":null].filter(Boolean);return t.createElement("div",{className:"flex items-start justify-between gap-3"},t.createElement("div",{className:"min-w-0 flex-1 space-y-1.5"},t.createElement("div",{className:"flex items-center gap-2"},t.createElement("span",{className:_("h-2.5 w-2.5 rounded-full",s?"otel-pulse-dot":"bg-muted-foreground/40")}),t.createElement("span",{className:"text-base font-semibold tracking-tight"},s?e.name||e.type:"Not configured"),s&&e.type&&e.type!==e.name?t.createElement(L,{variant:"secondary",className:"text-[10px] uppercase"},e.type):null,r.map(o=>t.createElement(L,{key:o,variant:"secondary",className:"text-[10px]"},o)),e.query_backend_pin&&e.query_backend_pin===e.active?t.createElement("span",{className:"text-[10px] text-muted-foreground"},"default (query_backend)"):null),s&&e.query_url?t.createElement("div",{className:"truncate font-mono text-xs text-muted-foreground"},e.query_url):null),t.createElement(O,{variant:"outline",size:"sm",onClick:n},"Refresh"))}function gr({trace:e,onSelect:n}){let s=gn(e.rootTraceName||""),r=Le(e),o=e.startTimeUnixNano?Number(e.startTimeUnixNano):0,l=r["llm.model_name"]||r["gen_ai.response.model"],a=r["tool.name"],i=r["gen_ai.usage.total_tokens"]||r["llm.token_count.total"],d=r["hermes.cost.usage"],m=r.status==="error"||r["error.type"],u=_t(Rt(r),140),c=_t(en(r),140),p=St(e),g=s.Icon;return t.createElement("div",{className:_("otel-card-bg otel-hover-parent flex cursor-pointer items-start gap-3 border p-3 transition-colors hover:bg-secondary/30",m?"border-destructive/30":"border-border"),role:"button",tabIndex:0,onClick:()=>n(e),onKeyDown:b=>{b.key==="Enter"&&n(e)},title:e.traceID||e.traceId},t.createElement("div",{className:_("shrink-0 pt-0.5",s.color)},t.createElement(g,{size:16})),t.createElement("div",{className:"min-w-0 flex-1 space-y-1"},t.createElement("div",{className:"flex min-w-0 items-center gap-2"},t.createElement("span",{className:"truncate font-mono text-sm"},e.rootTraceName||"\u2014"),s.label?t.createElement(L,{variant:"secondary",className:"shrink-0 text-[10px]"},s.label):null,m?t.createElement(L,{variant:"destructive",className:"shrink-0 text-[10px]"},"error"):null),t.createElement("div",{className:"flex flex-wrap items-center gap-1"},a?t.createElement(L,{variant:"secondary",className:"font-mono text-[10px]"},String(a)):null,l?t.createElement(L,{variant:"secondary",className:"font-mono text-[10px]"},String(l)):null),u||c?t.createElement("div",{className:"otel-pl-2 space-y-0.5 border-l-2 border-border/60 text-xs"},u?t.createElement("div",{className:"truncate text-foreground/80"},t.createElement("span",{className:"otel-mr-2 text-[10px] text-muted-foreground"},"in"),u):null,c?t.createElement("div",{className:"truncate text-foreground/80"},t.createElement("span",{className:"otel-mr-2 text-[10px] text-muted-foreground"},"out"),c):null):null,t.createElement("div",{className:"flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground"},t.createElement("span",null,e.rootServiceName||"\u2014"),t.createElement("span",{className:"text-border"},"\xB7"),t.createElement("span",{className:"tabular-nums"},F(e.durationMs)),p!=null?t.createElement(t.Fragment,null,t.createElement("span",{className:"text-border"},"\xB7"),t.createElement("span",{className:"tabular-nums"},p," spans")):null,i!=null?t.createElement(t.Fragment,null,t.createElement("span",{className:"text-border"},"\xB7"),t.createElement("span",{className:"inline-flex items-center gap-1 tabular-nums"},t.createElement(cn,{size:12,className:"opacity-70"}),D(i)," tok")):null,d?t.createElement("span",{className:"tabular-nums text-emerald-400"},"$",Number(d).toFixed(4)):null,t.createElement("span",{className:"text-border"},"\xB7"),t.createElement("span",{title:K(o)},se(o))),t.createElement("div",{className:"truncate font-mono text-[10px] text-muted-foreground/60"},e.traceID||e.traceId)),t.createElement("div",{className:"otel-self-center otel-reveal shrink-0 text-muted-foreground"},t.createElement(mt,{size:16})))}function fr({trace:e,detail:n,loading:s,error:r,onBack:o,source:l,status:a}){let i=n?tn(n.batches||n.trace&&n.trace.batches):{roots:[],all:[]},d=i.roots[0]||null,m=d?d._attrs:Le(e),u=d?d.durationMs:e.durationMs,c=String(e.traceID||e.traceId),p=i.all.some(g=>{var b,k,I;return((I=(b=g.status)==null?void 0:b.code)!=null?I:(k=g.status)==null?void 0:k.statusCode)===2})||Le(e).status==="error";return t.createElement(_e,null,t.createElement(ut,{className:"otel-space-y-0"},t.createElement(gt,{title:(d==null?void 0:d.name)||e.rootTraceName||"\u2014",traceId:c,service:e.rootServiceName,durationMs:u,rootAttrs:m,spansAttrs:i.all.map(g=>g._attrs),error:p,uiUrl:(n==null?void 0:n.ui_url)||null,uiLabel:(a==null?void 0:a.name)||(a==null?void 0:a.type)||null,source:l,onBack:o})),t.createElement(Se,null,s?t.createElement("div",{className:"py-8 text-center text-sm text-muted-foreground"},"Loading trace\u2026"):null,r?t.createElement(J,{error:r}):null,!s&&!r?t.createElement(ft,{traceId:c,source:l,logsAvailable:!!(a!=null&&a.logs),spans:t.createElement(zt,{roots:i.roots}),raw:n}):null))}function vr({status:e,onRefresh:n,source:s,view:r,wanted:o}){let[l,a]=f({...ue,session:o.session||"",lookback:o.session||o.trace?168:ue.lookback}),[i,d]=f(null),[m,u]=f(!1),[c,p]=f(!1),[g,b]=f(null),[k,I]=f(null),[Y,M]=f(null),[G,A]=f(!1),[V,N]=f(null),C=j(async()=>{if(!(e!=null&&e.configured))return;p(!0),b(null),I(null);let h=l.traceId.trim();if(h){d([{traceID:h,rootTraceName:"(by id)",spanSets:[]}]),I({traceID:h,rootTraceName:"(by id)"}),p(!1);return}try{let v=await P(`${B}/traces/search?${At(l,s)}`);d(v.traces||[])}catch(v){b(String((v==null?void 0:v.message)||v).replace(/^.*?:\s*/,"")),d([])}finally{p(!1)}},[l,e,s]);if(T(()=>{d(null),I(null),b(null)},[s]),T(()=>{o.trace&&(e!=null&&e.configured)&&I({traceID:o.trace,rootTraceName:"(by id)"})},[o.trace,e==null?void 0:e.configured]),T(()=>{ce({trace:k?String(k.traceID||k.traceId):""})},[k]),T(()=>{if(!k)return;M(null),N(null),A(!0);let h=ee(new URLSearchParams,s);P(`${B}/traces/${k.traceID||k.traceId}?${h}`).then(M).catch(v=>N(String((v==null?void 0:v.message)||v))).finally(()=>A(!1))},[k,s]),!(e!=null&&e.configured))return t.createElement(_e,null,t.createElement(Se,{className:"space-y-2 pt-4 text-sm text-muted-foreground"},t.createElement("p",null,(e==null?void 0:e.reason)||"No queryable trace backend configured."),t.createElement("p",{className:"text-xs"},"That's fine \u2014 the ",t.createElement("span",{className:"font-medium text-foreground"},"\u26A1 Live")," source needs no backend. Add a backend of a queryable type to browse historical traces here:"," ",t.createElement("span",{className:"font-mono"},((e==null?void 0:e.queryable_types)||[]).join(", ")||"none available"),".")));if(k)return t.createElement(fr,{trace:k,detail:Y,loading:G,error:V,onBack:()=>I(null),source:s,status:e});let E=h=>De(h.rootTraceName,Le(h).status==="error"),z=i?i.filter(E).length:0,$=i&&!m?i.filter(h=>!E(h)):i,W=h=>t.createElement(gr,{key:h.traceID||h.traceId,trace:h,onSelect:I});return t.createElement("div",{className:"space-y-3"},t.createElement(_e,null,t.createElement(Se,{className:"space-y-3 pt-4"},t.createElement(pr,{status:e,onRefresh:n}),t.createElement(jt,{filters:l,onChange:a,onSubmit:C,backend:!0,status:e,busy:c}),t.createElement("div",{className:"flex items-center justify-between gap-3"},t.createElement("span",{className:"text-xs text-muted-foreground"},$==null?"Not searched yet":`${$.length} trace${$.length===1?"":"s"}`),t.createElement("label",{className:"inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"},t.createElement("input",{type:"checkbox",checked:m,onChange:h=>u(h.target.checked)}),"show MCP keepalive pings",z?` (${z})`:"")))),g?t.createElement("div",{className:"space-y-1"},t.createElement(J,{error:`Backend query failed: ${g}`}),t.createElement("p",{className:"px-1 text-xs text-muted-foreground"},"Backend unreachable from the dashboard. Use the \u26A1 Live source \u2014 it reads the in-process store and always works.")):null,$&&$.length>0?r==="sessions"?t.createElement(Gn,{traces:$,renderTrace:W}):t.createElement("div",{className:"flex flex-col gap-2"},$.map(W)):$&&$.length===0&&!g?t.createElement("div",{className:"border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground"},z?`Only MCP keepalive pings matched (${z} hidden) \u2014 tick "show MCP keepalive pings" to see them.`:"No traces matched \u2014 widen the lookback or run a turn."):null)}function Xn(){let{source:e,setSource:n,status:s,refresh:r,isLive:o}=qe(),[l,a]=f(()=>be()),[i,d]=f(l.view||cr()),m=c=>{try{localStorage.setItem(Qn,c)}catch{}d(c),ce({view:c})};T(()=>{let c=p=>{let g=p.detail||{};g.tab&&g.tab!=="traces"||(g.source&&n(g.source),g.view&&d(g.view),a({...g}))};return window.addEventListener(Me,c),()=>window.removeEventListener(Me,c)},[n]),T(()=>{let c=be().source;c&&c!==e&&n(c)},[]),T(()=>{ce({tab:"traces",source:e,view:i})},[e,i]);let u=`${e}:${l.trace||""}:${l.session||""}`;return t.createElement("div",{className:"space-y-3"},t.createElement("div",{className:"flex flex-wrap items-center justify-between gap-2"},t.createElement("div",{className:"flex flex-wrap items-center gap-3"},t.createElement(Ue,{source:e,onChange:n,status:s,need:"traces"}),t.createElement(Yn,{view:i,onChange:m})),o?t.createElement(X,null,"queried from the in-process store"):null),o?t.createElement(mr,{key:u,view:i,wanted:l}):t.createElement(vr,{key:u,status:s,onRefresh:r,source:e,view:i,wanted:l}))}var hr=15e3,Zn={"hermes.token.usage":"tokens","hermes.cost.usage":"USD","hermes.model.usage":"calls","hermes.tool.duration":"ms","hermes.approval.count":"approvals","hermes.approval.duration":"ms","hermes.message.count":"messages","hermes.session.count":"sessions","hermes.session.turns":"turns","hermes.session.duration":"s","hermes.prompt_cache.tokens":"tokens","hermes.prompt_cache.observations":"observations","hermes.api.error.count":"errors","hermes.retry.count":"retries","hermes.subagent.count":"runs","hermes.subagent.duration":"ms","hermes.skill.inferred":"hits","gen_ai.client.token.usage":"tokens","gen_ai.client.operation.duration":"s","gen_ai.agent.token.usage":"tokens","process.cpu.utilization":"ratio","system.cpu.utilization":"ratio","hw.gpu.utilization":"ratio","hw.gpu.memory.usage":"bytes","hw.power":"W"},br=["","model","provider","token_type","tool_name","choice","status","operation","error_type"],ht=[{label:"15m",hours:.25,bucket:15},{label:"1h",hours:1,bucket:60},{label:"6h",hours:6,bucket:300},{label:"24h",hours:24,bucket:900},{label:"7d",hours:168,bucket:3600*3}];function xt(e,n){if(!e)return 0;let s=n?[n]:Object.keys(e.series),r=0;for(let o of s)for(let l of e.series[o]||[])l!=null&&(r+=l);return r}function Oe(e){return e?Object.keys(e.series).map(n=>({label:n,value:xt(e,n)})).sort((n,s)=>s.value-n.value):[]}function Rn(e){return e?Object.keys(e.series).map(n=>{let s=(e.series[n]||[]).filter(r=>r!=null);return{label:n,value:s.length?s.reduce((r,o)=>r+o,0)/s.length:0}}).sort((n,s)=>s.value-n.value):[]}function xr(e){let n=e.bucket>=3600?`${e.bucket/3600}h`:e.bucket>=60?`${e.bucket/60}m`:`${e.bucket}s`;return`last ${e.label} \xB7 ${n} buckets`}var es=["#38bdf8","#34d399","#fbbf24","#a78bfa","#f472b6","#22d3ee","#6ee7b7","#94a3b8"];function nt({rows:e,fmt:n,color:s}){if(!e.length)return t.createElement("div",{className:"py-3 text-xs text-muted-foreground"},"No data in this range.");let r=Math.max(1e-9,...e.map(o=>o.value));return t.createElement("div",{className:"space-y-1.5"},e.slice(0,10).map(o=>t.createElement("div",{key:o.label,className:"flex items-center gap-2"},t.createElement("span",{className:"otel-w-28 shrink-0 truncate font-mono text-[11px] text-muted-foreground",title:o.label},o.label==="_"?"all":o.label),t.createElement("div",{className:"relative h-4 flex-1 bg-muted/30"},t.createElement("div",{className:"absolute inset-y-0 left-0",style:{width:`${o.value/r*100}%`,background:s||"var(--color-primary, #34d399)"}})),t.createElement("span",{className:"otel-w-16 shrink-0 text-right tabular-nums text-xs"},n?n(o.value):Q(Math.round(o.value))))))}function ye({title:e,sub:n,children:s}){return t.createElement("div",{className:"otel-card-bg border border-border p-3"},t.createElement("div",{className:"flex items-baseline justify-between gap-2"},t.createElement(X,null,e),n?t.createElement("span",{className:"text-[10px] text-muted-foreground"},n):null),t.createElement("div",{className:"mt-2"},s))}function bt({b:e,fmt:n}){if(!e||!Object.keys(e.series).length)return t.createElement("div",{className:"py-3 text-xs text-muted-foreground"},"No data in this range.");let s=Object.keys(e.series).slice(0,8).map((l,a)=>({label:l==="_"?e.name:l,color:es[a%es.length],points:e.series[l].map(i=>i!=null?i:0)})),r=e.buckets.length,o=[0,Math.floor(r/2),r-1].map(l=>K(e.buckets[l]).replace(/^.*?, /,""));return t.createElement(dn,{series:s,labels:o,fmt:n})}function ts(){var ot,lt,Ye,Qe,x,R;let{source:e,setSource:n,status:s,isLive:r}=qe(),[o,l]=f(ht[1]),[a,i]=f([]),[d,m]=f(null),[u,c]=f({}),[p,g]=f(""),[b,k]=f(""),[I,Y]=f(""),[M,G]=f("sum"),[A,V]=f(null),N=r?`${B}/live`:B,C=r||!!(s!=null&&s.metrics),E=j(async(y,Ne,at)=>{let it=ee(new URLSearchParams({name:y,agg:at,lookback_hours:String(o.hours),bucket_s:String(o.bucket)}),e);Ne&&it.set("group_by",Ne);try{return await P(`${N}/metrics/query?${it}`)}catch{return null}},[N,o,e]),z=j(async()=>{if(C)try{let y=ee(new URLSearchParams({lookback_hours:String(o.hours)}),e),at=(await P(`${N}/metrics/names?${y}`)).names||[];i(at),m(null);let it=new Set(at.map(kt=>kt.name)),fs=[["tokens",r?"hermes.token.usage":"hermes_token_usage","token_type","sum"],["cost",r?"hermes.cost.usage":"hermes_cost_usage","","sum"],["calls",r?"hermes.model.usage":"hermes_model_usage","model",r?"count":"sum"],["tools",r?"hermes.tool.duration":"hermes_tool_duration_sum","tool_name",r?"avg":"sum"],["approvals",r?"hermes.approval.count":"hermes_approval_count","choice",r?"count":"sum"],["cache",r?"hermes.prompt_cache.tokens":"hermes_prompt_cache_tokens","token_type","sum"],["cpu","process.cpu.utilization","","avg"],["gpu","hw.gpu.utilization","","avg"]],Ht={};await Promise.all(fs.map(async([kt,Jt,vs,hs])=>{Ht[kt]=it.has(Jt)?await E(Jt,vs,hs):null})),c(Ht)}catch(y){m(String((y==null?void 0:y.message)||y))}},[N,C,r,E,o.hours,e]);T(()=>{z()},[z]),xe(z,hr,C);let $=j(async()=>{p&&V(await E(p,I.trim()||b,M))},[M,I,b,p,E]);T(()=>{$()},[$]);let W=u.tokens||null,h=u.cost||null,v=u.calls||null,S=u.tools||null,te=u.approvals||null,ke=u.cache||null,fe=xt(W),Je=xt(h),pe=oe(()=>Oe(W),[W]),Ge=oe(()=>Oe(ke),[ke]),Be=(Qe=(Ye=(ot=pe.find(y=>/cache/i.test(y.label)))==null?void 0:ot.value)!=null?Ye:(lt=Ge.find(y=>/read|hit/i.test(y.label)))==null?void 0:lt.value)!=null?Qe:null,Pe=(R=(x=pe.find(y=>y.label==="input"))==null?void 0:x.value)!=null?R:Ge.reduce((y,Ne)=>y+Ne.value,0),Ae=y=>Zn[y]||Zn[ln(y)]||"",rt=t.createElement("div",{className:"flex flex-wrap items-center justify-between gap-2"},t.createElement("div",{className:"flex flex-wrap items-center gap-3"},t.createElement(Ue,{source:e,onChange:n,status:s,need:"metrics"}),t.createElement(H,{value:String(o.hours),onValueChange:y=>l(ht.find(Ne=>String(Ne.hours)===y)||ht[1]),className:"otel-w-56 h-8"},ht.map(y=>t.createElement(w,{key:y.label,value:String(y.hours)},xr(y))))),t.createElement("span",{className:"text-xs text-muted-foreground"},a.length," instrument",a.length===1?"":"s"," in this range"));return C?t.createElement("div",{className:"space-y-3"},rt,d?t.createElement(J,{error:d}):null,a.length===0?t.createElement("div",{className:"border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground"},t.createElement("div",{className:"mb-1 text-base font-medium text-foreground"},"No metrics in this range"),"Run a Hermes turn, or widen the range. Token usage, cost, tool durations and approvals appear here."):t.createElement(t.Fragment,null,t.createElement("div",{className:"otel-kpi-grid"},t.createElement(q,{label:"Tokens",value:Q(Math.round(fe))}),t.createElement(q,{label:"Cost",value:h&&h.points?Re(Je):"\u2014",sub:h&&h.points?void 0:"no pricing data",accent:h&&h.points?"cost":void 0}),t.createElement(q,{label:"Model calls",value:Q(Math.round(xt(v)))}),t.createElement(q,{label:"Tool calls",value:S?Q(S.points):"0"}),t.createElement(q,{label:"Cache read",value:Be!=null&&Pe?`${Math.round(Be/Pe*100)}%`:"\u2014",sub:Be!=null?`${Q(Math.round(Be))} of ${Q(Math.round(Pe))} input tokens`:"no cache data"})),t.createElement("div",{className:"grid gap-3 lg:grid-cols-2"},t.createElement(ye,{title:"Tokens over time",sub:`by token_type \xB7 per ${o.bucket}s`},t.createElement(bt,{b:W})),t.createElement(ye,{title:"Cost over time",sub:h&&h.points?`USD \xB7 per ${o.bucket}s`:"no pricing data for the models used"},t.createElement(bt,{b:h,fmt:Re})),t.createElement(ye,{title:"Tokens by type"},t.createElement(nt,{rows:Oe(W),color:"#38bdf8"})),t.createElement(ye,{title:"Calls by model"},t.createElement(nt,{rows:Oe(v),color:"#a78bfa"})),t.createElement(ye,{title:r?"Avg tool duration":"Tool duration (sum)",sub:"ms"},t.createElement(nt,{rows:r?Rn(S):Oe(S),fmt:F,color:"#fbbf24"})),t.createElement(ye,{title:"Approvals by choice"},t.createElement(nt,{rows:Oe(te),color:"#f472b6"})),u.cpu||u.gpu?t.createElement(ye,{title:"Host",sub:"utilisation ratio, avg per bucket"},t.createElement(bt,{b:u.cpu||u.gpu})):null),t.createElement(ye,{title:"Explore any instrument",sub:"server-side buckets; group by an attribute"},t.createElement("div",{className:"otel-search-grid"},t.createElement(H,{value:p,onValueChange:g,className:"h-8"},t.createElement(w,{value:""},"pick an instrument\u2026"),a.map(y=>t.createElement(w,{key:y.name,value:y.name},y.name,y.count!=null?` (${y.count})`:"",Ae(y.name)?` \xB7 ${Ae(y.name)}`:""))),t.createElement(H,{value:b,onValueChange:k,className:"h-8"},br.map(y=>t.createElement(w,{key:y,value:y},y?`group by ${y}`:"no grouping"))),t.createElement(le,{className:"h-8",placeholder:"or any attribute",value:I,onChange:y=>Y(y.target.value)}),t.createElement(H,{value:M,onValueChange:G,className:"h-8"},["sum","count","avg","max","last"].map(y=>t.createElement(w,{key:y,value:y},y))),t.createElement(O,{type:"button",size:"sm",onClick:$,disabled:!p},"Query")),p?t.createElement("div",{className:"mt-3 space-y-3"},t.createElement(bt,{b:A}),t.createElement("div",{className:"text-[11px] text-muted-foreground"},A?`${A.points} point${A.points===1?"":"s"} \xB7 ${Object.keys(A.series).length} series \xB7 ${A.agg} per ${A.bucketS}s${Ae(p)?` \xB7 ${Ae(p)}`:""}${A.cumulative?" \xB7 cumulative counter shown as increases":""}`:"no data"),t.createElement(nt,{rows:M==="avg"?Rn(A):Oe(A)})):null))):t.createElement("div",{className:"space-y-3"},rt,t.createElement("div",{className:"border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground"},t.createElement("div",{className:"mb-1 text-base font-medium text-foreground"},"This source does not serve metrics"),"Pick the Live source, or a backend whose adapter serves metrics (OpenObserve, SigNoz, Uptrace, LGTM)."))}var ss=["traces","metrics","logs"];function rs(e,n,s){let r=n.configured==="auto"?"by default":`${e}: ${n.configured==="on"} in the config file`;return n.exported&&n.supported?{label:`${e} on`,cls:"on",title:`${s} accepts OTLP ${e}; exported (${r})`}:n.exported?{label:`${e} forced`,cls:"forced",title:`${s} does not accept OTLP ${e}, but the entry sets ${e}: true; exports fail unless a collector fronts it`}:n.supported?{label:`${e} off`,cls:"off",title:`${s} accepts OTLP ${e}; not exported (${r})`}:{label:`${e} n/a`,cls:"na",title:`${s} does not accept OTLP ${e}; not exported`}}function os(e,n){if(!e)return null;if(!e.supported)return{text:"not queryable from this dashboard",title:`no query adapter for ${n}; the Traces, Metrics and Logs tabs use the Live source or another backend`};let s=["traces",...e.metrics?["metrics"]:[],...e.logs?["logs"]:[]];return{text:`dashboard queries ${s.join(", ")}`,title:`the Traces${e.metrics?", Metrics":""}${e.logs?", Logs":""} tab${s.length>1?"s":""} can read from this backend`}}function ls(e){let n=e.name.toLowerCase();return n!==e.type.toLowerCase()&&n!==e.display_type.toLowerCase()}var yt="https://briancaffey.github.io/hermes-otel";function as(e){let n=[],s=/`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)/g,r=0,o;for(;o=s.exec(e);)o.index>r&&n.push({t:"text",v:e.slice(r,o.index)}),o[1]!=null?n.push({t:"code",v:o[1]}):n.push({t:"link",v:o[2],href:o[3].startsWith("/")?yt+o[3]:o[3]}),r=o.index+o[0].length;return r<e.length&&n.push({t:"text",v:e.slice(r)}),n}function is(e){let n=e.value;if(n==null)return"unset";if(e.kind==="bool")return n?"true":"false";if(e.kind==="backends"){let s=Array.isArray(n)?n.length:0;return s===1?"1 backend":`${s} backends`}return e.kind==="map"?Object.entries(n).map(([s,r])=>`${s}=${r}`).join(", "):String(n)}function us(e,n){let s=(n.query||"").trim().toLowerCase();return e.filter(r=>{if(n.changedOnly&&!r.changed&&!r.env_invalid&&!r.file_invalid)return!1;if(!s)return!0;let o=[r.key,r.group,r.description,is(r),r.env_var||"",r.source].join(" ").toLowerCase();return s.split(/\s+/).every(l=>o.includes(l))})}function ds(e,n){return(n.length?n:Array.from(new Set(e.map(r=>r.group)))).map(r=>({group:r,fields:e.filter(o=>o.group===r)})).filter(r=>r.fields.length>0)}function cs(e){switch(e){case"env":return"HERMES_OTEL_CONFIG";case"durable":return"$HERMES_HOME/hermes_otel.yaml";case"legacy":return"plugin directory (legacy location)";case"explicit":return"explicit path";default:return"no config file"}}var yr={override:"Setting overrides (HERMES_OTEL_*)",plugin:"Plugin",hermes:"Hermes",backend:"Backends: single-backend mode and credential fallbacks",langsmith:"LangSmith",otel:"OpenTelemetry SDK",other:"Other OTEL_* / HERMES_OTEL_* variables set here"},ns=["override","plugin","hermes","backend","langsmith","otel","other"];function qt(e,n){let s=new Set;return[...ns,...e.map(o=>o.group).filter(o=>!ns.includes(o))].filter(o=>s.has(o)?!1:(s.add(o),!0)).map(o=>({group:o,label:yr[o]||o,entries:e.filter(l=>l.group===o&&(n||l.set))})).filter(o=>o.entries.length>0)}function Kt(e){return{set:e.filter(n=>n.set).length,known:e.length}}function ms(e){return e.env_invalid&&e.env_var?`${e.env_var}=${e.env_raw} is not a valid ${e.kind}; ignored`:e.derived_from&&e.derived_from.length?`follows ${e.derived_from.join(", ")}`:e.file_invalid?`file value "${e.file_value}" is not a valid ${e.kind}; ignored`:e.source==="env"&&e.file_value!=null?`overrides the file's ${is({kind:e.kind,value:e.file_value})}`:e.source==="env"&&e.env_var?`from ${e.env_var}`:null}var kr=[{id:"structured",label:"Structured"},{id:"raw",label:"Raw YAML"},{id:"env",label:"Environment"}];function Wt({text:e}){return t.createElement("span",null,as(e).map((n,s)=>n.t==="code"?t.createElement("code",{key:s,className:"otel-code"},n.v):n.t==="link"?t.createElement("a",{key:s,className:"otel-link",href:n.href,target:"_blank",rel:"noreferrer"},n.v):t.createElement("span",{key:s},n.v)))}function Nr({source:e}){let n=e==="env"?"set by a HERMES_OTEL_* environment variable":e==="file"?"set in the config file":"the built-in default";return t.createElement("span",{className:_("otel-src",`otel-src-${e}`),title:n},e)}function _r({f:e}){let n=e.value;if(n==null)return t.createElement("span",{className:"otel-unset"},"unset");if(e.kind==="bool")return t.createElement("span",{className:_("otel-pill",n?"otel-pill-on":"otel-pill-off")},n?"on":"off");if(e.kind==="map")return t.createElement("div",{className:"otel-kv"},Object.entries(n).map(([s,r])=>t.createElement("div",{key:s,className:"font-mono text-xs"},t.createElement("span",{className:"text-muted-foreground"},s,":")," ",String(r))));if(e.kind==="backends"){let s=Array.isArray(n)?n.length:0;return t.createElement("span",{className:"font-mono text-xs"},s," configured")}return t.createElement("span",{className:"font-mono text-xs break-all"},String(n))}function Sr({f:e}){if(!e.changed||e.kind==="backends"||e.kind==="map")return null;let n=e.default,s=n==null?"unset":e.kind==="bool"?n?"on":"off":String(n);return t.createElement("span",{className:"text-[11px] text-muted-foreground"},"default ",s)}function ps({f:e}){let n=ms(e),s=e.env_invalid||e.file_invalid;return t.createElement("div",{className:_("otel-settings-row",e.changed&&"otel-changed")},t.createElement("div",{className:"min-w-0"},t.createElement("div",{className:"flex flex-wrap items-center gap-2"},t.createElement("span",{className:"font-mono text-xs text-foreground"},e.key),e.env_var?t.createElement("span",{className:"font-mono text-[10px] text-muted-foreground/70",title:"environment variable that overrides this setting"},e.env_var):t.createElement("span",{className:"text-[10px] text-muted-foreground/70"},"yaml only")),t.createElement("div",{className:"mt-0.5 text-[11px] leading-snug text-muted-foreground"},t.createElement(Wt,{text:e.description}))),t.createElement("div",{className:"min-w-0"},t.createElement(_r,{f:e}),t.createElement("div",{className:"mt-0.5 flex flex-wrap items-center gap-2"},t.createElement(Sr,{f:e}),n?t.createElement("span",{className:_("text-[11px]",s?"otel-warn":"text-muted-foreground")},n):null)),t.createElement("div",{className:"otel-self-center"},t.createElement(Nr,{source:e.source})))}function He({k:e,children:n,title:s}){return t.createElement(t.Fragment,null,t.createElement("span",{className:"text-muted-foreground",title:s},e),t.createElement("span",{className:"min-w-0 break-all"},n))}var Ut=e=>e.stopPropagation();function wr({b:e,q:n}){var a;let s=e.ui.url,r=()=>{s&&window.open(s,"_blank","noopener,noreferrer")},o=os(n,e.display_type),l=(a=e.signals.metrics)==null?void 0:a.exported;return t.createElement("div",{className:_("otel-card-bg border border-border px-3 py-2.5",s?"otel-backend-card":""),onClick:s?r:void 0,onKeyDown:s?i=>i.key==="Enter"?r():void 0:void 0,role:s?"link":void 0,tabIndex:s?0:void 0,title:s?`${e.ui.note} \xB7 opens ${s} in a new window`:e.ui.note},t.createElement("div",{className:"flex flex-wrap items-center gap-2"},s?t.createElement("a",{className:"otel-backend-name",href:s,target:"_blank",rel:"noreferrer noopener",onClick:Ut},e.name,t.createElement(xn,{size:12,className:"otel-backend-ext"})):t.createElement("span",{className:"text-sm font-medium"},e.name),ls(e)?t.createElement(L,{variant:"secondary",className:"text-[10px] uppercase"},e.display_type):null,e.docs_path?t.createElement("a",{className:"otel-link text-[11px] text-muted-foreground",href:yt+e.docs_path,target:"_blank",rel:"noreferrer",onClick:Ut,title:`${e.display_type} backend docs`},"docs"):null,t.createElement("span",{className:"ml-auto flex flex-wrap gap-1"},ss.map(i=>{let d=e.signals[i];if(!d)return null;let m=rs(i,d,e.display_type);return t.createElement("span",{key:i,className:_("otel-pill",`otel-pill-${m.cls}`),title:m.title},m.label)}))),o?t.createElement("div",{className:"mt-1 text-[11px] text-muted-foreground",title:o.title},o.text):null,t.createElement("div",{className:"otel-attr-table mt-2 text-xs"},Object.entries(e.fields).map(([i,d])=>t.createElement(He,{key:i,k:i},t.createElement("span",{className:"font-mono"},String(d)))),t.createElement(He,{k:"ui",title:"the link the card opens; set ui_url on the entry to override"},s?t.createElement(t.Fragment,null,t.createElement("a",{className:"otel-link font-mono",href:s,target:"_blank",rel:"noreferrer noopener",onClick:Ut},s),t.createElement("span",{className:"text-muted-foreground"}," \xB7 ",e.ui.source==="file"?"ui_url":"derived")):t.createElement("span",{className:"otel-unset"},e.ui.note)),l?t.createElement(He,{k:"temporality",title:"aggregation temporality of this backend's metric reader"},t.createElement("span",{className:"font-mono"},e.metrics_temporality.value),t.createElement("span",{className:"text-muted-foreground"}," \xB7 ",e.metrics_temporality.source)):null,Object.entries(e.query_fields||{}).map(([i,d])=>t.createElement(He,{key:`q-${i}`,k:i,title:"read by the dashboard's query adapter, not by the exporter"},t.createElement("span",{className:"font-mono"},String(d)),t.createElement("span",{className:"text-muted-foreground"}," \xB7 query"))),e.headers?Object.entries(e.headers).map(([i,d])=>t.createElement(He,{key:`h-${i}`,k:`header ${i}`},t.createElement("span",{className:"font-mono"},String(d)))):null,e.credentials.map(i=>{var d;return t.createElement(He,{key:i.field,k:i.field},i.set?t.createElement(t.Fragment,null,t.createElement("span",{className:"font-mono"},(d=i.value)!=null?d:"set"),t.createElement("span",{className:"text-muted-foreground"}," \xB7 ",i.source)):t.createElement("span",{className:"otel-warn"},i.source||"not set"))})))}function Tr({text:e}){let[n,s]=f(!1);return t.createElement(O,{variant:"outline",size:"sm",onClick:async()=>{try{await navigator.clipboard.writeText(e),s(!0),setTimeout(()=>s(!1),1500)}catch{}},title:"copy to clipboard"},n?t.createElement(bn,{size:13}):t.createElement(hn,{size:13}),t.createElement("span",{className:"ml-1"},n?"copied":"copy"))}function Lr({r:e}){let n=e.config;return t.createElement("div",{className:"otel-card-bg border border-border px-3 py-2 text-xs"},t.createElement("div",{className:"flex flex-wrap items-center gap-x-3 gap-y-1"},t.createElement(X,null,"config file"),n.path?t.createElement("span",{className:"font-mono break-all"},n.path):t.createElement("span",{className:"text-muted-foreground"},"none found"),t.createElement("span",{className:"otel-pill",title:"how the file was chosen: HERMES_OTEL_CONFIG, then $HERMES_HOME/hermes_otel.yaml, then the plugin directory"},cs(n.path_source)),n.exists&&n.mtime?t.createElement("span",{className:"text-muted-foreground",title:K(n.mtime*1e9)},"edited ",se(n.mtime*1e9)):null,n.path&&!n.exists?t.createElement("span",{className:"otel-warn"},"file does not exist; defaults and environment variables apply"):null,n.exists&&!n.parse_ok?t.createElement("span",{className:"otel-warn"},"file could not be parsed; defaults and environment variables apply"):null),n.path?null:t.createElement("div",{className:"mt-1 text-muted-foreground"},"Create ",t.createElement("span",{className:"font-mono"},n.durable_path)," to change settings; see the"," ",t.createElement("a",{className:"otel-link",href:`${yt}/configuration/overview`,target:"_blank",rel:"noreferrer"},"configuration guide"),"."),n.unknown_keys.length?t.createElement("div",{className:"mt-1 text-muted-foreground"},"Also in the file:"," ",n.unknown_keys.map((s,r)=>t.createElement("span",{key:s.key},r?", ":"",t.createElement("span",{className:"font-mono"},s.key),s.note?t.createElement(t.Fragment,null," ","(",t.createElement(Wt,{text:s.note}),")"):t.createElement("span",{className:"otel-warn"}," (not a known setting)")))):null)}function gs(){var h;let[e,n]=f(null),[s,r]=f(null),[o,l]=f(!1),[a,i]=f("structured"),[d,m]=f(!1),[u,c]=f(""),[p,g]=f(!1),[b,k]=f("file"),[I,Y]=f(!1),[M,G]=f(null),A=j(async()=>{l(!0),P(`${B}/status`).then(v=>G(v)).catch(()=>G(null));try{let v=await P(`${B}/settings?reveal=${d?"true":"false"}`);n(v),r(null)}catch(v){r(String((v==null?void 0:v.message)||v))}finally{l(!1)}},[d]);T(()=>{A()},[A]);let V=(e==null?void 0:e.fields)||[],N=oe(()=>us(V,{query:u,changedOnly:p}),[V,u,p]),C=oe(()=>ds(N,(e==null?void 0:e.groups)||[]),[N,e]),E=((h=V.find(v=>v.key==="backends"))==null?void 0:h.value)||[],z=oe(()=>{let v={};for(let S of V)S.env_invalid&&S.env_var&&(v[S.env_var]=`not a valid ${S.kind}; ignored`);return v},[V]),$=e==null?void 0:e.capture_summary,W=oe(()=>{let v={};for(let S of(M==null?void 0:M.available)||[])v[S.name]={supported:S.supported,metrics:S.metrics,logs:S.logs};return v},[M]);return t.createElement("div",{className:"space-y-3"},t.createElement("div",{className:"flex flex-wrap items-center gap-2"},t.createElement("span",{className:"text-base font-semibold tracking-tight"},"Settings"),e?t.createElement("span",{className:"text-xs text-muted-foreground"},"hermes-otel ",e.process.plugin_version||"?"," \xB7 resolved ",se(e.resolved_at*1e9)):null,t.createElement("div",{className:"ml-auto flex flex-wrap items-center gap-2"},t.createElement("div",{className:"flex items-center gap-1 border border-border p-0.5"},kr.map(v=>t.createElement("button",{key:v.id,type:"button",onClick:()=>i(v.id),className:_("otel-toggle px-3 py-1 text-xs font-medium transition-colors",a===v.id?"otel-toggle-active text-foreground":"text-muted-foreground hover:text-foreground")},v.label))),t.createElement("label",{className:"inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground",title:"credential values are masked unless this is on"},t.createElement("input",{type:"checkbox",checked:d,onChange:v=>m(v.target.checked)}),"show secrets"),t.createElement(O,{variant:"outline",size:"sm",onClick:A,disabled:o,title:"re-read the file and environment"},t.createElement(vn,{size:13,className:o?"otel-spin":""}),t.createElement("span",{className:"ml-1"},"reload")))),s?t.createElement(J,{error:s}):null,!e&&!s?t.createElement("div",{className:"text-sm text-muted-foreground"},"Loading settings\u2026"):null,e?t.createElement(t.Fragment,null,t.createElement(Lr,{r:e}),t.createElement("div",{className:"otel-kpi-grid"},t.createElement(q,{label:"Settings",value:e.fields.length,sub:`${e.counts.changed} changed from default`}),t.createElement(q,{label:"From file",value:e.counts.file,sub:e.config.exists?"in the config file":"no file"}),t.createElement(q,{label:"From env",value:e.counts.env,sub:"HERMES_OTEL_* variables"}),t.createElement(q,{label:"Backends",value:E.length,sub:E.map(v=>v.name).join(", ")||"live store only"}),t.createElement(q,{label:"Content",value:$?$.mode:"?",sub:$?$.detail:"",accent:($==null?void 0:$.mode)==="off"?void 0:($==null?void 0:$.mode)==="full"?"cost":void 0})),a==="structured"?t.createElement(t.Fragment,null,t.createElement("div",{className:"flex flex-wrap items-center gap-3"},t.createElement(le,{value:u,onChange:v=>c(v.target.value),placeholder:"filter by name, value, description\u2026",className:"otel-w-56 h-8 text-xs"}),t.createElement("label",{className:"inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground"},t.createElement("input",{type:"checkbox",checked:p,onChange:v=>g(v.target.checked)}),"changed from default only"),t.createElement("span",{className:"ml-auto text-[11px] text-muted-foreground"},N.length," of ",V.length," \xB7 precedence: ",t.createElement("span",{className:"otel-src otel-src-env"},"env")," over"," ",t.createElement("span",{className:"otel-src otel-src-file"},"file")," over ",t.createElement("span",{className:"otel-src otel-src-default"},"default"))),C.length===0?t.createElement("div",{className:"border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground"},"No setting matches."):null,C.map(v=>t.createElement("div",{key:v.group,className:"space-y-1"},t.createElement("div",{className:"flex items-center gap-2 pt-1"},t.createElement(X,null,v.group),t.createElement("span",{className:"text-[11px] text-muted-foreground/70"},v.fields.length)),v.group==="Backends"?t.createElement("div",{className:"space-y-2"},v.fields.map(S=>t.createElement(ps,{key:S.key,f:S})),E.length?t.createElement("div",{className:"otel-backend-grid"},E.map((S,te)=>t.createElement(wr,{key:`${S.name}-${te}`,b:S,q:W[S.name]}))):t.createElement("div",{className:"text-xs text-muted-foreground"},"No ",t.createElement("span",{className:"font-mono"},"backends:")," entry. Telemetry stays in the live store on this machine; single-backend environment variables, if any, are listed under Environment.")):t.createElement("div",{className:"otel-settings-list"},v.fields.map(S=>t.createElement(ps,{key:S.key,f:S})))))):null,a==="raw"?t.createElement("div",{className:"space-y-2"},t.createElement("div",{className:"flex flex-wrap items-center gap-2"},t.createElement("div",{className:"flex items-center gap-1 border border-border p-0.5"},["file","effective"].map(v=>t.createElement("button",{key:v,type:"button",onClick:()=>k(v),className:_("otel-toggle px-3 py-1 text-xs font-medium transition-colors",b===v?"otel-toggle-active text-foreground":"text-muted-foreground hover:text-foreground")},v==="file"?"File as written":"Effective config"))),t.createElement("span",{className:"min-w-0 flex-1 truncate text-[11px] text-muted-foreground",title:b==="file"&&e.config.path||""},b==="file"?e.config.exists?`${e.config.path}${d?"":" \xB7 secrets masked"}`:"no config file to show":"every setting after env, file and defaults are applied; each key notes its source"),t.createElement("span",{className:"shrink-0"},t.createElement(Tr,{text:b==="file"?e.config.raw||"":e.effective_yaml}))),b==="file"?e.config.raw!=null?t.createElement("pre",{className:"otel-pre otel-raw"},e.config.raw):t.createElement("div",{className:"border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground"},t.createElement("div",{className:"mb-1 text-base font-medium text-foreground"},"No config file"),e.config.raw_error?e.config.raw_error:t.createElement(t.Fragment,null,"Create ",t.createElement("span",{className:"font-mono"},e.config.durable_path),". The Effective config view is a starting point you can paste in.")):t.createElement("pre",{className:"otel-pre otel-raw"},e.effective_yaml)):null,a==="env"?t.createElement("div",{className:"space-y-3"},t.createElement("div",{className:"flex flex-wrap items-center gap-3"},t.createElement("span",{className:"text-[11px] text-muted-foreground"},Kt(e.env).set," set of ",Kt(e.env).known," the plugin reads, as seen by the dashboard process"),t.createElement("label",{className:"ml-auto inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground"},t.createElement("input",{type:"checkbox",checked:I,onChange:v=>Y(v.target.checked)}),"show unset variables")),qt(e.env,I).length===0?t.createElement("div",{className:"border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground"},t.createElement("div",{className:"mb-1 text-base font-medium text-foreground"},"No plugin environment variables set"),'Every setting comes from the file or its default. Tick "show unset variables" to see every variable the plugin would read.'):null,qt(e.env,I).map(v=>t.createElement("div",{key:v.group,className:"space-y-1"},t.createElement(X,null,v.label),t.createElement("div",{className:"otel-settings-list"},v.entries.map(S=>t.createElement("div",{key:S.name,className:_("otel-env-row",S.set&&"otel-changed")},t.createElement("div",{className:"min-w-0"},t.createElement("div",{className:"font-mono text-xs break-all"},S.name),S.maps_to?t.createElement("div",{className:"text-[10px] text-muted-foreground/70"},"sets ",t.createElement("span",{className:"font-mono"},S.maps_to)):null),t.createElement("div",{className:"min-w-0"},S.set?t.createElement("span",{className:"font-mono text-xs break-all"},S.value):t.createElement("span",{className:"otel-unset"},"unset"),z[S.name]?t.createElement("div",{className:"otel-warn text-[11px]"},z[S.name]):null),t.createElement("div",{className:"text-[11px] leading-snug text-muted-foreground"},t.createElement(Wt,{text:S.description})))))))):null,t.createElement("div",{className:"text-[11px] text-muted-foreground"},e.process.note)):null)}var st=[{id:"live",label:"Live",Icon:Lt,render:()=>t.createElement(Wn,null)},{id:"traces",label:"Traces",Icon:Ct,render:()=>t.createElement(Xn,null)},{id:"metrics",label:"Metrics",Icon:mn,render:()=>t.createElement(ts,null)},{id:"logs",label:"Logs",Icon:Ct,render:()=>t.createElement(jn,null)},{id:"settings",label:"Settings",Icon:fn,render:()=>t.createElement(gs,null)}];function Cr(){let[e,n]=f(()=>st.some(o=>o.id===be().tab)?be().tab:"live"),s=o=>{n(o),ce({tab:o,trace:"",session:""})};T(()=>{let o=l=>{let a=l.detail||{};a.tab&&st.some(i=>i.id===a.tab)&&n(a.tab)};return window.addEventListener(Me,o),()=>window.removeEventListener(Me,o)},[]);let r=st.find(o=>o.id===e)||st[0];return t.createElement("div",{className:"otel-root space-y-4"},t.createElement("div",{className:"flex items-center gap-1 border-b border-border"},st.map(o=>{let l=o.id===e,a=o.Icon;return t.createElement("button",{key:o.id,onClick:()=>s(o.id),className:_("otel-tab inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors",l?"otel-tab-active text-foreground":"text-muted-foreground hover:text-foreground")},t.createElement(a,{size:15}),o.label)}),t.createElement("span",{className:"ml-auto pr-1 font-mono text-[11px] text-muted-foreground/60"},"hermes-otel")),t.createElement("div",null,r.render()))}Qt?Yt("hermes_otel",Cr):console.error("[hermes_otel] dashboard SDK unavailable \u2014 not registering");})();
+"use strict";
+(() => {
+  // src/sdk.ts
+  var SDK = window.__HERMES_PLUGIN_SDK__ || {};
+  var PLUGINS = window.__HERMES_PLUGINS__ || {};
+  var React = SDK.React;
+  var hooks = SDK.hooks || {};
+  var useState = hooks.useState;
+  var useEffect = hooks.useEffect;
+  var useCallback = hooks.useCallback;
+  var useMemo = hooks.useMemo;
+  var useRef = hooks.useRef;
+  var useContext = hooks.useContext || SDK.React && SDK.React.useContext;
+  var createContext = hooks.createContext || SDK.React && SDK.React.createContext;
+  var useTheme = SDK.useTheme;
+  var C = SDK.components || {};
+  var { Card, CardHeader, CardContent, Badge, Button, Input, Label, SelectOption, Checkbox } = C;
+  var HostSelect = C.Select;
+  function Select({ "aria-label": ariaLabel, ...props }) {
+    const el = React.createElement(HostSelect, props);
+    if (!ariaLabel) return el;
+    return React.createElement("label", { className: "otel-select-label" }, React.createElement("span", { className: "otel-sr-only" }, ariaLabel), el);
+  }
+  var API = "/api/plugins/hermes_otel";
+  function pageProfile() {
+    try {
+      return new URLSearchParams(window.location.search).get("profile") || "";
+    } catch {
+      return "";
+    }
+  }
+  function withProfile(url) {
+    const p = pageProfile();
+    if (!p || /[?&]profile=/.test(url)) return url;
+    return `${url}${url.includes("?") ? "&" : "?"}profile=${encodeURIComponent(p)}`;
+  }
+  var hostFetch = SDK.fetchJSON;
+  var fetchJSON = hostFetch ? (url, opts) => hostFetch(withProfile(url), opts) : async () => {
+    throw new Error("0: dashboard SDK unavailable");
+  };
+  function api(path, params) {
+    let q = "";
+    if (params instanceof URLSearchParams) q = params.toString();
+    else if (params) {
+      const sp = new URLSearchParams();
+      for (const [k, v] of Object.entries(params)) if (v != null && v !== "") sp.set(k, String(v));
+      q = sp.toString();
+    }
+    return fetchJSON(`${API}${path}${q ? `?${q}` : ""}`);
+  }
+  var cn = SDK.utils && SDK.utils.cn || ((...a) => a.filter(Boolean).join(" "));
+  function register(name, component) {
+    if (PLUGINS && typeof PLUGINS.register === "function") {
+      PLUGINS.register(name, component);
+    } else {
+      console.error("[hermes_otel] dashboard plugin registry unavailable");
+    }
+  }
+  var sdkOk = Boolean(SDK && SDK.React && PLUGINS && PLUGINS.register);
+
+  // src/semconv.generated.ts
+  var CARD_SESSION_KEYS = [
+    "hermes.session_id",
+    "langfuse.sessionId",
+    "session.id",
+    "session_id"
+  ];
+  var MODEL_KEYS = [
+    "gen_ai.request.model",
+    "llm.model_name",
+    "gen_ai.response.model"
+  ];
+  var TOTAL_TOKEN_KEYS = [
+    "gen_ai.usage.total_tokens",
+    "llm.token_count.total"
+  ];
+  var COST_KEYS = [
+    "hermes.cost.usage"
+  ];
+  var TURN_TOTAL_KEYS = [
+    "gen_ai.usage.total_tokens",
+    "gen_ai.usage.input_tokens",
+    "gen_ai.usage.output_tokens",
+    "llm.token_count.total",
+    "llm.token_count.prompt",
+    "llm.token_count.completion",
+    "hermes.cost.usage"
+  ];
+  var KIND_OVERRIDE_ATTR = "hermes.span_kind";
+  var KIND_OVERRIDES = [
+    "skill",
+    "approval",
+    "human_input"
+  ];
+  var KIND_RULES = [
+    {
+      "kind": "agent",
+      "prefixes": [
+        "agent."
+      ],
+      "exact": [
+        "agent"
+      ]
+    },
+    {
+      "kind": "cron",
+      "prefixes": [
+        "cron"
+      ],
+      "exact": []
+    },
+    {
+      "kind": "session",
+      "prefixes": [
+        "session"
+      ],
+      "exact": []
+    },
+    {
+      "kind": "skill",
+      "prefixes": [
+        "skill."
+      ],
+      "exact": []
+    },
+    {
+      "kind": "approval",
+      "prefixes": [
+        "approval"
+      ],
+      "exact": []
+    },
+    {
+      "kind": "human_input",
+      "prefixes": [
+        "human_input."
+      ],
+      "exact": []
+    },
+    {
+      "kind": "subagent",
+      "prefixes": [
+        "subagent"
+      ],
+      "exact": []
+    },
+    {
+      "kind": "llm",
+      "prefixes": [
+        "llm."
+      ],
+      "exact": []
+    },
+    {
+      "kind": "api",
+      "prefixes": [
+        "api."
+      ],
+      "exact": []
+    },
+    {
+      "kind": "tool",
+      "prefixes": [
+        "tool."
+      ],
+      "exact": []
+    }
+  ];
+
+  // src/lib.ts
+  function decodeAttrValue(v) {
+    if (v == null) return null;
+    if (typeof v !== "object") return v;
+    if ("stringValue" in v) return v.stringValue;
+    if ("intValue" in v) return Number(v.intValue);
+    if ("doubleValue" in v) return v.doubleValue;
+    if ("boolValue" in v) return v.boolValue;
+    if ("arrayValue" in v) return (v.arrayValue.values || []).map(decodeAttrValue);
+    if ("kvlistValue" in v) return attrsObject(v.kvlistValue.values);
+    return JSON.stringify(v);
+  }
+  function attrsObject(attrs) {
+    const out = {};
+    for (const a of attrs || []) if (a && a.key) out[a.key] = decodeAttrValue(a.value);
+    return out;
+  }
+  function fmtDurationMs(ms) {
+    if (ms == null) return "\u2014";
+    if (ms < 1) return `${(ms * 1e3).toFixed(0)}\xB5s`;
+    if (ms < 1e3) return `${ms.toFixed(ms < 10 ? 1 : 0)}ms`;
+    if (ms < 6e4) return `${(ms / 1e3).toFixed(2)}s`;
+    const m = Math.floor(ms / 6e4);
+    return `${m}m ${Math.round(ms % 6e4 / 1e3)}s`;
+  }
+  var TIME_FMT = {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  };
+  var CLOCK_FMT = { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false };
+  function fmtAbsTime(unixNano) {
+    if (!unixNano) return "";
+    try {
+      const d = new Date(unixNano / 1e6);
+      const p = (n) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    } catch {
+      return "";
+    }
+  }
+  function fmtClock(unixNano) {
+    if (!unixNano) return "";
+    try {
+      return new Date(unixNano / 1e6).toLocaleTimeString(void 0, CLOCK_FMT);
+    } catch {
+      return "";
+    }
+  }
+  function localTimezone() {
+    try {
+      return Intl.DateTimeFormat(void 0, TIME_FMT).resolvedOptions().timeZone || "";
+    } catch {
+      return "";
+    }
+  }
+  function fmtTimeAgo(unixNano) {
+    if (!unixNano) return "";
+    const diff = Date.now() - unixNano / 1e6;
+    if (diff < 1500) return "just now";
+    if (diff < 6e4) return `${Math.round(diff / 1e3)}s ago`;
+    if (diff < 36e5) return `${Math.round(diff / 6e4)}m ago`;
+    if (diff < 864e5) return `${Math.round(diff / 36e5)}h ago`;
+    return `${Math.round(diff / 864e5)}d ago`;
+  }
+  function fmtTokens(n) {
+    if (n == null || isNaN(Number(n))) return null;
+    const num = Number(n);
+    if (num >= 1e4) return `${(num / 1e3).toFixed(num >= 1e5 ? 0 : 1)}k`;
+    return num.toLocaleString("en-US");
+  }
+  function fmtCost(usd) {
+    if (usd == null || isNaN(Number(usd))) return "\u2014";
+    if (usd === 0) return "$0.00";
+    if (usd < 0.01) return `$${usd.toFixed(4)}`;
+    return `$${usd.toFixed(2)}`;
+  }
+  function fmtCostExact(usd) {
+    if (usd == null || isNaN(Number(usd))) return "\u2014";
+    return `$${Number(usd).toFixed(4)}`;
+  }
+  function fmtInt(n) {
+    return n == null ? "\u2014" : n.toLocaleString("en-US");
+  }
+  function clip(s, max) {
+    if (s == null) return null;
+    const str = (typeof s === "string" ? s : String(s)).replace(/\s+/g, " ").trim();
+    if (!str) return null;
+    return str.length <= max ? str : str.slice(0, max - 1) + "\u2026";
+  }
+  function kindOf(name, attrs) {
+    const a = attrs || {};
+    const override = a[KIND_OVERRIDE_ATTR];
+    if (typeof override === "string" && KIND_OVERRIDES.includes(override)) return override;
+    const n = (name || "").toLowerCase();
+    for (const rule of KIND_RULES) {
+      if (rule.exact.includes(n) || rule.prefixes.some((p) => n.startsWith(p))) return rule.kind;
+    }
+    return "other";
+  }
+  var KIND_COLOR = {
+    agent: "var(--otel-kind-agent)",
+    llm: "var(--otel-kind-llm)",
+    api: "var(--otel-kind-api)",
+    tool: "var(--otel-kind-tool)",
+    skill: "var(--otel-kind-skill)",
+    approval: "var(--otel-kind-approval)",
+    human_input: "var(--otel-kind-approval)",
+    // a wait on the person, like an approval
+    subagent: "var(--otel-kind-subagent)",
+    session: "var(--otel-kind-agent)",
+    cron: "var(--otel-kind-cron)",
+    other: "var(--otel-kind-other)"
+  };
+  function traceAttrs(trace) {
+    const out = {};
+    const spanSets = trace.spanSets || (trace.spanSet ? [trace.spanSet] : []);
+    if (!spanSets.length) return out;
+    const spans = spanSets[0].spans || [];
+    const priority = (s) => {
+      const n = (s.name || "").toLowerCase();
+      if (n.startsWith("api.")) return 0;
+      if (n.startsWith("tool.")) return 1;
+      if (n.startsWith("llm.")) return 2;
+      return 3;
+    };
+    for (const sp of spans.slice().sort((a, b) => priority(a) - priority(b))) {
+      for (const a of sp.attributes || []) {
+        if (!a.key || out[a.key] != null) continue;
+        const d = decodeAttrValue(a.value);
+        if (d !== null && d !== void 0 && d !== "") out[a.key] = d;
+      }
+    }
+    const root = spans.find((s) => priority(s) === 3);
+    if (root && spans.length > 1) {
+      for (const a of root.attributes || []) {
+        if (!a.key || !TURN_TOTAL_KEYS2.has(a.key)) continue;
+        const d = decodeAttrValue(a.value);
+        if (d !== null && d !== void 0 && d !== "") out[a.key] = d;
+      }
+    }
+    return out;
+  }
+  var TURN_TOTAL_KEYS2 = new Set(TURN_TOTAL_KEYS);
+  function traceSpanCount(trace) {
+    if (typeof trace.spanCount === "number" && trace.spanCount > 0) return trace.spanCount;
+    if (typeof trace.span_count === "number" && trace.span_count > 0) return trace.span_count;
+    if (trace.serviceStats) {
+      let total = 0;
+      for (const k in trace.serviceStats) total += trace.serviceStats[k].spanCount || 0;
+      if (total) return total;
+    }
+    return null;
+  }
+  function extractInputPreview(attrs) {
+    const raw = attrs["input.value"];
+    if (raw == null) return null;
+    if (typeof raw === "string") {
+      const t = raw.trim();
+      if (t[0] === "[" || t[0] === "{") {
+        try {
+          const parsed = JSON.parse(t);
+          if (Array.isArray(parsed)) {
+            for (let i = parsed.length - 1; i >= 0; i--) {
+              const m = parsed[i];
+              if (m && m.role === "user") {
+                const c = m.content;
+                if (typeof c === "string") return c;
+                if (Array.isArray(c)) {
+                  const parts2 = [];
+                  for (const p of c) {
+                    if (typeof p === "string") parts2.push(p);
+                    else if (p && typeof p.text === "string") parts2.push(p.text);
+                  }
+                  if (parts2.length) return parts2.join(" ");
+                }
+                if (c != null) return JSON.stringify(c);
+              }
+            }
+            for (const m of parsed) if (m && typeof m.content === "string") return m.content;
+          }
+          return t;
+        } catch {
+          return raw;
+        }
+      }
+      return raw;
+    }
+    return String(raw);
+  }
+  function extractOutputPreview(attrs) {
+    return attrs["llm.output.content"] || attrs["output.value"] || null;
+  }
+  function buildSpanTree(batches) {
+    if (!batches || !batches.length) return { roots: [], all: [] };
+    const all = [];
+    for (const b of batches) {
+      const scopeSpans = b.scopeSpans || b.scope_spans || b.instrumentationLibrarySpans || [];
+      for (const ss of scopeSpans) {
+        for (const span of ss.spans || []) {
+          const startNs = Number(span.startTimeUnixNano || span.start_time_unix_nano || 0);
+          const endNs = Number(span.endTimeUnixNano || span.end_time_unix_nano || 0);
+          all.push({
+            spanId: span.spanId || span.span_id,
+            parentSpanId: span.parentSpanId || span.parent_span_id || null,
+            name: span.name,
+            startNs,
+            endNs,
+            durationMs: endNs && startNs ? (endNs - startNs) / 1e6 : 0,
+            status: span.status || null,
+            _attrs: attrsObject(span.attributes),
+            children: []
+          });
+        }
+      }
+    }
+    return linkTree(all);
+  }
+  function linkTree(all) {
+    const byId = {};
+    all.forEach((s) => byId[s.spanId] = s);
+    const roots = [];
+    all.forEach((s) => {
+      if (s.parentSpanId && byId[s.parentSpanId]) byId[s.parentSpanId].children.push(s);
+      else roots.push(s);
+    });
+    const sortRec = (list) => {
+      list.sort((a, b) => a.startNs - b.startNs);
+      list.forEach((n) => sortRec(n.children));
+    };
+    sortRec(roots);
+    return { roots, all };
+  }
+  function flatten(roots) {
+    const out = [];
+    const walk = (n, depth) => {
+      out.push({ span: n, depth });
+      n.children.forEach((c) => walk(c, depth + 1));
+    };
+    roots.forEach((r) => walk(r, 0));
+    return out;
+  }
+  function statusCode(status) {
+    var _a;
+    if (!status) return null;
+    const code = (_a = status.code) != null ? _a : status.statusCode;
+    if (code === 2 || code === "STATUS_CODE_ERROR" || status === "ERROR") return "error";
+    if (code === 1 || code === "STATUS_CODE_OK" || status === "OK") return "ok";
+    return null;
+  }
+  function firstAttr(a, keys) {
+    for (const k of keys) {
+      const v = a[k];
+      if (v !== null && v !== void 0 && v !== "") return v;
+    }
+    return null;
+  }
+  function attrNum(a, ...keys) {
+    for (const k of keys) {
+      const v = a[k];
+      if (typeof v === "number") return v;
+      if (typeof v === "string" && v.trim() && !isNaN(Number(v))) return Number(v);
+    }
+    return null;
+  }
+  function findRoot(spans) {
+    const ids = new Set(spans.map((s) => {
+      var _a;
+      return (_a = s.span_id) != null ? _a : s.spanId;
+    }));
+    return spans.find((s) => {
+      var _a, _b;
+      return !((_a = s.parent_span_id) != null ? _a : s.parentSpanId) || !ids.has((_b = s.parent_span_id) != null ? _b : s.parentSpanId);
+    }) || null;
+  }
+  function rowFromLive(t) {
+    var _a;
+    return {
+      traceId: String(t.traceId),
+      rootName: t.rootName,
+      rootKind: t.rootKind || kindOf(t.rootName),
+      service: t.service || null,
+      startNs: t.startNs,
+      endNs: t.endNs || t.startNs,
+      durationMs: t.durationMs,
+      spanCount: (_a = t.spanCount) != null ? _a : null,
+      model: t.model,
+      tokens: t.tokens,
+      cost: t.cost,
+      error: !!t.error,
+      session: t.session,
+      partial: !!t.partial,
+      toolName: null,
+      inPreview: null,
+      outPreview: null,
+      raw: t,
+      subagents: t.subagents || null
+    };
+  }
+  function rowFromBackend(t) {
+    const attrs = traceAttrs(t);
+    const startNs = t.startTimeUnixNano ? Number(t.startTimeUnixNano) : 0;
+    const durationMs = Number(t.durationMs || 0);
+    const name = t.rootTraceName || "";
+    return {
+      traceId: String(t.traceID || t.traceId || ""),
+      rootName: name || "\u2014",
+      rootKind: kindOf(name, attrs),
+      service: t.rootServiceName || null,
+      startNs,
+      endNs: startNs + durationMs * 1e6,
+      durationMs,
+      spanCount: traceSpanCount(t),
+      model: firstAttr(attrs, MODEL_KEYS),
+      tokens: attrNum(attrs, ...TOTAL_TOKEN_KEYS),
+      cost: attrNum(attrs, ...COST_KEYS),
+      error: attrs["status"] === "error" || !!attrs["error.type"],
+      session: sessionOfCard(t),
+      partial: false,
+      toolName: attrs["tool.name"] ? String(attrs["tool.name"]) : null,
+      inPreview: clip(extractInputPreview(attrs), 140),
+      outPreview: clip(extractOutputPreview(attrs), 140),
+      raw: t,
+      // A backend card is the root alone; the split needs the spans (trace detail).
+      subagents: null
+    };
+  }
+  function sessionOfCard(trace) {
+    const a = traceAttrs(trace);
+    const sid = firstAttr(a, CARD_SESSION_KEYS);
+    return sid == null ? null : String(sid);
+  }
+  function groupBySession(traces) {
+    const by = {};
+    for (const t of traces) {
+      const sid = sessionOfCard(t);
+      if (!sid) continue;
+      const a = traceAttrs(t);
+      const start = Number(t.startTimeUnixNano || 0);
+      const end = start + Number(t.durationMs || 0) * 1e6;
+      const tok = attrNum(a, "gen_ai.usage.total_tokens", "llm.token_count.total");
+      const cost = attrNum(a, "hermes.cost.usage");
+      const spanCount = traceSpanCount(t);
+      const row = by[sid] || (by[sid] = {
+        session: sid,
+        turns: 0,
+        spans: 0,
+        errors: 0,
+        tokens: null,
+        cost: null,
+        toolCalls: null,
+        startNs: start,
+        endNs: end,
+        model: a["llm.model_name"] || a["gen_ai.request.model"] || null,
+        platform: a["hermes.platform"] || null,
+        traceIds: []
+      });
+      row.turns += 1;
+      row.spans = spanCount == null || row.spans == null ? null : row.spans + spanCount;
+      if (a["status"] === "error" || a["error.type"]) row.errors += 1;
+      if (tok != null) row.tokens = (row.tokens || 0) + tok;
+      if (cost != null) row.cost = (row.cost || 0) + cost;
+      row.startNs = Math.min(row.startNs, start);
+      row.endNs = Math.max(row.endNs, end);
+      row.traceIds.push(t.traceID || t.traceId);
+    }
+    return Object.values(by).sort((x, y) => y.endNs - x.endNs);
+  }
+  function sumApiSpans(spans, ...keys) {
+    let sum = 0;
+    let seen = false;
+    for (const s of spans) {
+      if (!(s.name || "").startsWith("api.")) continue;
+      if ((s.attributes || {})["hermes.query_source"] === "auxiliary") continue;
+      const v = attrNum(s.attributes || {}, ...keys);
+      if (v != null) {
+        sum += v;
+        seen = true;
+      }
+    }
+    return seen ? sum : null;
+  }
+  var MCP_PING_NAME = "MCP send ping";
+  function isMcpKeepalivePing(rootName, error) {
+    return rootName === MCP_PING_NAME && !error;
+  }
+  function liveTreeFromSpans(spans) {
+    const all = spans.map((s) => ({
+      spanId: s.span_id,
+      parentSpanId: s.parent_span_id || null,
+      name: s.name,
+      startNs: s.start_time_unix_nano || 0,
+      endNs: s.end_time_unix_nano || s.start_time_unix_nano || 0,
+      durationMs: s.duration_ms || 0,
+      status: s.status === "ERROR" ? { code: 2 } : null,
+      _attrs: s.attributes || {},
+      children: []
+    }));
+    return linkTree(all);
+  }
+  var DUPLICATE_GROUPS = [
+    ["gen_ai.request.model", "llm.model_name"],
+    ["gen_ai.usage.input_tokens", "llm.token_count.prompt"],
+    ["gen_ai.usage.output_tokens", "llm.token_count.completion"],
+    ["gen_ai.usage.total_tokens", "llm.token_count.total"],
+    ["gen_ai.usage.reasoning.output_tokens", "llm.token_count.completion_details.reasoning"],
+    ["gen_ai.usage.cache_read.input_tokens", "gen_ai.usage.cache_read_input_tokens", "llm.token_count.prompt_details.cache_read"],
+    ["gen_ai.provider.name", "gen_ai.system", "llm.provider"],
+    ["hermes.session_id", "session.id", "session_id", "gen_ai.conversation.id", "wandb.thread_id"],
+    ["openinference.span.kind", "traceloop.span.kind"]
+  ];
+  function groupAttrs(attrs) {
+    const folded = /* @__PURE__ */ new Set();
+    const alias = {};
+    for (const grp of DUPLICATE_GROUPS) {
+      const present = grp.filter((k) => attrs[k] !== void 0 && attrs[k] !== null && attrs[k] !== "");
+      if (present.length > 1) {
+        alias[present[0]] = present.slice(1);
+        present.slice(1).forEach((k) => folded.add(k));
+      }
+    }
+    const groups = {};
+    for (const key of Object.keys(attrs).sort()) {
+      if (folded.has(key)) continue;
+      const prefix = key.includes(".") ? key.split(".")[0] : "other";
+      (groups[prefix] || (groups[prefix] = { prefix, entries: [] })).entries.push({ key, value: attrs[key], aliases: alias[key] || [] });
+    }
+    const order = ["hermes", "gen_ai", "llm", "tool", "input", "output", "session", "openinference"];
+    return Object.values(groups).sort((a, b) => {
+      const ia = order.indexOf(a.prefix);
+      const ib = order.indexOf(b.prefix);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.prefix.localeCompare(b.prefix);
+    });
+  }
+  function headerFacts(root, spans = []) {
+    var _a;
+    const a = root || {};
+    const num = (...keys) => attrNum(a, ...keys);
+    let totalTokens = num("gen_ai.usage.total_tokens", "llm.token_count.total");
+    let inputTokens = num("gen_ai.usage.input_tokens", "llm.token_count.prompt");
+    let outputTokens = num("gen_ai.usage.output_tokens", "llm.token_count.completion");
+    if (totalTokens == null) {
+      const t = sumApiSpans(spans, "gen_ai.usage.total_tokens", "llm.token_count.total");
+      if (t != null) {
+        totalTokens = t;
+        inputTokens = inputTokens != null ? inputTokens : sumApiSpans(spans, "gen_ai.usage.input_tokens", "llm.token_count.prompt");
+        outputTokens = outputTokens != null ? outputTokens : sumApiSpans(spans, "gen_ai.usage.output_tokens", "llm.token_count.completion");
+      }
+    }
+    const costUnknown = a["hermes.cost.status"] != null && num("hermes.cost.usage") == null;
+    const cost = costUnknown ? null : (_a = num("hermes.cost.usage")) != null ? _a : sumApiSpans(spans, "hermes.cost.usage");
+    const toolsRaw = a["hermes.turn.tools"];
+    let tools = [];
+    if (Array.isArray(toolsRaw)) tools = toolsRaw.map(String);
+    else if (typeof toolsRaw === "string" && toolsRaw.trim()) {
+      try {
+        const parsed = JSON.parse(toolsRaw);
+        tools = Array.isArray(parsed) ? parsed.map(String) : toolsRaw.split(",").map((s) => s.trim()).filter(Boolean);
+      } catch {
+        tools = toolsRaw.split(",").map((s) => s.trim()).filter(Boolean);
+      }
+    }
+    const requestModel = a["gen_ai.request.model"] || a["llm.model_name"] || null;
+    const responseModel = a["gen_ai.response.model"] || null;
+    return {
+      requestModel,
+      responseModel: responseModel && responseModel !== requestModel ? responseModel : null,
+      inputTokens,
+      outputTokens,
+      reasoningTokens: num("gen_ai.usage.reasoning.output_tokens", "llm.token_count.completion_details.reasoning"),
+      cacheReadTokens: num("gen_ai.usage.cache_read.input_tokens", "gen_ai.usage.cache_read_input_tokens", "llm.token_count.prompt_details.cache_read"),
+      totalTokens,
+      cost,
+      costUnknown,
+      tools,
+      exitReason: a["hermes.turn.exit_reason"] || null,
+      finalStatus: a["hermes.turn.final_status"] || null,
+      session: a["hermes.session_id"] || a["session.id"] || a["session_id"] || null,
+      turn: num("hermes.turn.number"),
+      platform: a["hermes.platform"] || null
+    };
+  }
+  function topLevelSubagents(spans) {
+    const subs = spans.filter((s) => kindOf(s.name || "", s.attributes) === "subagent");
+    const children = new Set(
+      subs.map((s) => {
+        var _a;
+        return (_a = s.attributes) == null ? void 0 : _a["hermes.subagent.child_session_id"];
+      }).filter((v) => v != null && v !== "").map(String)
+    );
+    return subs.filter((s) => {
+      var _a, _b;
+      return !children.has(String((_b = (_a = s.attributes) == null ? void 0 : _a["hermes.subagent.parent_session_id"]) != null ? _b : ""));
+    });
+  }
+  var SUBAGENT_ERROR_STATUSES = /* @__PURE__ */ new Set(["error", "errored", "failed", "failure", "cancelled", "canceled", "timeout", "timed_out", "stalled"]);
+  var sumKnown = (vals) => {
+    const known = vals.filter((v) => v != null);
+    return known.length ? known.reduce((a, b) => a + b, 0) : null;
+  };
+  function agentBreakdown(rootAttrs, spans) {
+    const top = topLevelSubagents(spans);
+    if (!top.length) return null;
+    const f = headerFacts(rootAttrs, spans);
+    const main = {
+      label: "main",
+      main: true,
+      model: f.requestModel,
+      tokens: f.totalTokens,
+      calls: attrNum(rootAttrs || {}, "hermes.turn.api_call_count"),
+      cost: f.cost,
+      error: false
+    };
+    const subs = top.map((s) => {
+      const a = s.attributes || {};
+      const role = a["hermes.subagent.role"] || a["gen_ai.agent.name"] || (s.name.startsWith("subagent.") ? s.name.slice("subagent.".length) : "");
+      return {
+        label: role ? String(role) : "subagent",
+        main: false,
+        model: a["gen_ai.request.model"] || null,
+        tokens: attrNum(a, "hermes.subagent.usage.total_tokens"),
+        calls: attrNum(a, "hermes.subagent.api_call_count"),
+        cost: attrNum(a, "hermes.subagent.cost.usage"),
+        error: SUBAGENT_ERROR_STATUSES.has(String(a["hermes.subagent.status"] || "").toLowerCase())
+      };
+    });
+    const rows = [main, ...subs];
+    return {
+      rows,
+      total: {
+        tokens: sumKnown(rows.map((r) => r.tokens)),
+        calls: sumKnown(rows.map((r) => r.calls)),
+        cost: rows.every((r) => r.cost != null) ? sumKnown(rows.map((r) => r.cost)) : null
+      }
+    };
+  }
+  function metricOtlpName(n) {
+    if (n.includes(".")) return n;
+    const base = n.replace(/_(sum|count|bucket|total)$/, "");
+    if (base.startsWith("hermes_prompt_cache_")) return "hermes.prompt_cache." + base.slice("hermes_prompt_cache_".length);
+    return base.replace(/_/g, ".");
+  }
+
+  // src/errors.ts
+  var KIND_TEXT = {
+    not_found: "Not found",
+    auth: "The backend rejected the credentials",
+    config: "The backend entry is not configured for this",
+    request: "The plugin rejected the request",
+    backend: "The backend did not answer",
+    validation: "The request was rejected",
+    network: "The dashboard server is unreachable",
+    unknown: "Request failed"
+  };
+  var NETWORK_RE = /unreachable|cannot reach|failed to fetch|network|refused|offline/i;
+  function parts(e) {
+    var _a, _b;
+    const msg = String((_b = (_a = e == null ? void 0 : e.message) != null ? _a : e) != null ? _b : "").trim();
+    const status = e == null ? void 0 : e.status;
+    const body = e == null ? void 0 : e.body;
+    if (typeof status === "number" && Number.isFinite(status)) {
+      return { status, body: typeof body === "string" ? body : null, msg };
+    }
+    const m = /^(\d{3}):\s*([\s\S]*)$/.exec(msg);
+    if (m) return { status: Number(m[1]), body: m[2].trim(), msg: m[2].trim() };
+    return { status: null, body: null, msg };
+  }
+  function describeError(e) {
+    const { status, body, msg } = parts(e);
+    let detail = msg;
+    let kind = "unknown";
+    if (status !== null && status !== 0) {
+      try {
+        const parsed = JSON.parse(body != null ? body : "");
+        if (parsed && typeof parsed === "object") {
+          if (typeof parsed.detail === "string") detail = parsed.detail;
+          else if (Array.isArray(parsed.detail)) detail = parsed.detail.map((d) => (d == null ? void 0 : d.msg) || JSON.stringify(d)).join("; ");
+          else if (parsed.detail != null) detail = JSON.stringify(parsed.detail);
+          if (typeof parsed.kind === "string" && parsed.kind in KIND_TEXT) kind = parsed.kind;
+        }
+      } catch {
+      }
+      if (kind === "unknown") {
+        if (status === 404) kind = "not_found";
+        else if (status === 401 || status === 403) kind = "auth";
+        else if (status === 422 || status === 400) kind = "validation";
+        else if (status === 503) kind = "config";
+        else if (status === 502 || status === 504) kind = "backend";
+      }
+    } else if (status === 0 || NETWORK_RE.test(msg)) {
+      kind = "network";
+    }
+    const hint = kind === "auth" ? "Check the credential on the backend entry in the Settings tab." : kind === "config" ? "Check the backend entry in the Settings tab." : kind === "backend" ? "The Live source needs no backend and always works." : kind === "network" ? "Is the Hermes dashboard still running?" : null;
+    return { status, kind, detail, text: KIND_TEXT[kind], hint };
+  }
+
+  // src/icons.tsx
+  function svg(size, className, children) {
+    return /* @__PURE__ */ React.createElement(
+      "svg",
+      {
+        width: size || 16,
+        height: size || 16,
+        viewBox: "0 0 24 24",
+        fill: "none",
+        stroke: "currentColor",
+        strokeWidth: 2,
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        className: className || "",
+        "aria-hidden": true
+      },
+      children
+    );
+  }
+  var IconZap = (p) => svg(p.size, p.className, /* @__PURE__ */ React.createElement("polygon", { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" }));
+  var IconWrench = (p) => svg(
+    p.size,
+    p.className,
+    /* @__PURE__ */ React.createElement("path", { d: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" })
+  );
+  var IconTerminal = (p) => svg(p.size, p.className, [/* @__PURE__ */ React.createElement("polyline", { key: "a", points: "4 17 10 11 4 5" }), /* @__PURE__ */ React.createElement("line", { key: "b", x1: 12, x2: 20, y1: 19, y2: 19 })]);
+  var IconClock = (p) => svg(p.size, p.className, [/* @__PURE__ */ React.createElement("circle", { key: "a", cx: 12, cy: 12, r: 10 }), /* @__PURE__ */ React.createElement("polyline", { key: "b", points: "12 6 12 12 16 14" })]);
+  var IconActivity = (p) => svg(p.size, p.className, /* @__PURE__ */ React.createElement("polyline", { points: "22 12 18 12 15 21 9 3 6 12 2 12" }));
+  var IconChevronRight = (p) => svg(p.size, p.className, /* @__PURE__ */ React.createElement("path", { d: "m9 18 6-6-6-6" }));
+  var IconSparkles = (p) => svg(p.size, p.className, /* @__PURE__ */ React.createElement("path", { d: "M9.94 14.06 7 21l-2.94-6.94L-.94 12 7 9.06 9.94 3l2.94 6.06L19.94 12zM18 5l1 2.5L21.5 8 19 9l-1 2.5L17 9l-2.5-1L17 7z" }));
+  var IconShield = (p) => svg(
+    p.size,
+    p.className,
+    /* @__PURE__ */ React.createElement("path", { d: "M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" })
+  );
+  var IconUsers = (p) => svg(p.size, p.className, [
+    /* @__PURE__ */ React.createElement("path", { key: "a", d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }),
+    /* @__PURE__ */ React.createElement("circle", { key: "b", cx: 9, cy: 7, r: 4 }),
+    /* @__PURE__ */ React.createElement("path", { key: "c", d: "M22 21v-2a4 4 0 0 0-3-3.87" }),
+    /* @__PURE__ */ React.createElement("path", { key: "d", d: "M16 3.13a4 4 0 0 1 0 7.75" })
+  ]);
+  var IconChart = (p) => svg(p.size, p.className, [/* @__PURE__ */ React.createElement("path", { key: "a", d: "M3 3v16a2 2 0 0 0 2 2h16" }), /* @__PURE__ */ React.createElement("path", { key: "b", d: "m19 9-5 5-4-4-3 3" })]);
+  var IconList = (p) => svg(p.size, p.className, [
+    /* @__PURE__ */ React.createElement("line", { key: "a", x1: 8, x2: 21, y1: 6, y2: 6 }),
+    /* @__PURE__ */ React.createElement("line", { key: "b", x1: 8, x2: 21, y1: 12, y2: 12 }),
+    /* @__PURE__ */ React.createElement("line", { key: "c", x1: 8, x2: 21, y1: 18, y2: 18 }),
+    /* @__PURE__ */ React.createElement("line", { key: "d", x1: 3, x2: 3.01, y1: 6, y2: 6 }),
+    /* @__PURE__ */ React.createElement("line", { key: "e", x1: 3, x2: 3.01, y1: 12, y2: 12 }),
+    /* @__PURE__ */ React.createElement("line", { key: "f", x1: 3, x2: 3.01, y1: 18, y2: 18 })
+  ]);
+  var CATEGORY = {
+    llm: { Icon: IconZap, color: "otel-c-llm", label: "llm" },
+    tool: { Icon: IconWrench, color: "otel-c-tool", label: "tool" },
+    agent: { Icon: IconTerminal, color: "otel-c-agent", label: "agent" },
+    cron: { Icon: IconClock, color: "otel-c-cron", label: "cron" },
+    skill: { Icon: IconSparkles, color: "otel-c-skill", label: "skill" },
+    approval: { Icon: IconShield, color: "otel-c-approval", label: "approval" },
+    subagent: { Icon: IconUsers, color: "otel-c-subagent", label: "subagent" },
+    other: { Icon: IconActivity, color: "text-muted-foreground", label: null }
+  };
+  function kindIcon(kind) {
+    return (CATEGORY[kind] || CATEGORY.other).Icon;
+  }
+  var IconSettings = (p) => svg(
+    p.size,
+    p.className,
+    /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("path", { d: "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" }), /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "12", r: "3" }))
+  );
+  var IconRefresh = (p) => svg(
+    p.size,
+    p.className,
+    /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("path", { d: "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" }), /* @__PURE__ */ React.createElement("path", { d: "M21 3v5h-5" }), /* @__PURE__ */ React.createElement("path", { d: "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" }), /* @__PURE__ */ React.createElement("path", { d: "M8 16H3v5" }))
+  );
+  var IconCopy = (p) => svg(
+    p.size,
+    p.className,
+    /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("rect", { width: "14", height: "14", x: "8", y: "8", rx: "2", ry: "2" }), /* @__PURE__ */ React.createElement("path", { d: "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" }))
+  );
+  var IconCheck = (p) => svg(p.size, p.className, /* @__PURE__ */ React.createElement("path", { d: "M20 6 9 17l-5-5" }));
+  var IconExternal = (p) => svg(
+    p.size,
+    p.className,
+    /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("path", { d: "M15 3h6v6" }), /* @__PURE__ */ React.createElement("path", { d: "M10 14 21 3" }), /* @__PURE__ */ React.createElement("path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }))
+  );
+  var IconDatabase = (p) => svg(
+    p.size,
+    p.className,
+    /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("ellipse", { cx: "12", cy: "5", rx: "9", ry: "3" }), /* @__PURE__ */ React.createElement("path", { d: "M3 5v14a9 3 0 0 0 18 0V5" }), /* @__PURE__ */ React.createElement("path", { d: "M3 12a9 3 0 0 0 18 0" }))
+  );
+  var IconPause = (p) => svg(
+    p.size,
+    p.className,
+    /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("rect", { x: "6", y: "4", width: "4", height: "16" }), /* @__PURE__ */ React.createElement("rect", { x: "14", y: "4", width: "4", height: "16" }))
+  );
+  var IconPlay = (p) => svg(p.size, p.className, /* @__PURE__ */ React.createElement("polygon", { points: "6 3 20 12 6 21 6 3" }));
+  var IconSkipBack = (p) => svg(
+    p.size,
+    p.className,
+    /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("polygon", { points: "19 20 9 12 19 4 19 20" }), /* @__PURE__ */ React.createElement("line", { x1: "5", x2: "5", y1: "19", y2: "5" }))
+  );
+  var IconArrowLeft = (p) => svg(
+    p.size,
+    p.className,
+    /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("path", { d: "m12 19-7-7 7-7" }), /* @__PURE__ */ React.createElement("path", { d: "M19 12H5" }))
+  );
+  var IconArrowRight = (p) => svg(
+    p.size,
+    p.className,
+    /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("path", { d: "M5 12h14" }), /* @__PURE__ */ React.createElement("path", { d: "m12 5 7 7-7 7" }))
+  );
+  var IconAlert = (p) => svg(
+    p.size,
+    p.className,
+    /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("path", { d: "m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" }), /* @__PURE__ */ React.createElement("path", { d: "M12 9v4" }), /* @__PURE__ */ React.createElement("path", { d: "M12 17h.01" }))
+  );
+  var IconScrollText = (p) => svg(
+    p.size,
+    p.className,
+    /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("path", { d: "M15 12h-5" }), /* @__PURE__ */ React.createElement("path", { d: "M15 8h-5" }), /* @__PURE__ */ React.createElement("path", { d: "M19 17V5a2 2 0 0 0-2-2H4" }), /* @__PURE__ */ React.createElement("path", { d: "M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" }))
+  );
+
+  // src/atoms.tsx
+  function MiniLabel(props) {
+    return /* @__PURE__ */ React.createElement("span", { className: "text-[11px] font-medium uppercase tracking-wide text-muted-foreground" }, props.children);
+  }
+  function ErrorBanner({ error, prefix }) {
+    const e = typeof error === "object" && error && "kind" in error && "detail" in error ? error : describeError(error);
+    return /* @__PURE__ */ React.createElement("div", { role: "alert", className: "otel-error-banner" }, /* @__PURE__ */ React.createElement(IconAlert, { size: 14, className: "shrink-0" }), /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("div", null, prefix ? `${prefix}: ` : "", e.text, e.status ? /* @__PURE__ */ React.createElement("span", { className: "otel-error-status" }, " ", e.status) : null), e.detail && e.detail !== e.text ? /* @__PURE__ */ React.createElement("div", { className: "otel-error-detail" }, e.detail) : null, e.hint ? /* @__PURE__ */ React.createElement("div", { className: "otel-error-hint" }, e.hint) : null));
+  }
+  function Clickable({
+    onActivate,
+    className,
+    children,
+    label,
+    as = "div",
+    toggle,
+    open,
+    ...rest
+  }) {
+    const Tag = as;
+    if (toggle) {
+      const { "aria-expanded": _ignored, ...plain } = rest;
+      return /* @__PURE__ */ React.createElement(Tag, { className, onClick: onActivate, ...plain }, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "otel-row-toggle",
+          "aria-expanded": !!open,
+          "aria-label": label,
+          onClick: (e) => {
+            e.stopPropagation();
+            onActivate();
+          }
+        },
+        open ? "\u25BE" : "\u25B8"
+      ), children);
+    }
+    return /* @__PURE__ */ React.createElement(
+      Tag,
+      {
+        role: "button",
+        tabIndex: 0,
+        "aria-label": label,
+        className,
+        onClick: onActivate,
+        onKeyDown: (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onActivate();
+          }
+        },
+        ...rest
+      },
+      children
+    );
+  }
+  function CopyButton({ text, label, className }) {
+    const [done, setDone] = useState(false);
+    return /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: cn("otel-link inline-flex items-center gap-1 text-[10px] text-muted-foreground", className),
+        title: `copy ${label || "to clipboard"}`,
+        onClick: (e) => {
+          var _a;
+          e.stopPropagation();
+          const p = (_a = navigator.clipboard) == null ? void 0 : _a.writeText(text);
+          if (p && typeof p.then === "function") p.catch(() => void 0);
+          setDone(true);
+          setTimeout(() => setDone(false), 1200);
+        }
+      },
+      done ? /* @__PURE__ */ React.createElement(IconCheck, { size: 11 }) : /* @__PURE__ */ React.createElement(IconCopy, { size: 11 }),
+      done ? "copied" : label || "copy"
+    );
+  }
+  function Stat({
+    label,
+    value,
+    sub,
+    accent,
+    unknownText
+  }) {
+    const unknown = value == null;
+    const valColor = unknown ? "text-muted-foreground" : accent === "cost" ? "otel-c-cost" : accent === "error" ? "text-destructive" : "text-foreground";
+    return /* @__PURE__ */ React.createElement("div", { className: "otel-card-bg border border-border px-3 py-2.5" }, /* @__PURE__ */ React.createElement("div", { className: cn("text-xl font-semibold tabular-nums tracking-tight", valColor) }, unknown ? "\u2014" : value), /* @__PURE__ */ React.createElement("div", { className: "text-[11px] uppercase tracking-wide text-muted-foreground" }, label), unknown && unknownText ? /* @__PURE__ */ React.createElement("div", { className: "mt-0.5 text-[11px] text-muted-foreground" }, unknownText) : sub != null ? /* @__PURE__ */ React.createElement("div", { className: "mt-0.5 text-[11px] text-muted-foreground" }, sub) : null);
+  }
+  function Pulse({ active }) {
+    return /* @__PURE__ */ React.createElement("span", { className: cn("inline-block h-2.5 w-2.5 rounded-full", active ? "otel-pulse-dot otel-pulse" : "bg-muted-foreground/40"), "aria-hidden": true });
+  }
+  function Sparkline({ values, height = 30, color, label }) {
+    const max = Math.max(1, ...values);
+    const w = values.length || 1;
+    const bw = 100 / w;
+    const fill = color || "var(--otel-kind-agent)";
+    return /* @__PURE__ */ React.createElement("svg", { viewBox: `0 0 100 ${height}`, preserveAspectRatio: "none", style: { width: "100%", height }, role: "img", "aria-label": label || "activity over time" }, values.map((v, i) => {
+      const h = v / max * (height - 2);
+      return /* @__PURE__ */ React.createElement("rect", { key: i, x: i * bw + 0.25, y: height - h, width: Math.max(0.5, bw - 0.5), height: h || 0.5, fill, opacity: 0.3 + 0.7 * (i / w) });
+    }));
+  }
+  function yTicks(max, n = 3) {
+    if (!(max > 0)) return [0];
+    const raw = max / n;
+    const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+    const step = [1, 2, 2.5, 5, 10].map((m) => m * pow).find((s) => s >= raw) || raw;
+    const out = [];
+    for (let v = 0; ; v += step) {
+      out.push(Number(v.toFixed(10)));
+      if (v >= max - 1e-9) break;
+    }
+    return out;
+  }
+  function LineChart({
+    series,
+    height = 120,
+    labels,
+    fmt,
+    bucketLabels
+  }) {
+    var _a;
+    const [hover, setHover] = useState(null);
+    const box = useRef(null);
+    const n = Math.max(1, ...series.map((s) => s.points.length));
+    const vals = series.flatMap((s) => s.points.filter((v) => v != null));
+    const rawMax = vals.length ? Math.max(...vals, 0) : 0;
+    const ticks = yTicks(rawMax);
+    const max = Math.max(ticks[ticks.length - 1] || 0, rawMax) || 1;
+    const fmtY = (v) => fmt ? fmt(v) : v >= 1e3 ? `${(v / 1e3).toFixed(v >= 1e4 ? 0 : 1)}k` : v.toFixed(v < 10 && v !== Math.round(v) ? 2 : 0);
+    const W = 100;
+    const PAD = 3;
+    const x = (i) => i / Math.max(1, n - 1) * W;
+    const y = (v) => height - v / max * (height - 2 * PAD) - PAD;
+    const path = (pts) => {
+      let d = "";
+      let pen = false;
+      pts.forEach((v, i) => {
+        if (v == null) {
+          pen = false;
+          return;
+        }
+        d += `${pen ? "L" : "M"} ${x(i).toFixed(2)} ${y(v).toFixed(2)} `;
+        pen = true;
+      });
+      return d;
+    };
+    const onMove = (e) => {
+      var _a2, _b;
+      const r = (_b = (_a2 = box.current) == null ? void 0 : _a2.getBoundingClientRect) == null ? void 0 : _b.call(_a2);
+      if (!r || !r.width) return;
+      const i = Math.round((e.clientX - r.left) / r.width * (n - 1));
+      setHover(Math.max(0, Math.min(n - 1, i)));
+    };
+    return /* @__PURE__ */ React.createElement("div", { className: "otel-chart" }, /* @__PURE__ */ React.createElement("div", { className: "otel-chart-y", "aria-hidden": true }, ticks.slice().reverse().map((t) => /* @__PURE__ */ React.createElement("span", { key: t, style: { top: `${(max - t) / max * 100}%` } }, fmtY(t)))), /* @__PURE__ */ React.createElement("div", { className: "otel-chart-plot", ref: box, onMouseMove: onMove, onMouseLeave: () => setHover(null) }, /* @__PURE__ */ React.createElement(
+      "svg",
+      {
+        viewBox: `0 0 ${W} ${height}`,
+        preserveAspectRatio: "none",
+        style: { width: "100%", height },
+        role: "img",
+        "aria-label": `${series.map((s) => s.label).join(", ")} over time`
+      },
+      ticks.map((t) => /* @__PURE__ */ React.createElement("line", { key: t, x1: 0, x2: W, y1: y(t), y2: y(t), stroke: "var(--color-border)", strokeWidth: 0.3, vectorEffect: "non-scaling-stroke" })),
+      series.map((s) => /* @__PURE__ */ React.createElement("path", { key: s.label, d: path(s.points), fill: "none", stroke: s.color, strokeWidth: 1.2, vectorEffect: "non-scaling-stroke" })),
+      series.map(
+        (s) => s.points.map(
+          (v, i) => v != null && s.points[i - 1] == null && s.points[i + 1] == null ? /* @__PURE__ */ React.createElement("circle", { key: `${s.label}-${i}`, cx: x(i), cy: y(v), r: 1.2, fill: s.color }) : null
+        )
+      ),
+      hover != null ? /* @__PURE__ */ React.createElement(
+        "line",
+        {
+          x1: x(hover),
+          x2: x(hover),
+          y1: 0,
+          y2: height,
+          stroke: "var(--color-foreground)",
+          strokeWidth: 0.6,
+          opacity: 0.5,
+          vectorEffect: "non-scaling-stroke"
+        }
+      ) : null,
+      hover != null ? series.map(
+        (s) => s.points[hover] != null ? /* @__PURE__ */ React.createElement("circle", { key: s.label, cx: x(hover), cy: y(s.points[hover]), r: 1.4, fill: s.color }) : null
+      ) : null
+    ), hover != null ? /* @__PURE__ */ React.createElement("div", { className: "otel-chart-tip", style: { left: `${hover / Math.max(1, n - 1) * 100}%` } }, /* @__PURE__ */ React.createElement("div", { className: "text-muted-foreground" }, (_a = bucketLabels == null ? void 0 : bucketLabels[hover]) != null ? _a : `bucket ${hover + 1}`), series.map((s) => /* @__PURE__ */ React.createElement("div", { key: s.label, className: "flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "otel-w-2 inline-block h-2 rounded-full", style: { background: s.color } }), /* @__PURE__ */ React.createElement("span", { className: "truncate" }, s.label), /* @__PURE__ */ React.createElement("span", { className: "ml-auto tabular-nums" }, s.points[hover] == null ? "no data" : fmtY(s.points[hover]))))) : null), /* @__PURE__ */ React.createElement("div", { className: "otel-chart-x" }, labels && labels.length ? labels.map((l, i) => /* @__PURE__ */ React.createElement("span", { key: i }, l)) : null), /* @__PURE__ */ React.createElement("div", { className: "mt-1 flex flex-wrap items-center gap-3" }, series.map((s) => /* @__PURE__ */ React.createElement("span", { key: s.label, className: "inline-flex items-center gap-1.5 text-[11px] text-muted-foreground" }, /* @__PURE__ */ React.createElement("span", { className: "otel-w-2 inline-block h-2 rounded-full", style: { background: s.color } }), s.label))));
+  }
+  function Pager({
+    page,
+    hasMore,
+    onNewest,
+    onNewer,
+    onOlder,
+    range
+  }) {
+    const first2 = page <= 1;
+    return /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground" }, /* @__PURE__ */ React.createElement("span", null, range || ""), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "tabular-nums" }, "page ", page), /* @__PURE__ */ React.createElement("button", { type: "button", className: "otel-btn", onClick: onNewest, disabled: first2, title: "newest page" }, /* @__PURE__ */ React.createElement(IconSkipBack, { size: 12 }), " Newest"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "otel-btn", onClick: onNewer, disabled: first2, title: "newer page" }, /* @__PURE__ */ React.createElement(IconArrowLeft, { size: 12 }), " Newer"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "otel-btn", onClick: onOlder, disabled: !hasMore, title: hasMore ? "older page" : "no older rows" }, "Older ", /* @__PURE__ */ React.createElement(IconArrowRight, { size: 12 }))));
+  }
+  function Segmented({
+    value,
+    options,
+    onChange,
+    label
+  }) {
+    return /* @__PURE__ */ React.createElement("div", { className: "otel-card-bg inline-flex border border-border p-0.5", role: "group", "aria-label": label }, options.map((o) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: o.id,
+        type: "button",
+        "aria-pressed": value === o.id,
+        onClick: () => onChange(o.id),
+        className: cn(
+          "otel-toggle px-3 py-1 text-xs font-medium transition-colors",
+          value === o.id ? "otel-toggle-active text-foreground" : "text-muted-foreground hover:text-foreground"
+        )
+      },
+      o.label
+    )));
+  }
+  function Empty({ title, children, className }) {
+    return /* @__PURE__ */ React.createElement("div", { className: cn("border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground", className) }, /* @__PURE__ */ React.createElement("div", { className: "mb-1 text-base font-medium text-foreground" }, title), children);
+  }
+  function Toggle({
+    checked,
+    onChange,
+    label,
+    title,
+    Switch
+  }) {
+    const id = useRef(`otel-sw-${Math.random().toString(36).slice(2, 8)}`);
+    return /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5 text-[11px] text-muted-foreground", title }, Switch ? /* @__PURE__ */ React.createElement(Switch, { checked, onCheckedChange: onChange, id: id.current }) : /* @__PURE__ */ React.createElement("input", { id: id.current, type: "checkbox", checked, onChange: (e) => onChange(e.target.checked) }), /* @__PURE__ */ React.createElement("label", { htmlFor: id.current, className: "cursor-pointer" }, label));
+  }
+
+  // src/md.ts
+  var SAFE_HREF = /^(https?:\/\/|mailto:|#|\/)/i;
+  function parseInline(src) {
+    const out = [];
+    let buf = "";
+    const flush = () => {
+      if (buf) out.push({ t: "text", v: buf });
+      buf = "";
+    };
+    let i = 0;
+    while (i < src.length) {
+      const ch = src[i];
+      if (ch === "`") {
+        const end = src.indexOf("`", i + 1);
+        if (end > i) {
+          flush();
+          out.push({ t: "code", v: src.slice(i + 1, end) });
+          i = end + 1;
+          continue;
+        }
+      }
+      if (ch === "*" && src[i + 1] === "*") {
+        const end = src.indexOf("**", i + 2);
+        if (end > i + 2) {
+          flush();
+          out.push({ t: "strong", children: parseInline(src.slice(i + 2, end)) });
+          i = end + 2;
+          continue;
+        }
+      }
+      if ((ch === "*" || ch === "_") && src[i + 1] !== ch && src[i + 1] !== " ") {
+        const end = src.indexOf(ch, i + 1);
+        if (end > i + 1 && src[end - 1] !== " ") {
+          flush();
+          out.push({ t: "em", children: parseInline(src.slice(i + 1, end)) });
+          i = end + 1;
+          continue;
+        }
+      }
+      if (ch === "[") {
+        const close = src.indexOf("](", i + 1);
+        const end = close > 0 ? src.indexOf(")", close + 2) : -1;
+        if (close > i && end > close) {
+          const href = src.slice(close + 2, end).trim();
+          if (SAFE_HREF.test(href)) {
+            flush();
+            out.push({ t: "link", href, children: parseInline(src.slice(i + 1, close)) });
+            i = end + 1;
+            continue;
+          }
+        }
+      }
+      if (ch === "h" && /^https?:\/\/\S+/.test(src.slice(i))) {
+        const m = /^https?:\/\/[^\s<>)]+/.exec(src.slice(i));
+        flush();
+        out.push({ t: "link", href: m[0], children: [{ t: "text", v: m[0] }] });
+        i += m[0].length;
+        continue;
+      }
+      buf += ch;
+      i++;
+    }
+    flush();
+    return out;
+  }
+  function splitRow(line) {
+    return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+  }
+  var isSeparatorRow = (line) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line);
+  function parseBlocks(src) {
+    const lines = src.replace(/\r\n?/g, "\n").split("\n");
+    const blocks = [];
+    let para = [];
+    const flushPara = () => {
+      if (para.length) blocks.push({ t: "paragraph", children: parseInline(para.join("\n")) });
+      para = [];
+    };
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      const fence = /^\s*```\s*(\S*)\s*$/.exec(line);
+      if (fence) {
+        flushPara();
+        const buf = [];
+        i++;
+        while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) buf.push(lines[i++]);
+        i++;
+        blocks.push({ t: "code", lang: fence[1] || "", text: buf.join("\n") });
+        continue;
+      }
+      const heading = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+      if (heading) {
+        flushPara();
+        blocks.push({ t: "heading", level: heading[1].length, children: parseInline(heading[2]) });
+        i++;
+        continue;
+      }
+      if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+        flushPara();
+        blocks.push({ t: "rule" });
+        i++;
+        continue;
+      }
+      const bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
+      const number = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+      if (bullet || number) {
+        flushPara();
+        const ordered = !!number;
+        const items = [];
+        const re = ordered ? /^\s*\d+[.)]\s+(.*)$/ : /^\s*[-*+]\s+(.*)$/;
+        while (i < lines.length) {
+          const m = re.exec(lines[i]);
+          if (m) {
+            items.push(parseInline(m[1]));
+            i++;
+          } else if (/^\s{2,}\S/.test(lines[i]) && items.length) {
+            const last = items[items.length - 1];
+            last.push({ t: "text", v: " " }, ...parseInline(lines[i].trim()));
+            i++;
+          } else break;
+        }
+        blocks.push({ t: "list", ordered, items });
+        continue;
+      }
+      if (/^\s*>\s?/.test(line)) {
+        flushPara();
+        const buf = [];
+        while (i < lines.length && /^\s*>\s?/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, ""));
+        blocks.push({ t: "quote", children: parseInline(buf.join("\n")) });
+        continue;
+      }
+      if (line.includes("|") && i + 1 < lines.length && isSeparatorRow(lines[i + 1])) {
+        flushPara();
+        const header = splitRow(line).map(parseInline);
+        i += 2;
+        const rows = [];
+        while (i < lines.length && lines[i].includes("|") && lines[i].trim()) rows.push(splitRow(lines[i++]).map(parseInline));
+        blocks.push({ t: "table", header, rows });
+        continue;
+      }
+      if (!line.trim()) {
+        flushPara();
+        i++;
+        continue;
+      }
+      para.push(line);
+      i++;
+    }
+    flushPara();
+    return blocks;
+  }
+
+  // src/markdown.tsx
+  function Inlines({ nodes }) {
+    return /* @__PURE__ */ React.createElement(React.Fragment, null, nodes.map((n, i) => {
+      if (n.t === "text") return /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, n.v);
+      if (n.t === "code")
+        return /* @__PURE__ */ React.createElement("code", { key: i, className: "otel-code" }, n.v);
+      if (n.t === "strong")
+        return /* @__PURE__ */ React.createElement("strong", { key: i }, /* @__PURE__ */ React.createElement(Inlines, { nodes: n.children }));
+      if (n.t === "em")
+        return /* @__PURE__ */ React.createElement("em", { key: i }, /* @__PURE__ */ React.createElement(Inlines, { nodes: n.children }));
+      return /* @__PURE__ */ React.createElement("a", { key: i, className: "otel-link", href: n.href, target: "_blank", rel: "noreferrer noopener" }, /* @__PURE__ */ React.createElement(Inlines, { nodes: n.children }));
+    }));
+  }
+  function BlockView({ b }) {
+    switch (b.t) {
+      case "heading": {
+        const Tag = `h${Math.min(6, b.level)}`;
+        return /* @__PURE__ */ React.createElement(Tag, { className: `otel-md-h otel-md-h${Math.min(4, b.level)}` }, /* @__PURE__ */ React.createElement(Inlines, { nodes: b.children }));
+      }
+      case "paragraph":
+        return /* @__PURE__ */ React.createElement("p", { className: "otel-md-p" }, /* @__PURE__ */ React.createElement(Inlines, { nodes: b.children }));
+      case "code":
+        return /* @__PURE__ */ React.createElement("pre", { className: "otel-pre otel-md-code", "data-lang": b.lang || void 0 }, b.text);
+      case "list": {
+        const Tag = b.ordered ? "ol" : "ul";
+        return /* @__PURE__ */ React.createElement(Tag, { className: b.ordered ? "otel-md-ol" : "otel-md-ul" }, b.items.map((it, i) => /* @__PURE__ */ React.createElement("li", { key: i }, /* @__PURE__ */ React.createElement(Inlines, { nodes: it }))));
+      }
+      case "quote":
+        return /* @__PURE__ */ React.createElement("blockquote", { className: "otel-md-quote" }, /* @__PURE__ */ React.createElement(Inlines, { nodes: b.children }));
+      case "table":
+        return /* @__PURE__ */ React.createElement("div", { className: "otel-md-tablewrap" }, /* @__PURE__ */ React.createElement("table", { className: "otel-md-table" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, b.header.map((c, i) => /* @__PURE__ */ React.createElement("th", { key: i }, /* @__PURE__ */ React.createElement(Inlines, { nodes: c }))))), /* @__PURE__ */ React.createElement("tbody", null, b.rows.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, r.map((c, j) => /* @__PURE__ */ React.createElement("td", { key: j }, /* @__PURE__ */ React.createElement(Inlines, { nodes: c }))))))));
+      default:
+        return /* @__PURE__ */ React.createElement("hr", { className: "otel-md-rule" });
+    }
+  }
+  function Markdown({ text }) {
+    const blocks = parseBlocks(text || "");
+    return /* @__PURE__ */ React.createElement("div", { className: "otel-md" }, blocks.map((b, i) => /* @__PURE__ */ React.createElement(BlockView, { key: i, b })));
+  }
+
+  // src/values.ts
+  function parseJsonish(raw) {
+    if (typeof raw !== "string") return raw;
+    const t = raw.trim();
+    if (!(t.startsWith("[") || t.startsWith("{"))) return raw;
+    try {
+      return JSON.parse(t);
+    } catch {
+      return raw;
+    }
+  }
+  function parsePyRepr(raw) {
+    if (typeof raw !== "string") return raw;
+    const t = raw.trim();
+    if (!(t.startsWith("[") && t.endsWith("]") || t.startsWith("{") && t.endsWith("}"))) return raw;
+    if (!t.includes("'")) return raw;
+    try {
+      return JSON.parse(
+        t.replace(/'/g, '"').replace(/\bTrue\b/g, "true").replace(/\bFalse\b/g, "false").replace(/\bNone\b/g, "null")
+      );
+    } catch {
+      return raw;
+    }
+  }
+  function toolCallOf(tc) {
+    var _a, _b, _c, _d, _e;
+    if (!tc || typeof tc !== "object") return null;
+    const fn = tc.function && typeof tc.function === "object" ? tc.function : tc;
+    const name = (_a = fn.name) != null ? _a : tc.name;
+    if (typeof name !== "string" || !name) return null;
+    let args = (_e = (_d = (_c = (_b = fn.arguments) != null ? _b : tc.arguments) != null ? _c : tc.args) != null ? _d : tc.input) != null ? _e : null;
+    if (typeof args === "string") args = parseJsonish(args);
+    return { id: tc.id != null ? String(tc.id) : null, name, args };
+  }
+  function parseToolCalls(raw) {
+    const v = parseJsonish(raw);
+    if (!Array.isArray(v) || !v.length) return null;
+    const calls = v.map(toolCallOf);
+    return calls.every((c) => c !== null) ? calls : null;
+  }
+  function partsOfContent(c) {
+    if (c == null || c === "") return [];
+    if (typeof c === "string") return [{ type: "text", text: c }];
+    if (Array.isArray(c)) {
+      const out = [];
+      for (const p of c) {
+        if (typeof p === "string") out.push({ type: "text", text: p });
+        else if (p && typeof p === "object" && typeof p.text === "string") out.push({ type: "text", text: p.text });
+        else if (p && typeof p === "object" && (p.type === "text" || p.type === "reasoning") && typeof p.content === "string")
+          out.push({ type: "text", text: p.content });
+        else if (p && typeof p === "object" && p.type === "tool_call_response")
+          out.push({ type: "text", text: typeof p.response === "string" ? p.response : JSON.stringify(p.response) });
+        else if (p && typeof p === "object" && (p.type === "tool_use" || p.type === "tool_call")) {
+          const tc = toolCallOf(p);
+          if (tc) out.push({ type: "tool_call", ...tc });
+        } else out.push({ type: "other", label: p && p.type || "part", value: p });
+      }
+      return out;
+    }
+    return [{ type: "other", label: "content", value: c }];
+  }
+  function parseChat(raw) {
+    var _a, _b, _c, _d;
+    const v = parseJsonish(raw);
+    const list = Array.isArray(v) ? v : v && typeof v === "object" && (v.role || v["message.role"]) ? [v] : null;
+    if (!list || !list.length) return null;
+    const out = [];
+    for (const m of list) {
+      if (!m || typeof m !== "object") return null;
+      const role = (_a = m.role) != null ? _a : m["message.role"];
+      if (typeof role !== "string") return null;
+      const parts2 = partsOfContent((_c = (_b = m.content) != null ? _b : m["message.content"]) != null ? _c : m.parts);
+      const response = Array.isArray(m.parts) ? m.parts.find((p) => p && p.type === "tool_call_response") : null;
+      const tcs = (_d = m.tool_calls) != null ? _d : m["message.tool_calls"];
+      if (Array.isArray(tcs)) {
+        for (const tc of tcs) {
+          const call = toolCallOf(tc);
+          if (call) parts2.push({ type: "tool_call", ...call });
+        }
+      }
+      out.push({
+        role,
+        parts: parts2,
+        toolCallId: m.tool_call_id != null ? String(m.tool_call_id) : response && response.id != null ? String(response.id) : null,
+        name: typeof m.name === "string" ? m.name : null
+      });
+    }
+    return out;
+  }
+  var MD_CUES = /(^|\n)(#{1,6} |\s*[-*] |\s*\d+\. |```|> )|\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\)/;
+  function looksLikeCode(text) {
+    const t = text.trim();
+    return /^[[{]/.test(t) || /\\n.*\\n/.test(t);
+  }
+  function looksLikeMarkdown(text) {
+    return typeof text === "string" && text.length > 0 && MD_CUES.test(text);
+  }
+  var COMMAND_KEYS = /* @__PURE__ */ new Set(["hermes.tool.command", "hermes.approval.command", "hermes.turn.tool_commands"]);
+  var PATH_KEYS = /* @__PURE__ */ new Set(["hermes.skill.path", "hermes.tool.target", "hermes.turn.tool_targets", "code.file.path"]);
+  var ID_KEYS = /* @__PURE__ */ new Set([
+    "hermes.session_id",
+    "session.id",
+    "session_id",
+    "gen_ai.conversation.id",
+    "wandb.thread_id",
+    "gen_ai.tool.call.id",
+    "gen_ai.response.id",
+    "hermes.session.previous_id",
+    "hermes.subagent.child_session_id",
+    "hermes.subagent.child_id",
+    "hermes.subagent.parent_session_id",
+    "hermes.subagent.parent_turn_id",
+    "hermes.subagent.parent_id",
+    "hermes.cron.job_id",
+    "correlation.id"
+  ]);
+  var PROSE_KEYS = /* @__PURE__ */ new Set([
+    "gen_ai.system_instructions",
+    "hermes.subagent.goal",
+    "hermes.subagent.summary",
+    "hermes.approval.description",
+    "llm.output.content",
+    "error.message"
+  ]);
+  var LIST_KEYS = {
+    "hermes.turn.tools": ",",
+    "hermes.turn.tool_outcomes": ",",
+    "hermes.turn.tool_targets": "|",
+    "hermes.turn.skills": ",",
+    "hermes.turn.tool_commands": "|",
+    "hermes.approval.pattern_keys": ",",
+    "gen_ai.request.stop_sequences": ","
+  };
+  function splitList(key, value) {
+    if (typeof value !== "string") return Array.isArray(value) ? value.map(String) : null;
+    const sep = LIST_KEYS[key];
+    const py = parsePyRepr(value);
+    if (Array.isArray(py)) return py.map(String);
+    if (!sep) return null;
+    return value.split(sep).map((s) => s.trim()).filter(Boolean);
+  }
+  function textParts(raw) {
+    const v = parseJsonish(raw);
+    if (!Array.isArray(v) || !v.length) return null;
+    if (!v.every((p) => p && typeof p === "object" && p.type === "text" && typeof p.content === "string")) return null;
+    return v.map((p) => p.content).join("\n\n");
+  }
+  function classify(key, raw) {
+    if (raw == null || raw === "") return { kind: "empty", value: raw, text: "" };
+    const text = typeof raw === "string" ? raw : JSON.stringify(raw);
+    const k = key.toLowerCase();
+    if (typeof raw === "boolean" || /^(true|false)$/i.test(text.trim())) {
+      return { kind: "bool", value: /^true$/i.test(text.trim()) || raw === true, text };
+    }
+    if (COMMAND_KEYS.has(key) && key !== "hermes.turn.tool_commands") return { kind: "command", value: text, text };
+    const list = splitList(key, raw);
+    const isRepr = typeof raw === "string" && Array.isArray(parsePyRepr(raw));
+    if (list && (list.length > 1 || key in LIST_KEYS || isRepr)) return { kind: "list", value: list, text };
+    if (ID_KEYS.has(key)) return { kind: "id", value: text, text };
+    if (PATH_KEYS.has(key)) return { kind: "path", value: text, text };
+    if (/^https?:\/\/\S+$/.test(text.trim())) return { kind: "url", value: text.trim(), text };
+    const num = typeof raw === "number" ? raw : /^-?\d+(\.\d+)?$/.test(text.trim()) ? Number(text) : null;
+    if (num != null && Number.isFinite(num)) {
+      if (/(_ms|\.ms|duration_ms|latency_ms)$/.test(k)) return { kind: "duration", value: num, text };
+      if (/duration_s$/.test(k)) return { kind: "duration", value: num * 1e3, text };
+      return { kind: "count", value: num, text };
+    }
+    const instructions = textParts(raw);
+    if (instructions != null) return { kind: "markdown", value: instructions, text };
+    const chat = parseChat(raw);
+    if (chat) return { kind: "messages", value: chat, text };
+    const calls = parseToolCalls(raw);
+    if (calls) return { kind: "tool_calls", value: calls, text };
+    const parsed = parseJsonish(raw);
+    if (parsed && typeof parsed === "object") return { kind: "json", value: parsed, text };
+    if (looksLikeCode(text)) return { kind: "code", value: text, text };
+    if (PROSE_KEYS.has(key) || looksLikeMarkdown(text)) return { kind: "markdown", value: text, text };
+    return { kind: "text", value: text, text };
+  }
+  function pretty(raw) {
+    if (raw == null) return "";
+    const v = parseJsonish(raw);
+    return typeof v === "string" ? v : JSON.stringify(v, null, 2);
+  }
+  function fmtCount(n) {
+    return Number.isInteger(n) ? n.toLocaleString("en-US") : String(n);
+  }
+  function splitToolResult(raw) {
+    var _a, _b, _c, _d;
+    const v = parseJsonish(raw);
+    if (!v || typeof v !== "object" || Array.isArray(v)) return { output: typeof v === "string" ? v : null, rest: null, error: null };
+    const out = (_d = (_c = (_b = (_a = v.output) != null ? _a : v.result) != null ? _b : v.content) != null ? _c : v.stdout) != null ? _d : null;
+    const rest = {};
+    for (const [k, val] of Object.entries(v)) {
+      if (k === "output" || k === "result" || k === "content" || k === "stdout") continue;
+      rest[k] = val;
+    }
+    const err = typeof v.error === "string" ? v.error : v.success === false ? "failed" : null;
+    return {
+      output: typeof out === "string" ? out : out == null ? null : JSON.stringify(out, null, 2),
+      rest: Object.keys(rest).length ? rest : null,
+      error: err
+    };
+  }
+  function turnTools(a) {
+    return {
+      tools: splitList("hermes.turn.tools", a["hermes.turn.tools"]) || [],
+      outcomes: splitList("hermes.turn.tool_outcomes", a["hermes.turn.tool_outcomes"]) || [],
+      commands: splitList("hermes.turn.tool_commands", a["hermes.turn.tool_commands"]) || [],
+      targets: splitList("hermes.turn.tool_targets", a["hermes.turn.tool_targets"]) || []
+    };
+  }
+  var MODE_KEY = "hermes_otel.attr_view";
+  function readViewMode() {
+    try {
+      return localStorage.getItem(MODE_KEY) === "raw" ? "raw" : "structured";
+    } catch {
+      return "structured";
+    }
+  }
+  function writeViewMode(m) {
+    try {
+      localStorage.setItem(MODE_KEY, m);
+    } catch {
+    }
+  }
+
+  // src/render.tsx
+  var CLAMP_CHARS = 1600;
+  var HUGE_CHARS = 2e5;
+  var ViewModeContext = createContext ? createContext(null) : null;
+  function useViewMode() {
+    const ctx = ViewModeContext && useContext ? useContext(ViewModeContext) : null;
+    const own = useState(readViewMode());
+    if (ctx) return ctx;
+    return [
+      own[0],
+      (m) => {
+        writeViewMode(m);
+        own[1](m);
+      }
+    ];
+  }
+  function LongText({ text, mono, markdown }) {
+    const [open, setOpen] = useState(false);
+    const long = text.length > CLAMP_CHARS;
+    const huge = text.length > HUGE_CHARS;
+    const shown = long && !open ? text.slice(0, CLAMP_CHARS) : text;
+    return /* @__PURE__ */ React.createElement("div", { className: "otel-longtext" }, markdown ? /* @__PURE__ */ React.createElement(Markdown, { text: shown }) : /* @__PURE__ */ React.createElement("pre", { className: cn("otel-pre", mono ? "" : "otel-prose") }, shown), long ? /* @__PURE__ */ React.createElement("span", { className: "otel-more inline-flex items-center gap-2" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "otel-link", onClick: () => setOpen((o) => !o) }, open ? "show less" : `show all (${fmtCount(text.length)} chars${huge ? ", large" : ""})`)) : null);
+  }
+  function Scalar({ v }) {
+    const mono = typeof v !== "string";
+    return /* @__PURE__ */ React.createElement("span", { className: mono ? "font-mono" : "" }, String(v));
+  }
+  function KvTable({ value }) {
+    const entries = Object.entries(value || {});
+    if (!entries.length) return /* @__PURE__ */ React.createElement("span", { className: "otel-unset" }, "empty");
+    return /* @__PURE__ */ React.createElement("dl", { className: "otel-attr-table otel-kv-table text-xs" }, entries.map(([k, v]) => /* @__PURE__ */ React.createElement(React.Fragment, { key: k }, /* @__PURE__ */ React.createElement("dt", { className: "text-muted-foreground" }, k), /* @__PURE__ */ React.createElement("dd", { className: "min-w-0 break-words" }, v && typeof v === "object" ? /* @__PURE__ */ React.createElement("pre", { className: "otel-pre otel-pre-inline" }, JSON.stringify(v, null, 2)) : typeof v === "string" && v.includes("\n") ? /* @__PURE__ */ React.createElement(LongText, { text: v, mono: true }) : /* @__PURE__ */ React.createElement(Scalar, { v })))));
+  }
+  function Chips({ items, mono }) {
+    return /* @__PURE__ */ React.createElement("span", { className: "otel-chips" }, items.map((s, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: cn("otel-chip", mono ? "font-mono" : "") }, s)));
+  }
+  function ToolCallCard({ call }) {
+    const args = call.args;
+    return /* @__PURE__ */ React.createElement("div", { className: "otel-toolcall" }, /* @__PURE__ */ React.createElement("div", { className: "otel-toolcall-head" }, /* @__PURE__ */ React.createElement("span", { className: "otel-chip otel-chip-tool font-mono" }, call.name), call.id ? /* @__PURE__ */ React.createElement("span", { className: "font-mono text-[10px] text-muted-foreground", title: "tool call id" }, call.id) : null), args && typeof args === "object" && !Array.isArray(args) ? /* @__PURE__ */ React.createElement(KvTable, { value: args }) : args != null ? /* @__PURE__ */ React.createElement("pre", { className: "otel-pre otel-pre-inline" }, typeof args === "string" ? args : JSON.stringify(args, null, 2)) : null);
+  }
+  function ToolCalls({ calls }) {
+    return /* @__PURE__ */ React.createElement("div", { className: "otel-toolcalls" }, calls.map((c, i) => /* @__PURE__ */ React.createElement(ToolCallCard, { key: c.id || i, call: c })));
+  }
+  var ROLE_LABEL = { system: "system", user: "user", assistant: "assistant", tool: "tool result", developer: "developer" };
+  function Chat({ messages }) {
+    const [openSystem, setOpenSystem] = useState(false);
+    return /* @__PURE__ */ React.createElement("div", { className: "otel-chat" }, messages.map((m, i) => {
+      const role = m.role.toLowerCase();
+      const text = m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n");
+      const isSystem = role === "system" || role === "developer";
+      const collapsed = isSystem && !openSystem && text.length > 400;
+      return /* @__PURE__ */ React.createElement("div", { key: i, className: cn("otel-msg", `otel-msg-${role}`) }, /* @__PURE__ */ React.createElement("div", { className: "otel-msg-head" }, /* @__PURE__ */ React.createElement("span", { className: cn("otel-role", `otel-role-${role}`) }, ROLE_LABEL[role] || role), m.name ? /* @__PURE__ */ React.createElement("span", { className: "font-mono text-[10px] text-muted-foreground" }, m.name) : null, m.toolCallId ? /* @__PURE__ */ React.createElement("span", { className: "font-mono text-[10px] text-muted-foreground", title: "answers this tool call" }, "\u21B3 ", m.toolCallId) : null, collapsed ? /* @__PURE__ */ React.createElement("button", { type: "button", className: "otel-link text-[10px]", onClick: () => setOpenSystem(true) }, "show all (", fmtCount(text.length), " chars)") : null), m.parts.map((p, j) => {
+        if (p.type === "text") {
+          const body = collapsed ? p.text.slice(0, 400) + " \u2026" : p.text;
+          if (role === "tool") return /* @__PURE__ */ React.createElement(ToolResultBody, { key: j, raw: body });
+          return looksLikeMarkdown(body) || role === "assistant" ? /* @__PURE__ */ React.createElement(Markdown, { key: j, text: body }) : /* @__PURE__ */ React.createElement("pre", { key: j, className: "otel-pre otel-prose" }, body);
+        }
+        if (p.type === "tool_call") return /* @__PURE__ */ React.createElement(ToolCallCard, { key: j, call: p });
+        return /* @__PURE__ */ React.createElement("div", { key: j, className: "text-[11px] text-muted-foreground" }, /* @__PURE__ */ React.createElement("span", { className: "otel-chip" }, p.label), /* @__PURE__ */ React.createElement("pre", { className: "otel-pre otel-pre-inline" }, JSON.stringify(p.value, null, 2)));
+      }));
+    }));
+  }
+  function ToolResultBody({ raw }) {
+    const v = parseJsonish(raw);
+    if (Array.isArray(v)) return /* @__PURE__ */ React.createElement("pre", { className: "otel-pre" }, JSON.stringify(v, null, 2));
+    const { output, rest } = splitToolResult(raw);
+    if (v && typeof v === "object") {
+      return /* @__PURE__ */ React.createElement("div", { className: "otel-toolresult" }, output != null ? /* @__PURE__ */ React.createElement(LongText, { text: output, mono: !looksLikeMarkdown(output), markdown: looksLikeMarkdown(output) }) : null, rest ? /* @__PURE__ */ React.createElement(KvTable, { value: rest }) : null);
+    }
+    const text = String(v != null ? v : "");
+    const md = looksLikeMarkdown(text) && !looksLikeCode(text);
+    return /* @__PURE__ */ React.createElement(LongText, { text, mono: !md, markdown: md });
+  }
+  function ModeToggle({ mode, onChange }) {
+    const Btn = ({ id, label }) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        "aria-pressed": mode === id,
+        onClick: () => onChange(id),
+        className: cn("otel-toggle otel-mode-btn", mode === id ? "otel-toggle-active text-foreground" : "text-muted-foreground hover:text-foreground")
+      },
+      label
+    );
+    return /* @__PURE__ */ React.createElement("span", { className: "otel-mode", role: "group", "aria-label": "structured or raw" }, /* @__PURE__ */ React.createElement(Btn, { id: "structured", label: "structured" }), /* @__PURE__ */ React.createElement(Btn, { id: "raw", label: "raw" }));
+  }
+  function ValueView({ attrKey, value, label, onSessionClick }) {
+    const [mode, change] = useViewMode();
+    const c = classify(attrKey, value);
+    const rich = c.kind === "messages" || c.kind === "tool_calls" || c.kind === "json" || c.kind === "markdown";
+    const head = label || rich ? /* @__PURE__ */ React.createElement("div", { className: "otel-value-head" }, label ? /* @__PURE__ */ React.createElement("span", { className: "text-[11px] font-medium uppercase tracking-wide text-muted-foreground" }, label) : null, rich ? /* @__PURE__ */ React.createElement(ModeToggle, { mode, onChange: change }) : null) : null;
+    let body;
+    if (rich && mode === "raw") body = /* @__PURE__ */ React.createElement(LongText, { text: pretty(value), mono: true });
+    else
+      switch (c.kind) {
+        case "empty":
+          body = /* @__PURE__ */ React.createElement("span", { className: "otel-unset" }, "unset");
+          break;
+        case "messages":
+          body = /* @__PURE__ */ React.createElement(Chat, { messages: c.value });
+          break;
+        case "tool_calls":
+          body = /* @__PURE__ */ React.createElement(ToolCalls, { calls: c.value });
+          break;
+        case "json":
+          body = Array.isArray(c.value) ? /* @__PURE__ */ React.createElement("pre", { className: "otel-pre" }, JSON.stringify(c.value, null, 2)) : /* @__PURE__ */ React.createElement(KvTable, { value: c.value });
+          break;
+        case "markdown":
+          body = /* @__PURE__ */ React.createElement(LongText, { text: c.value, markdown: true });
+          break;
+        case "code":
+          body = /* @__PURE__ */ React.createElement(LongText, { text: c.value, mono: true });
+          break;
+        case "command":
+          body = /* @__PURE__ */ React.createElement("pre", { className: "otel-pre otel-cmd" }, "$ ", c.value);
+          break;
+        case "list":
+          body = /* @__PURE__ */ React.createElement(Chips, { items: c.value, mono: attrKey.includes("command") || attrKey.includes("target") });
+          break;
+        case "path":
+          body = /* @__PURE__ */ React.createElement("span", { className: "font-mono break-all" }, c.value);
+          break;
+        case "url":
+          body = /* @__PURE__ */ React.createElement("a", { className: "otel-link font-mono break-all", href: c.value, target: "_blank", rel: "noreferrer noopener" }, c.value);
+          break;
+        case "duration":
+          body = /* @__PURE__ */ React.createElement("span", { className: "tabular-nums" }, fmtDurationMs(c.value));
+          break;
+        case "count":
+          body = /* @__PURE__ */ React.createElement("span", { className: "tabular-nums" }, fmtCount(c.value));
+          break;
+        case "bool":
+          body = /* @__PURE__ */ React.createElement("span", { className: cn("otel-chip", c.value ? "otel-chip-yes" : "otel-chip-no") }, c.value ? "yes" : "no");
+          break;
+        case "id":
+          body = onSessionClick && /session|conversation|thread/.test(attrKey) ? /* @__PURE__ */ React.createElement("button", { type: "button", className: "otel-link font-mono", title: "show this session's turns", onClick: () => onSessionClick(c.value) }, c.value) : /* @__PURE__ */ React.createElement("span", { className: "font-mono break-all" }, c.value);
+          break;
+        default:
+          body = c.text.length > 200 || c.text.includes("\n") ? /* @__PURE__ */ React.createElement(LongText, { text: c.text }) : /* @__PURE__ */ React.createElement("span", { className: "break-words" }, c.text);
+      }
+    const errorish = attrKey === "error.message";
+    return /* @__PURE__ */ React.createElement("div", { className: cn("otel-value", errorish ? "otel-value-error" : "") }, head, body);
+  }
+  function Facts({ items }) {
+    const shown = items.filter((f) => f.value != null && f.value !== "" && f.value !== false);
+    if (!shown.length) return null;
+    return /* @__PURE__ */ React.createElement("div", { className: "otel-factrow" }, shown.map((f, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: "otel-fact" }, /* @__PURE__ */ React.createElement("span", { className: "otel-fact-label" }, f.label), /* @__PURE__ */ React.createElement("span", { className: cn("otel-fact-value", f.mono ? "font-mono" : "", f.tone ? `otel-tone-${f.tone}` : "") }, String(f.value)))));
+  }
+  function StatusBadge({ value }) {
+    if (value == null || value === "") return null;
+    const s = String(value).toLowerCase();
+    const bad = /error|fail|denied|timed?_?out|cancel/.test(s);
+    return /* @__PURE__ */ React.createElement(Badge, { variant: bad ? "destructive" : "secondary", className: "text-[10px]" }, String(value));
+  }
+
+  // src/logs-lib.ts
+  var SEVERITY_OF = {
+    FATAL: "ERROR",
+    CRITICAL: "ERROR",
+    ERROR: "ERROR",
+    WARN: "WARN",
+    WARNING: "WARN",
+    INFO: "INFO",
+    DEBUG: "DEBUG",
+    TRACE: "DEBUG"
+  };
+  function severityOf(level) {
+    return SEVERITY_OF[String(level || "").toUpperCase()] || "OTHER";
+  }
+  function severityCounts(rows) {
+    const bySeverity = { ERROR: 0, WARN: 0, INFO: 0, DEBUG: 0, OTHER: 0 };
+    let events = 0;
+    for (const r of rows) {
+      bySeverity[severityOf(r.level)] += 1;
+      if (r.event_name) events += 1;
+    }
+    return { total: rows.length, events, bySeverity };
+  }
+  function timeBuckets(rows, n, startNs, endNs) {
+    const times = rows.map((r) => Number(r.time_unix_nano || 0)).filter((t) => t > 0);
+    if (!n || n < 1) return [];
+    const lo = startNs != null ? startNs : times.length ? Math.min(...times) : 0;
+    const hi = endNs != null ? endNs : times.length ? Math.max(...times) : 0;
+    if (!(hi > lo)) {
+      const one = { startNs: lo, total: 0, errors: 0, warns: 0 };
+      for (const r of rows) {
+        one.total += 1;
+        const s = severityOf(r.level);
+        if (s === "ERROR") one.errors += 1;
+        else if (s === "WARN") one.warns += 1;
+      }
+      return [one];
+    }
+    const width = (hi - lo) / n;
+    const out = Array.from({ length: n }, (_, i) => ({ startNs: Math.round(lo + i * width), total: 0, errors: 0, warns: 0 }));
+    for (const r of rows) {
+      const t = Number(r.time_unix_nano || 0);
+      if (!t) continue;
+      let i = Math.floor((t - lo) / width);
+      if (i >= n) i = n - 1;
+      if (i < 0) i = 0;
+      out[i].total += 1;
+      const s = severityOf(r.level);
+      if (s === "ERROR") out[i].errors += 1;
+      else if (s === "WARN") out[i].warns += 1;
+    }
+    return out;
+  }
+  var GROUP_ORDER = ["event", "hermes", "gen_ai", "exception", "code", "other"];
+  var GROUP_LABEL = {
+    event: "Event",
+    hermes: "Hermes",
+    gen_ai: "GenAI",
+    exception: "Exception",
+    code: "Code location",
+    other: "Other"
+  };
+  function groupLogAttributes(attrs) {
+    const buckets = { event: [], hermes: [], gen_ai: [], exception: [], code: [], other: [] };
+    let stacktrace = null;
+    for (const [k, v] of Object.entries(attrs || {}).sort(([a], [b]) => a.localeCompare(b))) {
+      if (k === "exception.stacktrace") {
+        stacktrace = String(v);
+        continue;
+      }
+      if (k.startsWith("hermes.")) buckets.hermes.push([k, v]);
+      else if (k.startsWith("gen_ai.")) buckets.gen_ai.push([k, v]);
+      else if (k.startsWith("exception.")) buckets.exception.push([k, v]);
+      else if (k.startsWith("code.")) buckets.code.push([k, v]);
+      else if (k === "event.name" || k === "event_name") buckets.event.push([k, v]);
+      else buckets.other.push([k, v]);
+    }
+    return {
+      groups: GROUP_ORDER.filter((g) => buckets[g].length).map((g) => ({ label: GROUP_LABEL[g], entries: buckets[g] })),
+      stacktrace
+    };
+  }
+  function codeLocation(attrs) {
+    var _a;
+    const a = attrs || {};
+    const file = a["code.file.path"] || a["code.filepath"];
+    if (!file) return null;
+    const line = (_a = a["code.line.number"]) != null ? _a : a["code.lineno"];
+    const fn = a["code.function.name"] || a["code.function"];
+    return `${String(file).split("/").slice(-2).join("/")}${line != null ? `:${line}` : ""}${fn ? ` (${fn})` : ""}`;
+  }
+  function contextWindow(timeUnixNano, windowS) {
+    const centerS = Math.floor(Number(timeUnixNano || 0) / 1e9);
+    return { startS: Math.max(0, centerS - windowS), endS: centerS + windowS + 1 };
+  }
+  function attributionHint(attrs) {
+    const tier = (attrs || {})["hermes.log.attribution"];
+    if (!tier) return null;
+    const titles = {
+      context: "a span was current on the logging thread",
+      session_tag: "Hermes's own session tag on the record",
+      single_session: "the one session with a turn in flight"
+    };
+    return { text: String(tier).replace("_", " "), title: titles[String(tier)] || String(tier) };
+  }
+
+  // src/params.ts
+  var LIVE = "live";
+  function withBackend(params, source) {
+    if (source && source !== LIVE) params.set("backend", source);
+    return params;
+  }
+  var DEFAULT_FILTERS = {
+    lookback: 1,
+    status: "",
+    kind: "",
+    tool: "",
+    model: "",
+    session: "",
+    minDurationMs: "",
+    text: "",
+    traceId: "",
+    q: "",
+    service: "",
+    rootsOnly: true
+  };
+  function isDefaultFilters(f) {
+    return Object.keys(DEFAULT_FILTERS).every((k) => DEFAULT_FILTERS[k] === f[k]);
+  }
+  var LOOKBACKS = [
+    { label: "15m", hours: 0.25 },
+    { label: "1h", hours: 1 },
+    { label: "6h", hours: 6 },
+    { label: "24h", hours: 24 },
+    { label: "3d", hours: 72 },
+    { label: "7d", hours: 168 },
+    { label: "30d", hours: 720 }
+  ];
+  function lookbackLabel(hours) {
+    const l = LOOKBACKS.find((x) => x.hours === hours);
+    if (l) return l.label;
+    if (hours < 1) return `${Math.round(hours * 60)}m`;
+    if (hours % 24 === 0) return `${hours / 24}d`;
+    return `${hours}h`;
+  }
+  var KINDS = ["agent", "cron", "subagent", "tool", "llm", "api", "approval", "human_input", "skill", "session", "other"];
+  var KIND_PREFIX = {
+    agent: "agent",
+    cron: "cron",
+    subagent: "subagent",
+    tool: "tool.",
+    llm: "llm.",
+    api: "api.",
+    approval: "approval",
+    human_input: "human_input.",
+    skill: "skill.",
+    session: "session"
+  };
+  function liveParams(f, limit = 50, beforeNs) {
+    const p = new URLSearchParams({ lookback_hours: String(f.lookback), limit: String(limit) });
+    if (f.status) p.set("status", f.status);
+    if (f.kind) p.set("kind", f.kind);
+    if (f.tool.trim()) p.set("tool", f.tool.trim());
+    if (f.model.trim()) p.set("model", f.model.trim());
+    if (f.session.trim()) p.set("session", f.session.trim());
+    if (Number(f.minDurationMs) > 0) p.set("min_duration_ms", String(Math.floor(Number(f.minDurationMs))));
+    if (f.text.trim()) p.set("text", f.text.trim());
+    if (f.traceId.trim()) p.set("trace_id", f.traceId.trim());
+    if (beforeNs && /^\d+$/.test(beforeNs)) p.set("before_ns", beforeNs);
+    return p;
+  }
+  function backendParams(f, source, limit = 50, beforeNs) {
+    const p = withBackend(new URLSearchParams({ lookback_hours: String(f.lookback), limit: String(limit) }), source);
+    const rootsOnly = f.rootsOnly && !f.kind && !f.tool.trim();
+    p.set("roots_only", String(rootsOnly));
+    if (f.status) p.set("status", f.status);
+    if (f.kind && KIND_PREFIX[f.kind]) p.set("name_prefix", KIND_PREFIX[f.kind]);
+    if (f.tool.trim()) p.set("tool", f.tool.trim());
+    if (f.model.trim()) p.set("model", f.model.trim());
+    if (f.session.trim()) p.set("session", f.session.trim());
+    if (Number(f.minDurationMs) > 0) p.set("min_duration_ms", String(Math.floor(Number(f.minDurationMs))));
+    if (f.text.trim()) p.set("free_text", f.text.trim());
+    if (f.q.trim()) p.set("q", f.q.trim());
+    if (f.service.trim()) p.set("service", f.service.trim());
+    if (beforeNs && /^\d+$/.test(beforeNs)) p.set("before_ns", beforeNs);
+    return p;
+  }
+  function traceFiltersFromNav(nav) {
+    const lookback = Number(nav.lookback);
+    const status = nav.status === "ok" || nav.status === "error" ? nav.status : "";
+    return {
+      lookback: lookback > 0 ? lookback : nav.session || nav.trace ? 168 : DEFAULT_FILTERS.lookback,
+      status,
+      kind: nav.kind && KINDS.includes(nav.kind) ? nav.kind : "",
+      tool: nav.tool || "",
+      model: nav.model || "",
+      session: nav.session || "",
+      minDurationMs: nav.mindur && /^\d+$/.test(nav.mindur) ? nav.mindur : "",
+      text: nav.text || "",
+      traceId: "",
+      q: nav.q || "",
+      service: nav.service || "",
+      rootsOnly: nav.roots !== "0"
+    };
+  }
+  function navFromTraceFilters(f) {
+    return {
+      status: f.status,
+      kind: f.kind,
+      tool: f.tool.trim(),
+      model: f.model.trim(),
+      session: f.session.trim(),
+      mindur: Number(f.minDurationMs) > 0 ? String(Math.floor(Number(f.minDurationMs))) : "",
+      text: f.text.trim(),
+      q: f.q.trim(),
+      service: f.service.trim(),
+      roots: f.rootsOnly ? "" : "0",
+      lookback: f.lookback !== DEFAULT_FILTERS.lookback ? String(f.lookback) : ""
+    };
+  }
+  var FILTER_FIELD_OF = {
+    lookback: "lookback",
+    status: "status_error",
+    kind: "name",
+    tool: "tool",
+    model: "model",
+    session: "session",
+    minDurationMs: "min_duration",
+    text: "free_text",
+    traceId: "trace_id",
+    q: "raw",
+    service: "service",
+    rootsOnly: "roots_only"
+  };
+  function fieldSupport(support, field) {
+    var _a;
+    if (!support) return "unknown";
+    const key = FILTER_FIELD_OF[field];
+    const v = support[key];
+    if (field === "status" && v === void 0) return (_a = support["status_ok"]) != null ? _a : "unknown";
+    return v != null ? v : "unknown";
+  }
+  var DEFAULT_LOG_FILTERS = {
+    minLevel: "0",
+    logger: "",
+    session: "",
+    traceId: "",
+    text: "",
+    lookback: 1,
+    eventsOnly: false,
+    eventName: "",
+    centerNs: "",
+    windowS: 30
+  };
+  var LOG_PAGE_SIZES = [100, 200, 500, 1e3];
+  var DEFAULT_LOG_PAGE = 200;
+  var LOG_LEVELS = [
+    { value: "0", label: "All levels", otel: 0 },
+    { value: "10", label: "DEBUG+ (sev 5)", otel: 5 },
+    { value: "20", label: "INFO+ (sev 9)", otel: 9 },
+    { value: "30", label: "WARN+ (sev 13)", otel: 13 },
+    { value: "40", label: "ERROR+ (sev 17)", otel: 17 }
+  ];
+  function logParams(f, source, limit, beforeNs) {
+    const p = withBackend(new URLSearchParams({ lookback_hours: String(f.lookback), limit: String(limit) }), source);
+    if (Number(f.minLevel) > 0) p.set("min_level", f.minLevel);
+    if (f.logger.trim()) p.set("logger", f.logger.trim());
+    if (f.session.trim()) p.set("session", f.session.trim());
+    if (f.traceId.trim()) p.set("trace_id", f.traceId.trim());
+    if (f.text.trim()) p.set("text", f.text.trim());
+    if (f.eventName.trim()) p.set("event_name", f.eventName.trim());
+    else if (f.eventsOnly) p.set("events_only", "1");
+    if (f.centerNs && /^\d+$/.test(f.centerNs)) {
+      const { startS, endS } = contextWindow(Number(f.centerNs), f.windowS);
+      p.set("start_s", String(startS));
+      p.set("end_s", String(endS));
+    }
+    if (beforeNs && /^\d+$/.test(beforeNs)) p.set("before_ns", beforeNs);
+    return p;
+  }
+  function logFiltersFromNav(nav) {
+    const lookback = Number(nav.lookback);
+    return {
+      minLevel: nav.level && /^\d+$/.test(nav.level) ? nav.level : DEFAULT_LOG_FILTERS.minLevel,
+      logger: nav.logger || "",
+      session: nav.session || "",
+      traceId: nav.trace || "",
+      text: nav.text || "",
+      lookback: lookback > 0 ? lookback : DEFAULT_LOG_FILTERS.lookback,
+      eventsOnly: nav.events === "1",
+      eventName: nav.event || "",
+      centerNs: nav.center && /^\d+$/.test(nav.center) ? nav.center : "",
+      windowS: nav.win && /^\d+$/.test(nav.win) && Number(nav.win) > 0 ? Number(nav.win) : DEFAULT_LOG_FILTERS.windowS
+    };
+  }
+  function navFromLogFilters(f) {
+    return {
+      level: Number(f.minLevel) > 0 ? f.minLevel : "",
+      logger: f.logger.trim(),
+      session: f.session.trim(),
+      trace: f.traceId.trim(),
+      text: f.text.trim(),
+      lookback: f.lookback !== DEFAULT_LOG_FILTERS.lookback ? String(f.lookback) : "",
+      events: f.eventsOnly ? "1" : "",
+      event: f.eventName.trim(),
+      center: f.centerNs || "",
+      win: f.centerNs && f.windowS !== DEFAULT_LOG_FILTERS.windowS ? String(f.windowS) : ""
+    };
+  }
+  function logPageSizeFromNav(size) {
+    const n = Number(size);
+    return LOG_PAGE_SIZES.includes(n) ? n : DEFAULT_LOG_PAGE;
+  }
+  function cursorsFromNav(before) {
+    if (!before) return [];
+    return before.split(",").filter((c) => /^\d+$/.test(c));
+  }
+  function navFromCursors(cursors) {
+    return cursors.join(",");
+  }
+  var RANGES = [
+    { label: "15m", hours: 0.25, bucket: 15 },
+    { label: "1h", hours: 1, bucket: 60 },
+    { label: "6h", hours: 6, bucket: 300 },
+    { label: "24h", hours: 24, bucket: 900 },
+    { label: "3d", hours: 72, bucket: 3600 },
+    { label: "7d", hours: 168, bucket: 3600 * 3 },
+    { label: "30d", hours: 720, bucket: 3600 * 12 }
+  ];
+  var AGGS = ["sum", "count", "avg", "max", "last"];
+  function explorerFromNav(nav) {
+    const range = RANGES.find((r) => String(r.hours) === nav.range) || RANGES[1];
+    return { range, instrument: nav.inst || "", groupBy: nav.group || "", agg: nav.agg && AGGS.includes(nav.agg) ? nav.agg : "sum" };
+  }
+  function navFromExplorer(s) {
+    return {
+      range: s.range.hours !== RANGES[1].hours ? String(s.range.hours) : "",
+      inst: s.instrument,
+      group: s.groupBy,
+      agg: s.agg !== "sum" ? s.agg : ""
+    };
+  }
+
+  // src/nav.ts
+  var SHARED_KEYS = ["tab", "source", "trace", "session"];
+  var TAB_KEYS = {
+    live: [],
+    traces: ["view", "status", "kind", "tool", "model", "mindur", "text", "q", "service", "roots", "lookback", "before"],
+    logs: ["level", "logger", "text", "lookback", "events", "event", "center", "win", "size", "before"],
+    metrics: ["range", "inst", "group", "agg"],
+    settings: []
+  };
+  var NAV_KEYS = Array.from(/* @__PURE__ */ new Set([...SHARED_KEYS, ...Object.values(TAB_KEYS).flat()]));
+  var NAV_EVENT = "hermes_otel:navigate";
+  function readNav(search) {
+    const q = new URLSearchParams(search != null ? search : typeof window !== "undefined" ? window.location.search : "");
+    const out = {};
+    for (const k of NAV_KEYS) {
+      const v = q.get(k);
+      if (v) out[k] = v;
+    }
+    return out;
+  }
+  function navSearch(state, base) {
+    const q = new URLSearchParams(base != null ? base : typeof window !== "undefined" ? window.location.search : "");
+    for (const k of NAV_KEYS) {
+      if (!(k in state)) continue;
+      const v = state[k];
+      if (v) q.set(k, v);
+      else q.delete(k);
+    }
+    const s = q.toString();
+    return s ? `?${s}` : "";
+  }
+  function clearOtherTabs(tab) {
+    const out = {};
+    for (const [t, keys] of Object.entries(TAB_KEYS)) {
+      if (t === tab) continue;
+      for (const k of keys) if (!(TAB_KEYS[tab] || []).includes(k)) out[k] = "";
+    }
+    return out;
+  }
+  function writeNav(patch) {
+    var _a;
+    if (typeof window === "undefined" || !((_a = window.history) == null ? void 0 : _a.replaceState)) return;
+    try {
+      const url = `${window.location.pathname}${navSearch(patch)}${window.location.hash}`;
+      window.history.replaceState(window.history.state, "", url);
+    } catch {
+    }
+  }
+  function navigate(state) {
+    const patch = state.tab ? { ...clearOtherTabs(state.tab), ...state } : state;
+    writeNav(patch);
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(NAV_EVENT, { detail: patch }));
+  }
+
+  // src/source.ts
+  var KEY = "hermes_otel.source";
+  function backendUsable(b, need) {
+    if (!b.supported) return false;
+    if (need === "metrics") return b.metrics;
+    if (need === "logs") return b.logs;
+    return true;
+  }
+  function readSource(search) {
+    const fromUrl = readNav(search).source;
+    if (fromUrl) return fromUrl;
+    try {
+      return localStorage.getItem(KEY) || LIVE;
+    } catch {
+      return LIVE;
+    }
+  }
+  function writeSource(v) {
+    try {
+      localStorage.setItem(KEY, v);
+    } catch {
+    }
+    writeNav({ source: v === LIVE ? "" : v });
+  }
+  var LIVE_FILTERS = {
+    service: "none",
+    name: "server",
+    model: "server",
+    session: "server",
+    tool: "server",
+    min_duration: "server",
+    status_error: "server",
+    status_ok: "server",
+    free_text: "server",
+    trace_id: "server",
+    raw: "none",
+    roots_only: "none",
+    lookback: "server"
+  };
+  var SourceContext = createContext ? createContext(null) : null;
+  function useSourceState(enabled = true) {
+    var _a;
+    const [source, setSourceState] = useState(readSource());
+    const [status, setStatus] = useState(null);
+    const refresh = useCallback(() => {
+      const p = withBackend(new URLSearchParams(), source);
+      api("/status", p).then((st) => {
+        setStatus(st);
+        if (source !== LIVE && !(st.available || []).some((b) => b.name === source)) {
+          setSourceState(LIVE);
+          writeSource(LIVE);
+        }
+      }).catch(() => {
+        setStatus({ configured: false, active: null, available: [], reason: "status unavailable" });
+        if (source !== LIVE) {
+          setSourceState(LIVE);
+          writeSource(LIVE);
+        }
+      });
+    }, [source]);
+    useEffect(() => {
+      if (enabled) refresh();
+    }, [refresh, enabled]);
+    const setSource = useCallback((s) => {
+      writeSource(s);
+      setSourceState(s);
+    }, []);
+    const isLive = source === LIVE;
+    const entry = ((_a = status == null ? void 0 : status.available) == null ? void 0 : _a.find((b) => b.name === source)) || null;
+    const filters = isLive ? LIVE_FILTERS : (entry == null ? void 0 : entry.filters) || (status == null ? void 0 : status.filters) || null;
+    return { source, setSource, status, refresh, isLive, filters };
+  }
+  function SourceProvider({ children }) {
+    const value = useSourceState();
+    if (!SourceContext) return children;
+    return React.createElement(SourceContext.Provider, { value }, children);
+  }
+  function useSource() {
+    const ctx = SourceContext && useContext ? useContext(SourceContext) : null;
+    const own = useSourceState(!ctx);
+    return ctx || own;
+  }
+
+  // src/poll.ts
+  function usePolling(fn, ms, enabled) {
+    useEffect(() => {
+      if (!enabled) return;
+      const tick = () => {
+        if (!document.hidden) fn();
+      };
+      const id = setInterval(tick, ms);
+      const onVisible = () => {
+        if (!document.hidden) fn();
+      };
+      document.addEventListener("visibilitychange", onVisible);
+      return () => {
+        clearInterval(id);
+        document.removeEventListener("visibilitychange", onVisible);
+      };
+    }, [fn, ms, enabled]);
+  }
+
+  // src/sourceselect.tsx
+  function unusableReason(b, need) {
+    if (!b.supported) return `no dashboard adapter for type ${b.type}`;
+    if (need === "metrics" && !b.metrics) return "does not serve metrics to the tab";
+    if (need === "logs" && !b.logs) return "does not serve logs to the tab";
+    return null;
+  }
+  function SourceSelect({
+    source,
+    onChange,
+    status,
+    need,
+    className
+  }) {
+    const backends = (status == null ? void 0 : status.available) || [];
+    const usable = backends.filter((b) => backendUsable(b, need));
+    const unusable = backends.filter((b) => !backendUsable(b, need));
+    const isLive = source === LIVE;
+    return /* @__PURE__ */ React.createElement("div", { className: cn("inline-flex flex-wrap items-center gap-2", className) }, /* @__PURE__ */ React.createElement("label", { className: "inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground", htmlFor: "otel-source" }, isLive ? /* @__PURE__ */ React.createElement(IconZap, { size: 12, className: "otel-c-agent" }) : /* @__PURE__ */ React.createElement(IconDatabase, { size: 12 }), "source"), /* @__PURE__ */ React.createElement(Select, { id: "otel-source", value: source, onValueChange: onChange, className: "otel-w-56 h-8", "aria-label": "source" }, /* @__PURE__ */ React.createElement(SelectOption, { value: LIVE }, "Live (in-process)"), usable.map((b) => /* @__PURE__ */ React.createElement(SelectOption, { key: b.name, value: b.name }, b.type !== b.name ? `${b.name} (${b.type})` : b.name))), unusable.length ? /* @__PURE__ */ React.createElement("span", { className: "text-[11px] text-muted-foreground", title: unusable.map((b) => `${b.name}: ${unusableReason(b, need)}`).join("\n") }, unusable.length, " backend", unusable.length === 1 ? "" : "s", " cannot serve this tab") : null);
+  }
+
+  // src/logs.tsx
+  var POLL_MS = 3e3;
+  var LEVEL_CLASS = {
+    ERROR: "otel-level-error",
+    WARN: "otel-level-warn",
+    INFO: "otel-level-info",
+    DEBUG: "otel-level-debug",
+    OTHER: "text-muted-foreground"
+  };
+  var RICH_KEY = /^(gen_ai\.(input|output)\.messages|gen_ai\.(prompt|completion)|gen_ai\.tool\.call\.(arguments|result)|input\.value|output\.value|hermes\.tool\.(command|output)|exception\.message)$/;
+  function LogRow({
+    l,
+    absolute,
+    wrap = true,
+    expanded,
+    onToggle,
+    actions
+  }) {
+    const lvl = (l.level || "INFO").toUpperCase();
+    const sev = severityOf(lvl);
+    const ts = l.time_unix_nano || 0;
+    const attrs = l.attributes || {};
+    const hint = attributionHint(attrs);
+    const edge = sev === "ERROR" ? "otel-row-error" : sev === "WARN" ? "otel-row-warn" : "";
+    return /* @__PURE__ */ React.createElement("div", { className: cn("border-b border-border/60 last:border-b-0", expanded ? "bg-muted/30" : "otel-hoverable", edge) }, /* @__PURE__ */ React.createElement(
+      Clickable,
+      {
+        onActivate: () => onToggle == null ? void 0 : onToggle(),
+        toggle: true,
+        open: !!expanded,
+        label: `${expanded ? "collapse" : "expand"} log line`,
+        className: "otel-row flex cursor-pointer items-start gap-2 px-3 py-1",
+        title: expanded ? "collapse" : "expand attributes"
+      },
+      /* @__PURE__ */ React.createElement("span", { className: cn("shrink-0 text-muted-foreground/70", absolute ? "otel-w-40" : "otel-w-14"), title: ts ? fmtAbsTime(ts) : "" }, ts ? absolute ? fmtAbsTime(ts) : fmtTimeAgo(ts) : ""),
+      /* @__PURE__ */ React.createElement("span", { className: cn("otel-w-12 shrink-0 font-semibold", LEVEL_CLASS[sev]) }, lvl),
+      l.event_name ? /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "shrink-0 rounded border border-border px-1 font-mono text-[10px] text-muted-foreground",
+          title: "structured event \u2014 click to filter to this event",
+          onClick: (e) => {
+            var _a;
+            e.stopPropagation();
+            (_a = actions == null ? void 0 : actions.onEvent) == null ? void 0 : _a.call(actions, String(l.event_name));
+          }
+        },
+        l.event_name
+      ) : null,
+      l.logger && !l.event_name ? /* @__PURE__ */ React.createElement("span", { className: "otel-w-40 shrink-0 truncate text-muted-foreground", title: l.logger }, l.logger) : null,
+      /* @__PURE__ */ React.createElement("span", { className: cn("min-w-0 flex-1 text-foreground/90", wrap ? "whitespace-pre-wrap break-words" : "truncate") }, l.body),
+      hint ? /* @__PURE__ */ React.createElement("span", { className: "shrink-0 text-[10px] text-muted-foreground/70", title: `attributed by ${hint.title}` }, hint.text) : null,
+      l.trace_id ? /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "otel-link shrink-0 font-mono text-[10px] text-muted-foreground/70",
+          title: `open trace ${l.trace_id}`,
+          onClick: (e) => {
+            var _a;
+            e.stopPropagation();
+            (_a = actions == null ? void 0 : actions.onTrace) == null ? void 0 : _a.call(actions, String(l.trace_id));
+          }
+        },
+        String(l.trace_id).slice(0, 8)
+      ) : null
+    ), expanded ? /* @__PURE__ */ React.createElement(LogDetail, { l, actions }) : null);
+  }
+  function LogDetail({ l, actions }) {
+    const attrs = l.attributes || {};
+    const { groups, stacktrace } = groupLogAttributes(attrs);
+    const where = codeLocation(attrs);
+    const ts = l.time_unix_nano || 0;
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-2 border-t border-border/60 px-3 py-2 font-mono text-[11px]" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground" }, /* @__PURE__ */ React.createElement("span", null, ts ? fmtAbsTime(ts) : ""), l.logger ? /* @__PURE__ */ React.createElement("span", { title: "logger / instrumentation scope" }, l.logger) : null, l.severity_number != null ? /* @__PURE__ */ React.createElement("span", { title: "OTel severity number" }, "sev ", l.severity_number) : null, where ? /* @__PURE__ */ React.createElement("span", { title: "code location" }, where) : null, l.session_id ? /* @__PURE__ */ React.createElement("button", { type: "button", className: "otel-link", title: "show this session's log lines", onClick: () => {
+      var _a;
+      return (_a = actions == null ? void 0 : actions.onSession) == null ? void 0 : _a.call(actions, String(l.session_id));
+    } }, "session ", String(l.session_id)) : null, l.trace_id ? /* @__PURE__ */ React.createElement("button", { type: "button", className: "otel-link", title: "open the trace", onClick: () => {
+      var _a;
+      return (_a = actions == null ? void 0 : actions.onTrace) == null ? void 0 : _a.call(actions, String(l.trace_id));
+    } }, "trace ", String(l.trace_id)) : null, l.span_id ? /* @__PURE__ */ React.createElement("span", { title: "span id" }, "span ", l.span_id) : null, /* @__PURE__ */ React.createElement("span", { className: "ml-auto flex items-center gap-2" }, ts && (actions == null ? void 0 : actions.onContext) ? /* @__PURE__ */ React.createElement("button", { type: "button", className: "otel-link", title: "show every line within 30 s of this one", onClick: () => {
+      var _a;
+      return (_a = actions.onContext) == null ? void 0 : _a.call(actions, l);
+    } }, "\xB130 s around this line") : null, /* @__PURE__ */ React.createElement(CopyButton, { text: JSON.stringify(l, null, 2), label: "copy JSON" }))), l.body ? /* @__PURE__ */ React.createElement("pre", { className: "otel-pre otel-raw whitespace-pre-wrap break-words" }, l.body) : null, groups.length ? /* @__PURE__ */ React.createElement("div", { className: "grid gap-x-4 gap-y-1 sm:grid-cols-2" }, groups.map((g) => /* @__PURE__ */ React.createElement("div", { key: g.label, className: "min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "mb-1 text-muted-foreground" }, g.label), /* @__PURE__ */ React.createElement("table", { className: "otel-kv-table w-full" }, /* @__PURE__ */ React.createElement("tbody", null, g.entries.map(([k, v]) => /* @__PURE__ */ React.createElement("tr", { key: k }, /* @__PURE__ */ React.createElement("td", { className: "otel-kv text-muted-foreground" }, k), /* @__PURE__ */ React.createElement("td", { className: "break-all text-foreground/90" }, RICH_KEY.test(k) || typeof v === "string" && v.length > 200 ? /* @__PURE__ */ React.createElement(ValueView, { attrKey: k, value: v }) : typeof v === "string" ? v : JSON.stringify(v))))))))) : /* @__PURE__ */ React.createElement("div", { className: "text-muted-foreground" }, "No attributes on this record."), stacktrace ? /* @__PURE__ */ React.createElement("pre", { className: "otel-pre otel-raw max-h-80 overflow-auto whitespace-pre-wrap break-words" }, stacktrace) : null);
+  }
+  function SeveritySummary({ rows, buckets }) {
+    const c = severityCounts(rows);
+    const max = Math.max(1, ...buckets.map((b) => b.total));
+    const w = 160;
+    const h = 24;
+    const bw = buckets.length ? w / buckets.length : w;
+    return /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground" }, /* @__PURE__ */ React.createElement("span", { className: "tabular-nums" }, c.total, " shown", c.events ? ` \xB7 ${c.events} event${c.events === 1 ? "" : "s"}` : ""), /* @__PURE__ */ React.createElement("span", { className: "tabular-nums" }, /* @__PURE__ */ React.createElement("span", { className: c.bySeverity.ERROR ? "otel-level-error" : "" }, c.bySeverity.ERROR, " error"), " \xB7 ", /* @__PURE__ */ React.createElement("span", { className: c.bySeverity.WARN ? "otel-level-warn" : "" }, c.bySeverity.WARN, " warn"), " \xB7 ", c.bySeverity.INFO, " info", c.bySeverity.DEBUG ? ` \xB7 ${c.bySeverity.DEBUG} debug` : ""), buckets.length > 1 ? /* @__PURE__ */ React.createElement("svg", { width: w, height: h, role: "img", "aria-label": "lines per time bucket, oldest left", className: "shrink-0" }, /* @__PURE__ */ React.createElement("rect", { x: "0", y: h - 1, width: w, height: "1", className: "text-muted-foreground", fill: "currentColor", opacity: "0.3" }), buckets.map((b, i) => {
+      const total = b.total / max * (h - 2);
+      const bad = (b.errors + b.warns) / max * (h - 2);
+      return /* @__PURE__ */ React.createElement("g", { key: i }, /* @__PURE__ */ React.createElement("title", null, `${b.total} line${b.total === 1 ? "" : "s"}${b.errors ? `, ${b.errors} error` : ""}${b.warns ? `, ${b.warns} warn` : ""}`), /* @__PURE__ */ React.createElement(
+        "rect",
+        {
+          x: i * bw + 0.5,
+          y: h - 1 - total,
+          width: Math.max(1, bw - 1),
+          height: total,
+          className: "text-muted-foreground",
+          fill: "currentColor",
+          opacity: "0.35"
+        }
+      ), bad > 0 ? /* @__PURE__ */ React.createElement(
+        "rect",
+        {
+          x: i * bw + 0.5,
+          y: h - 1 - bad,
+          width: Math.max(1, bw - 1),
+          height: bad,
+          fill: b.errors ? "var(--otel-level-error)" : "var(--otel-level-warn)"
+        }
+      ) : null);
+    })) : null);
+  }
+  function LogsPage() {
+    const { source, setSource, status, isLive } = useSource();
+    const active = useActive();
+    const initialNav = readNav();
+    const [filters, setFilters] = useState(() => logFiltersFromNav(initialNav));
+    const [applied, setApplied] = useState(() => logFiltersFromNav(initialNav));
+    const [pageSize, setPageSize] = useState(() => logPageSizeFromNav(initialNav.size));
+    const [cursors, setCursors] = useState(() => cursorsFromNav(initialNav.before));
+    const [logs, setLogs] = useState([]);
+    const [nextBefore, setNextBefore] = useState(null);
+    const [hasMore, setHasMore] = useState(false);
+    const [loggers, setLoggers] = useState([]);
+    const [absolute, setAbsolute] = useState(false);
+    const [paused, setPaused] = useState(false);
+    const [follow, setFollow] = useState(false);
+    const [wrap, setWrap] = useState(true);
+    const [expanded, setExpanded] = useState(null);
+    const listEnd = useRef(null);
+    const listBox = useRef(null);
+    const [tailing, setTailing] = useState(true);
+    const [error, setError] = useState(null);
+    const [loaded, setLoaded] = useState(false);
+    const [live, setLive] = useState(null);
+    const inflight = useRef(false);
+    const before = cursors.length ? cursors[cursors.length - 1] : null;
+    const onNewestPage = cursors.length === 0;
+    const base = isLive ? "/live" : "";
+    const entry = ((status == null ? void 0 : status.available) || []).find((b) => b.name === source) || null;
+    const canQuery = isLive || !!((entry == null ? void 0 : entry.logs) || (status == null ? void 0 : status.active) === source && (status == null ? void 0 : status.logs));
+    useEffect(() => {
+      if (active) writeNav({ ...navFromLogFilters(applied), size: pageSize !== 200 ? String(pageSize) : "", before: navFromCursors(cursors) });
+    }, [applied, pageSize, cursors, active]);
+    useEffect(() => {
+      const onNav = (e) => {
+        const d = e.detail || {};
+        if (d.tab !== "logs") return;
+        if (d.source) setSource(d.source);
+        const f = logFiltersFromNav({ ...readNav(), ...d });
+        setFilters(f);
+        setApplied(f);
+        setCursors([]);
+      };
+      window.addEventListener("hermes_otel:navigate", onNav);
+      return () => window.removeEventListener("hermes_otel:navigate", onNav);
+    }, [setSource]);
+    const load = useCallback(async () => {
+      if (!canQuery || inflight.current) return;
+      inflight.current = true;
+      try {
+        if (isLive) {
+          const st = await api("/live/status");
+          setLive(st && st.live !== false);
+          if (!st || st.live === false) return;
+        }
+        const r = await api(`${base}/logs/search`, logParams(applied, source, pageSize, before));
+        setLogs(dedupe(r.logs || []));
+        setNextBefore(r.next_before_ns != null ? String(r.next_before_ns) : null);
+        setHasMore(!!r.has_more);
+        setError(null);
+      } catch (e) {
+        setError(e);
+      } finally {
+        inflight.current = false;
+        setLoaded(true);
+      }
+    }, [applied, base, before, canQuery, isLive, pageSize, source]);
+    useEffect(() => {
+      load();
+    }, [load]);
+    usePolling(load, POLL_MS, active && !paused && canQuery && onNewestPage);
+    useEffect(() => {
+      if (!canQuery) return;
+      const p = withBackend(new URLSearchParams({ lookback_hours: String(applied.lookback) }), source);
+      api(`${base}/loggers`, p).then((r) => setLoggers(r.loggers || [])).catch(() => setLoggers([]));
+    }, [base, canQuery, source, applied.lookback]);
+    const set = (k, v) => setFilters({ ...filters, [k]: v });
+    const apply = (f) => {
+      setApplied(f);
+      setCursors([]);
+    };
+    const older = () => {
+      if (nextBefore) setCursors((c) => [...c, nextBefore]);
+    };
+    const newer = () => setCursors((c) => c.slice(0, -1));
+    const newest = () => setCursors([]);
+    const openTrace = (id) => navigate({ tab: "traces", source, trace: id, view: "turns" });
+    const showSession = (id) => {
+      const f = { ...DEFAULT_LOG_FILTERS, session: id, lookback: applied.lookback };
+      setFilters(f);
+      apply(f);
+    };
+    const showContext = (l) => {
+      const f = { ...DEFAULT_LOG_FILTERS, centerNs: String(l.time_unix_nano || ""), windowS: 30, lookback: applied.lookback };
+      setFilters(f);
+      apply(f);
+    };
+    const showEvent = (name) => {
+      const f = { ...filters, eventName: name, eventsOnly: true };
+      setFilters(f);
+      apply(f);
+    };
+    const actions = { onTrace: openTrace, onSession: showSession, onContext: showContext, onEvent: showEvent };
+    const rowKey = (l, i) => {
+      var _a, _b;
+      return String((_b = (_a = l.id) != null ? _a : l.seq) != null ? _b : `${l.time_unix_nano || 0}:${l.logger || ""}:${i}`);
+    };
+    const ordered = useMemo(() => follow ? [...logs].reverse() : logs, [logs, follow]);
+    const buckets = useMemo(() => timeBuckets(logs, 24), [logs]);
+    useEffect(() => {
+      var _a, _b;
+      if (follow && onNewestPage && !paused && tailing) (_b = (_a = listEnd.current) == null ? void 0 : _a.scrollIntoView) == null ? void 0 : _b.call(_a, { block: "nearest" });
+    }, [logs, follow, onNewestPage, paused, tailing]);
+    useEffect(() => {
+      if (!follow) return;
+      const onScroll = () => {
+        const el = document.scrollingElement || document.documentElement;
+        const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        setTailing(atEnd);
+      };
+      window.addEventListener("scroll", onScroll, { passive: true });
+      return () => window.removeEventListener("scroll", onScroll);
+    }, [follow]);
+    const permalink = typeof window !== "undefined" ? window.location.href : "";
+    const oldestShown = logs.length ? logs[logs.length - 1].time_unix_nano || 0 : 0;
+    const newestShown = logs.length ? logs[0].time_unix_nano || 0 : 0;
+    const header = /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-3" }, /* @__PURE__ */ React.createElement(SourceSelect, { source, onChange: setSource, status, need: "logs" }), /* @__PURE__ */ React.createElement("span", { className: "text-xs text-muted-foreground" }, logs.length, " line", logs.length === 1 ? "" : "s", cursors.length ? ` \xB7 page ${cursors.length + 1}` : "", onNewestPage ? paused ? " \xB7 paused" : " \xB7 following" : " \xB7 older page, not following")), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-3" }, /* @__PURE__ */ React.createElement(Toggle, { checked: absolute, onChange: setAbsolute, label: "absolute times", Switch: Checkbox }), /* @__PURE__ */ React.createElement(
+      Toggle,
+      {
+        checked: follow,
+        onChange: setFollow,
+        label: "follow",
+        title: "oldest first, newest at the bottom; scrolls with new lines until you scroll up",
+        Switch: Checkbox
+      }
+    ), /* @__PURE__ */ React.createElement(Toggle, { checked: wrap, onChange: setWrap, label: "wrap", title: "wrap long lines", Switch: Checkbox }), /* @__PURE__ */ React.createElement(CopyButton, { text: permalink, label: "copy link" }), /* @__PURE__ */ React.createElement(
+      Select,
+      {
+        value: String(pageSize),
+        onValueChange: (v) => {
+          setPageSize(Number(v));
+          setCursors([]);
+        },
+        className: "h-8",
+        "aria-label": "page size"
+      },
+      LOG_PAGE_SIZES.map((n) => /* @__PURE__ */ React.createElement(SelectOption, { key: n, value: String(n) }, `${n} / page`))
+    ), /* @__PURE__ */ React.createElement(
+      Button,
+      {
+        variant: "outline",
+        size: "sm",
+        onClick: () => setPaused((p) => !p),
+        disabled: !onNewestPage,
+        title: onNewestPage ? paused ? "resume following" : "stop following" : "an older page does not follow"
+      },
+      paused ? /* @__PURE__ */ React.createElement(IconPlay, { size: 12 }) : /* @__PURE__ */ React.createElement(IconPause, { size: 12 }),
+      /* @__PURE__ */ React.createElement("span", { className: "ml-1" }, paused ? "Resume" : "Pause")
+    )));
+    const availableSources = ((status == null ? void 0 : status.available) || []).filter((b) => b.logs).map((b) => b.name);
+    if (!canQuery)
+      return /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, header, /* @__PURE__ */ React.createElement(Empty, { title: "This source does not serve logs" }, "Pick the Live source", availableSources.length ? ` or one of: ${availableSources.join(", ")}` : ", or configure a backend whose adapter serves logs", "."));
+    const pager = /* @__PURE__ */ React.createElement(
+      Pager,
+      {
+        page: cursors.length + 1,
+        hasMore: !!hasMore && !!nextBefore,
+        onNewest: newest,
+        onNewer: newer,
+        onOlder: older,
+        range: logs.length ? `${fmtAbsTime(oldestShown)} \u2192 ${fmtAbsTime(newestShown)}` : ""
+      }
+    );
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, header, /* @__PURE__ */ React.createElement(
+      "form",
+      {
+        className: "otel-search-grid",
+        onSubmit: (e) => {
+          e.preventDefault();
+          apply(filters);
+        }
+      },
+      /* @__PURE__ */ React.createElement(Select, { value: filters.minLevel, onValueChange: (v) => set("minLevel", v), className: "h-8", "aria-label": "minimum level" }, LOG_LEVELS.map((l) => /* @__PURE__ */ React.createElement(SelectOption, { key: l.value, value: l.value }, l.label))),
+      /* @__PURE__ */ React.createElement(Select, { value: filters.logger, onValueChange: (v) => set("logger", v), className: "h-8", "aria-label": "logger" }, /* @__PURE__ */ React.createElement(SelectOption, { value: "" }, "Any logger"), filters.logger && !loggers.some((l) => l.logger === filters.logger) ? /* @__PURE__ */ React.createElement(SelectOption, { value: filters.logger }, filters.logger) : null, loggers.map((l) => /* @__PURE__ */ React.createElement(SelectOption, { key: l.logger, value: l.logger }, `${l.logger} (${l.count})`))),
+      /* @__PURE__ */ React.createElement(Input, { className: "h-8", placeholder: "session id", value: filters.session, onChange: (e) => set("session", e.target.value), "aria-label": "session id" }),
+      /* @__PURE__ */ React.createElement(Input, { className: "h-8", placeholder: "trace id", value: filters.traceId, onChange: (e) => set("traceId", e.target.value), "aria-label": "trace id" }),
+      /* @__PURE__ */ React.createElement(Input, { className: "h-8", placeholder: "text\u2026", value: filters.text, onChange: (e) => set("text", e.target.value), "aria-label": "text" }),
+      /* @__PURE__ */ React.createElement(
+        "label",
+        {
+          className: "inline-flex h-8 cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground",
+          title: "only hermes.* / GenAI events (logs.events.enabled)"
+        },
+        /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            type: "checkbox",
+            checked: filters.eventsOnly || !!filters.eventName,
+            onChange: (e) => setFilters({ ...filters, eventsOnly: e.target.checked, eventName: e.target.checked ? filters.eventName : "" })
+          }
+        ),
+        "events only"
+      ),
+      /* @__PURE__ */ React.createElement(
+        Input,
+        {
+          className: "h-8 font-mono",
+          placeholder: "event name\u2026",
+          value: filters.eventName,
+          onChange: (e) => set("eventName", e.target.value),
+          title: "one structured event, e.g. hermes.tool.call",
+          "aria-label": "event name"
+        }
+      ),
+      /* @__PURE__ */ React.createElement(Select, { value: String(filters.lookback), onValueChange: (v) => set("lookback", Number(v)), className: "h-8", "aria-label": "lookback" }, LOOKBACKS.map((l) => /* @__PURE__ */ React.createElement(SelectOption, { key: l.hours, value: String(l.hours) }, l.label))),
+      /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement(Button, { type: "submit", size: "sm" }, "Search"), /* @__PURE__ */ React.createElement(
+        Button,
+        {
+          type: "button",
+          variant: "outline",
+          size: "sm",
+          onClick: () => {
+            setFilters(DEFAULT_LOG_FILTERS);
+            apply(DEFAULT_LOG_FILTERS);
+          }
+        },
+        "Clear"
+      ))
+    ), error ? /* @__PURE__ */ React.createElement(ErrorBanner, { error, prefix: "Logs" }) : null, isLive && live === false ? /* @__PURE__ */ React.createElement(Empty, { title: "Live store unavailable" }, "Set ", /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, "dashboard_live: true"), " and ", /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, "logs.capture: true"), " (or", " ", /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, "logs.events.enabled: true"), "), then run a turn.") : logs.length === 0 && loaded && !error ? /* @__PURE__ */ React.createElement(Empty, { title: onNewestPage ? "No log lines" : "No older lines" }, !onNewestPage ? /* @__PURE__ */ React.createElement(Button, { variant: "outline", size: "sm", onClick: newer }, "\u2190 Back to the newer page") : isLive ? /* @__PURE__ */ React.createElement(React.Fragment, null, "Set ", /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, "logs.capture: true"), " or ", /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, "logs.events.enabled: true"), " in the plugin config and run a turn \u2014 the agent's log lines and events stream here. Lines written while a turn is in flight carry its trace and session id; click a line for its attributes.") : "Nothing matched in this window.") : logs.length === 0 && error ? null : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement(SeveritySummary, { rows: logs, buckets }), applied.centerNs ? /* @__PURE__ */ React.createElement("span", { className: "text-xs text-muted-foreground" }, "\xB1", applied.windowS, " s around ", fmtAbsTime(Number(applied.centerNs)), " ", /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "otel-link",
+        onClick: () => {
+          const f = { ...applied, centerNs: "" };
+          setFilters(f);
+          apply(f);
+        }
+      },
+      "clear"
+    )) : null), pager, /* @__PURE__ */ React.createElement("div", { className: "otel-card-bg overflow-hidden border border-border font-mono text-xs", ref: listBox }, ordered.map((l, i) => {
+      const k = rowKey(l, i);
+      return /* @__PURE__ */ React.createElement(
+        LogRow,
+        {
+          key: k,
+          l,
+          absolute,
+          wrap,
+          expanded: expanded === k,
+          onToggle: () => setExpanded(expanded === k ? null : k),
+          actions
+        }
+      );
+    }), /* @__PURE__ */ React.createElement("div", { ref: listEnd })), follow && !tailing && onNewestPage ? /* @__PURE__ */ React.createElement("div", { className: "flex justify-center" }, /* @__PURE__ */ React.createElement(
+      Button,
+      {
+        variant: "outline",
+        size: "sm",
+        onClick: () => {
+          var _a, _b;
+          setTailing(true);
+          (_b = (_a = listEnd.current) == null ? void 0 : _a.scrollIntoView) == null ? void 0 : _b.call(_a, { block: "nearest" });
+        }
+      },
+      "\u2193 Jump to newest"
+    )) : null, pager));
+  }
+  function dedupe(rows) {
+    const seen = /* @__PURE__ */ new Set();
+    const out = [];
+    for (const r of rows) {
+      const k = r.id != null ? `id:${r.id}` : r.seq != null ? `seq:${r.seq}` : `${r.time_unix_nano || 0}|${r.logger || ""}|${r.body || ""}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(r);
+    }
+    return out;
+  }
+
+  // src/detail.tsx
+  function Fact({ label, children }) {
+    if (children == null || children === "" || children === false) return null;
+    return /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] uppercase tracking-wide text-muted-foreground" }, label), /* @__PURE__ */ React.createElement("div", { className: "truncate text-sm text-foreground" }, children));
+  }
+  function AgentBreakdownTable({ b }) {
+    const cost = (v) => v != null ? /* @__PURE__ */ React.createElement("span", { className: "otel-c-cost" }, fmtCostExact(v)) : /* @__PURE__ */ React.createElement("span", { className: "text-muted-foreground" }, "\u2014");
+    const num = (v, fmt) => v != null ? fmt(v) : /* @__PURE__ */ React.createElement("span", { className: "text-muted-foreground" }, "\u2014");
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-1", "data-testid": "agent-breakdown" }, /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        className: "text-[10px] uppercase tracking-wide text-muted-foreground",
+        title: "the turn's own calls, then each delegation's whole subtree (a nested orchestrator's children are inside its row)"
+      },
+      "by agent"
+    ), /* @__PURE__ */ React.createElement("table", { className: "otel-md-table" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "agent"), /* @__PURE__ */ React.createElement("th", null, "model"), /* @__PURE__ */ React.createElement("th", null, "tokens"), /* @__PURE__ */ React.createElement("th", null, "API calls"), /* @__PURE__ */ React.createElement("th", null, "cost"))), /* @__PURE__ */ React.createElement("tbody", null, b.rows.map((r, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: r.error ? "otel-tone-bad" : "" }, r.main ? "main" : /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, r.label)), /* @__PURE__ */ React.createElement("td", { className: "font-mono" }, r.model || /* @__PURE__ */ React.createElement("span", { className: "text-muted-foreground" }, "\u2014")), /* @__PURE__ */ React.createElement("td", { className: "tabular-nums" }, num(r.tokens, fmtTokens)), /* @__PURE__ */ React.createElement("td", { className: "tabular-nums" }, num(r.calls, fmtInt)), /* @__PURE__ */ React.createElement("td", { className: "tabular-nums" }, cost(r.cost)))), /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", null, "whole run"), /* @__PURE__ */ React.createElement("td", null), /* @__PURE__ */ React.createElement("td", { className: "tabular-nums" }, num(b.total.tokens, fmtTokens)), /* @__PURE__ */ React.createElement("td", { className: "tabular-nums" }, num(b.total.calls, fmtInt)), /* @__PURE__ */ React.createElement("td", { className: "tabular-nums", title: b.total.cost == null ? "an amount only when every row is priced" : void 0 }, cost(b.total.cost))))));
+  }
+  function TraceHeader({
+    title,
+    traceId,
+    service,
+    durationMs,
+    rootAttrs,
+    spans,
+    error,
+    partial,
+    truncated,
+    spanCount,
+    uiUrl,
+    uiLabel,
+    source,
+    onBack
+  }) {
+    var _a, _b;
+    const f = headerFacts(rootAttrs, spans || []);
+    const breakdown = useMemo(() => agentBreakdown(rootAttrs, spans || []), [rootAttrs, spans]);
+    const tokens = f.totalTokens != null ? `${fmtTokens(f.totalTokens)}${f.inputTokens != null || f.outputTokens != null ? ` (in ${fmtTokens((_a = f.inputTokens) != null ? _a : 0)} \xB7 out ${fmtTokens((_b = f.outputTokens) != null ? _b : 0)}${f.reasoningTokens ? ` \xB7 reasoning ${fmtTokens(f.reasoningTokens)}` : ""}${f.cacheReadTokens ? ` \xB7 cache read ${fmtTokens(f.cacheReadTokens)}` : ""})` : ""}` : null;
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-start justify-between gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "min-w-0 space-y-1" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "text-lg font-semibold uppercase tracking-tight" }, title), error ? /* @__PURE__ */ React.createElement(Badge, { variant: "destructive", className: "text-[10px]" }, "error") : null, partial ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "text-[10px]", title: "the root span has not finished yet; totals are provisional" }, "in progress") : null, truncated ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "text-[10px]", title: `the backend returned the first spans only${spanCount ? ` of ${spanCount}` : ""}` }, "truncated") : null, f.platform ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "text-[10px]" }, f.platform) : null, f.turn != null ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "text-[10px]" }, "turn ", f.turn) : null), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2 text-xs text-muted-foreground" }, service ? /* @__PURE__ */ React.createElement("span", null, service) : null, /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, traceId), /* @__PURE__ */ React.createElement(CopyButton, { text: traceId, label: "copy id" }), uiUrl ? /* @__PURE__ */ React.createElement("a", { className: "otel-link", href: uiUrl, target: "_blank", rel: "noreferrer" }, "open in ", uiLabel || "backend", " \u2197") : null)), /* @__PURE__ */ React.createElement(Button, { variant: "ghost", size: "sm", onClick: onBack }, "\u2190 Back")), /* @__PURE__ */ React.createElement("div", { className: "otel-facts-grid" }, /* @__PURE__ */ React.createElement(Fact, { label: "duration" }, fmtDurationMs(durationMs)), /* @__PURE__ */ React.createElement(Fact, { label: "model" }, f.requestModel ? /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, f.requestModel) : null, f.responseModel ? /* @__PURE__ */ React.createElement("span", { className: "ml-1 text-xs text-muted-foreground", title: "the model named in the response, when it differs from the request" }, "(served: ", f.responseModel, ")") : null), /* @__PURE__ */ React.createElement(Fact, { label: breakdown ? "tokens (main)" : "tokens" }, tokens), /* @__PURE__ */ React.createElement(Fact, { label: breakdown ? "cost (main)" : "cost" }, f.cost != null ? /* @__PURE__ */ React.createElement("span", { className: "otel-c-cost" }, fmtCostExact(f.cost)) : /* @__PURE__ */ React.createElement("span", { className: "text-muted-foreground" }, "no pricing data")), /* @__PURE__ */ React.createElement(Fact, { label: "tools" }, f.tools.length ? f.tools.join(", ") : null), /* @__PURE__ */ React.createElement(Fact, { label: "outcome" }, f.finalStatus || f.exitReason ? `${f.finalStatus || ""}${f.finalStatus && f.exitReason ? " \xB7 " : ""}${f.exitReason || ""}` : null), /* @__PURE__ */ React.createElement(Fact, { label: "session" }, f.session ? /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "otel-link font-mono",
+        title: "show this session's turns",
+        onClick: () => navigate({ tab: "traces", source, view: "sessions", session: String(f.session), trace: "" })
+      },
+      f.session
+    ) : null)), breakdown ? /* @__PURE__ */ React.createElement(AgentBreakdownTable, { b: breakdown }) : null);
+  }
+  function Block2({ label, children }) {
+    if (children == null) return null;
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-1" }, /* @__PURE__ */ React.createElement(MiniLabel, null, label), children);
+  }
+  var first = (a, ...keys) => {
+    for (const k of keys) if (a[k] != null && a[k] !== "") return a[k];
+    return null;
+  };
+  function Attr({ a, label, keys, source }) {
+    const key = keys.find((k) => a[k] != null && a[k] !== "");
+    if (!key) return null;
+    return /* @__PURE__ */ React.createElement(
+      ValueView,
+      {
+        attrKey: key,
+        value: a[key],
+        label,
+        onSessionClick: source ? (id) => navigate({ tab: "traces", source, view: "sessions", session: id, trace: "" }) : void 0
+      }
+    );
+  }
+  function SpanSummary({ span, source }) {
+    var _a, _b, _c, _d, _e, _f;
+    const a = span._attrs || {};
+    const kind = kindOf(span.name, a);
+    const err = (_a = a["error.message"]) != null ? _a : a["exception.message"];
+    const errorBlock = err ? /* @__PURE__ */ React.createElement(ValueView, { attrKey: "error.message", value: err, label: a["error.type"] ? `error \xB7 ${a["error.type"]}` : "error" }) : null;
+    if (kind === "tool") {
+      const truncated = String(a["hermes.preview.output.truncated"]) === "true";
+      const origChars = Number(a["hermes.preview.output.original_chars"]);
+      return /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2 text-xs" }, first(a, "tool.name", "gen_ai.tool.name") ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "font-mono text-[10px]" }, String(first(a, "tool.name", "gen_ai.tool.name"))) : null, /* @__PURE__ */ React.createElement(StatusBadge, { value: a["hermes.tool.outcome"] || a["status"] }), a["hermes.tool.blocked_by"] ? /* @__PURE__ */ React.createElement(Badge, { variant: "destructive", className: "text-[10px]" }, "blocked by ", String(a["hermes.tool.blocked_by"])) : null, a["hermes.tool.decided_by"] ? /* @__PURE__ */ React.createElement("span", { className: "text-muted-foreground" }, "decided by ", String(a["hermes.tool.decided_by"])) : null), /* @__PURE__ */ React.createElement(
+        Facts,
+        {
+          items: [
+            { label: "target", value: a["hermes.tool.target"], mono: true },
+            { label: "call id", value: a["gen_ai.tool.call.id"], mono: true },
+            {
+              label: "cpu avg / peak",
+              value: a["hermes.tool.cpu.utilization.avg"] != null ? `${a["hermes.tool.cpu.utilization.avg"]} / ${(_b = a["hermes.tool.cpu.utilization.peak"]) != null ? _b : "?"}` : null
+            },
+            {
+              label: "gpu avg / peak",
+              value: a["hermes.tool.gpu.utilization.avg"] != null ? `${a["hermes.tool.gpu.utilization.avg"]} / ${(_c = a["hermes.tool.gpu.utilization.peak"]) != null ? _c : "?"}` : null
+            }
+          ]
+        }
+      ), errorBlock, /* @__PURE__ */ React.createElement(Attr, { a, label: "command", keys: ["hermes.tool.command"] }), /* @__PURE__ */ React.createElement(Attr, { a, label: "arguments", keys: ["input.value", "gen_ai.tool.call.arguments"] }), /* @__PURE__ */ React.createElement(
+        Attr,
+        {
+          a,
+          label: truncated ? `result \xB7 preview of ${Number.isFinite(origChars) ? fmtCount(origChars) : "?"} chars` : "result",
+          keys: ["output.value", "gen_ai.tool.call.result"]
+        }
+      ));
+    }
+    if (kind === "llm" || kind === "api") {
+      const f = headerFacts(a);
+      const http = first(a, "http.response.status_code", "gen_ai.response.status_code");
+      return /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement(
+        Facts,
+        {
+          items: [
+            { label: "model", value: f.requestModel, mono: true },
+            { label: "served by", value: f.responseModel, mono: true },
+            {
+              label: "tokens",
+              value: f.totalTokens != null ? `${fmtTokens(f.totalTokens)}${f.inputTokens != null ? ` (in ${fmtTokens(f.inputTokens)} \xB7 out ${fmtTokens((_d = f.outputTokens) != null ? _d : 0)}${f.reasoningTokens ? ` \xB7 reasoning ${fmtTokens(f.reasoningTokens)}` : ""}${f.cacheReadTokens ? ` \xB7 cache ${fmtTokens(f.cacheReadTokens)}` : ""})` : ""}` : null
+            },
+            { label: "cost", value: f.cost != null ? fmtCostExact(f.cost) : null },
+            { label: "finish", value: first(a, "llm.response.finish_reason", "gen_ai.response.finish_reasons") },
+            { label: "latency", value: a["llm.response.duration_ms"] != null ? fmtDurationMs(Number(a["llm.response.duration_ms"])) : null },
+            { label: "messages", value: a["llm.request.message_count"] },
+            { label: "mode", value: a["llm.api_mode"] },
+            { label: "tool calls", value: a["llm.response.tool_calls"] },
+            { label: "http", value: http, tone: http != null && Number(http) >= 400 ? "bad" : void 0 },
+            {
+              label: "retries",
+              value: a["hermes.retry.count"] != null ? `${a["hermes.retry.count"]}${a["hermes.max_retries"] != null ? ` of ${a["hermes.max_retries"]}` : ""}` : null
+            }
+          ]
+        }
+      ), errorBlock, /* @__PURE__ */ React.createElement(Attr, { a, label: kind === "llm" ? "input" : "prompt", keys: ["llm.input_messages", "input.value", "gen_ai.input.messages"] }), /* @__PURE__ */ React.createElement(Attr, { a, label: "response", keys: ["llm.output.content", "output.value", "gen_ai.output.messages"] }), a["gen_ai.system_instructions"] && !a["input.value"] ? /* @__PURE__ */ React.createElement(Attr, { a, label: "system instructions", keys: ["gen_ai.system_instructions"] }) : null);
+    }
+    if (kind === "agent" || kind === "session") {
+      const f = headerFacts(a);
+      const tools = turnTools(a);
+      const skills = splitList("hermes.turn.skills", a["hermes.turn.skills"]);
+      return /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2 text-xs" }, /* @__PURE__ */ React.createElement(StatusBadge, { value: a["hermes.turn.final_status"] }), a["hermes.session.kind"] ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "text-[10px]" }, String(a["hermes.session.kind"])) : null, String(a["hermes.session.is_subagent"]) === "true" ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "text-[10px]" }, "sub-agent") : null, String(a["hermes.session.interrupted"]) === "true" ? /* @__PURE__ */ React.createElement(Badge, { variant: "destructive", className: "text-[10px]" }, "interrupted") : null, String(a["hermes.session.failed"]) === "true" ? /* @__PURE__ */ React.createElement(Badge, { variant: "destructive", className: "text-[10px]" }, "failed") : null, String(a["hermes.session.synthesized"]) === "true" ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "text-[10px]", title: "root recreated by the plugin after a restart" }, "synthesized") : null), /* @__PURE__ */ React.createElement(
+        Facts,
+        {
+          items: [
+            { label: "exit", value: a["hermes.turn.exit_reason"] },
+            { label: "api calls", value: a["hermes.turn.api_call_count"] },
+            { label: "tokens", value: f.totalTokens != null ? fmtTokens(f.totalTokens) : null },
+            { label: "cost", value: f.cost != null ? fmtCostExact(f.cost) : f.costUnknown ? "no pricing data" : null },
+            { label: "platform", value: a["hermes.platform"] },
+            { label: "profile", value: a["hermes.profile"] },
+            { label: "turn", value: a["hermes.turn.number"] },
+            { label: "previous session", value: a["hermes.session.previous_id"], mono: true }
+          ]
+        }
+      ), errorBlock, /* @__PURE__ */ React.createElement(Attr, { a, label: "user message", keys: ["input.value", "gen_ai.input.messages"], source }), /* @__PURE__ */ React.createElement(Attr, { a, label: "final response", keys: ["output.value", "gen_ai.output.messages"] }), tools.tools.length || tools.commands.length || tools.targets.length ? /* @__PURE__ */ React.createElement(Block2, { label: tools.tools.length ? `tools \xB7 ${tools.tools.length}` : "tools" }, /* @__PURE__ */ React.createElement("dl", { className: "otel-attr-table otel-kv-table text-xs" }, tools.tools.length ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("dt", null, "used"), /* @__PURE__ */ React.createElement("dd", { className: "min-w-0 break-words" }, /* @__PURE__ */ React.createElement(Chips, { items: tools.tools, mono: true }))) : null, tools.outcomes.length ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("dt", null, "outcomes"), /* @__PURE__ */ React.createElement("dd", { className: "flex min-w-0 flex-wrap gap-1" }, tools.outcomes.map((o) => /* @__PURE__ */ React.createElement(StatusBadge, { key: o, value: o })))) : null, tools.commands.map((c, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: `c${i}` }, /* @__PURE__ */ React.createElement("dt", null, "command"), /* @__PURE__ */ React.createElement("dd", { className: "min-w-0 break-words" }, /* @__PURE__ */ React.createElement("code", { className: "otel-code" }, c)))), tools.targets.map((t, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: `t${i}` }, /* @__PURE__ */ React.createElement("dt", null, "target"), /* @__PURE__ */ React.createElement("dd", { className: "min-w-0 break-words font-mono text-muted-foreground" }, t))))) : null, skills && skills.length ? /* @__PURE__ */ React.createElement(Block2, { label: "skills" }, /* @__PURE__ */ React.createElement(Chips, { items: skills, mono: true })) : null);
+    }
+    if (kind === "skill") {
+      return /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2 text-xs" }, first(a, "hermes.skill.name", "gen_ai.skill.name") ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "font-mono text-[10px]" }, String(first(a, "hermes.skill.name", "gen_ai.skill.name"))) : null, /* @__PURE__ */ React.createElement(StatusBadge, { value: a["hermes.skill.result_status"] }), a["hermes.skill.source"] ? /* @__PURE__ */ React.createElement("span", { className: "text-muted-foreground" }, "loaded via ", String(a["hermes.skill.source"])) : null), /* @__PURE__ */ React.createElement(Facts, { items: [{ label: "path", value: a["hermes.skill.path"], mono: true }] }), errorBlock);
+    }
+    if (kind === "approval") {
+      return /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2 text-xs" }, a["hermes.approval.choice"] ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "text-[10px]" }, "choice: ", String(a["hermes.approval.choice"])) : null, a["hermes.approval.granted"] != null ? /* @__PURE__ */ React.createElement(Badge, { variant: String(a["hermes.approval.granted"]) === "true" ? "secondary" : "destructive", className: "text-[10px]" }, String(a["hermes.approval.granted"]) === "true" ? "granted" : "denied") : null, String(a["hermes.approval.timed_out"]) === "true" ? /* @__PURE__ */ React.createElement(Badge, { variant: "destructive", className: "text-[10px]" }, "timed out") : null), /* @__PURE__ */ React.createElement(
+        Facts,
+        {
+          items: [
+            { label: "decided by", value: a["hermes.approval.decided_by"] },
+            { label: "surface", value: a["hermes.approval.surface"] },
+            { label: "waited", value: a["hermes.approval.duration_ms"] != null ? fmtDurationMs(Number(a["hermes.approval.duration_ms"])) : null },
+            { label: "pattern", value: first(a, "hermes.approval.pattern_key", "hermes.approval.pattern_keys"), mono: true }
+          ]
+        }
+      ), /* @__PURE__ */ React.createElement(Attr, { a, label: "command", keys: ["hermes.approval.command"] }), /* @__PURE__ */ React.createElement(Attr, { a, label: "description", keys: ["hermes.approval.description"] }));
+    }
+    if (kind === "subagent") {
+      return /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2 text-xs" }, a["hermes.subagent.role"] ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "text-[10px]" }, String(a["hermes.subagent.role"])) : null, /* @__PURE__ */ React.createElement(StatusBadge, { value: a["hermes.subagent.status"] })), /* @__PURE__ */ React.createElement(
+        Facts,
+        {
+          items: [
+            { label: "duration", value: a["hermes.subagent.duration_ms"] != null ? fmtDurationMs(Number(a["hermes.subagent.duration_ms"])) : null },
+            { label: "child session", value: first(a, "hermes.subagent.child_session_id", "hermes.subagent.child_id"), mono: true },
+            { label: "parent session", value: first(a, "hermes.subagent.parent_session_id", "hermes.subagent.parent_id"), mono: true }
+          ]
+        }
+      ), errorBlock, /* @__PURE__ */ React.createElement(Attr, { a, label: "goal", keys: ["hermes.subagent.goal", "input.value"] }), /* @__PURE__ */ React.createElement(Attr, { a, label: "summary", keys: ["hermes.subagent.summary", "output.value"] }));
+    }
+    if (kind === "cron") {
+      return /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement(Facts, { items: [{ label: "job", value: a["hermes.cron.job_id"], mono: true }] }), errorBlock, /* @__PURE__ */ React.createElement(Attr, { a, label: "input", keys: ["input.value"] }), /* @__PURE__ */ React.createElement(Attr, { a, label: "output", keys: ["output.value"] }));
+    }
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement(
+      Facts,
+      {
+        items: [
+          { label: "span", value: span.name, mono: true },
+          { label: "duration", value: fmtDurationMs(span.durationMs) },
+          { label: "status", value: ((_e = span.status) == null ? void 0 : _e.code) === 2 ? "error" : ((_f = span.status) == null ? void 0 : _f.code) === 1 ? "ok" : null },
+          { label: "kind", value: a["openinference.span.kind"] || a["hermes.span_kind"] || null }
+        ]
+      }
+    ), errorBlock, /* @__PURE__ */ React.createElement(Attr, { a, label: "input", keys: ["input.value"] }), /* @__PURE__ */ React.createElement(Attr, { a, label: "output", keys: ["output.value"] }));
+  }
+  var CONTENT_KEYS = /* @__PURE__ */ new Set([
+    "input.value",
+    "output.value",
+    "gen_ai.input.messages",
+    "gen_ai.output.messages",
+    "llm.input_messages",
+    "llm.output.content",
+    "gen_ai.tool.call.arguments",
+    "gen_ai.tool.call.result",
+    "gen_ai.system_instructions",
+    "hermes.conversation.history"
+  ]);
+  function AttrGroups({ attrs, source }) {
+    const groups = groupAttrs(attrs || {});
+    if (!groups.length) return /* @__PURE__ */ React.createElement("div", { className: "text-xs text-muted-foreground" }, "(no attributes)");
+    const onSession = source ? (id) => navigate({ tab: "traces", source, view: "sessions", session: id, trace: "" }) : void 0;
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, groups.map((g) => /* @__PURE__ */ React.createElement("div", { key: g.prefix }, /* @__PURE__ */ React.createElement(MiniLabel, null, g.prefix), /* @__PURE__ */ React.createElement("dl", { className: "otel-attr-table text-xs" }, g.entries.map((e) => /* @__PURE__ */ React.createElement(React.Fragment, { key: e.key }, /* @__PURE__ */ React.createElement("dt", { className: "text-muted-foreground", title: e.aliases.length ? `also: ${e.aliases.join(", ")}` : "" }, e.key, e.aliases.length ? /* @__PURE__ */ React.createElement("span", { className: "ml-1 text-[10px] text-muted-foreground/60" }, "+", e.aliases.length) : null), /* @__PURE__ */ React.createElement("dd", { className: "min-w-0 break-words text-foreground" }, CONTENT_KEYS.has(e.key) ? /* @__PURE__ */ React.createElement("details", { className: "otel-details" }, /* @__PURE__ */ React.createElement("summary", { className: "cursor-pointer text-[11px] text-muted-foreground" }, fmtCount(String(e.value).length), " chars"), /* @__PURE__ */ React.createElement("div", { className: "mt-1" }, /* @__PURE__ */ React.createElement(ValueView, { attrKey: e.key, value: e.value }))) : /* @__PURE__ */ React.createElement(ValueView, { attrKey: e.key, value: e.value, onSessionClick: onSession }))))))));
+  }
+  function TraceTabs({
+    traceId,
+    source,
+    logsAvailable,
+    spans,
+    raw,
+    windowNs
+  }) {
+    const [tab, setTab] = useState("spans");
+    const [logs, setLogs] = useState(null);
+    const [openLog, setOpenLog] = useState(null);
+    const [error, setError] = useState(null);
+    useEffect(() => {
+      if (tab !== "logs" || logs !== null) return;
+      const p = withBackend(new URLSearchParams({ trace_id: traceId, limit: "500" }), source);
+      const [startNs, endNs] = windowNs || [0, 0];
+      if (startNs > 0 && endNs > 0) {
+        p.set("start_s", String(Math.max(0, Math.floor(startNs / 1e9) - 300)));
+        p.set("end_s", String(Math.ceil(endNs / 1e9) + 300));
+      } else {
+        p.set("lookback_hours", "720");
+      }
+      api(source === "live" ? "/live/logs/search" : "/logs/search", p).then((r) => setLogs(r.logs || [])).catch((e) => {
+        setError(e);
+        setLogs([]);
+      });
+    }, [tab, logs, source, traceId, windowNs]);
+    const rawText = useMemo(() => tab === "raw" ? JSON.stringify(raw, null, 2) : "", [raw, tab]);
+    const actions = {
+      onTrace: () => void 0,
+      onSession: (id) => navigate({ tab: "logs", source, session: id, trace: "", lookback: "168" }),
+      onEvent: (name) => navigate({ tab: "logs", source, trace: traceId, session: "", event: name, events: "1", lookback: "720" }),
+      onContext: (l) => navigate({ tab: "logs", source, trace: "", session: "", center: String(l.time_unix_nano || ""), lookback: "720" })
+    };
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement(
+      Segmented,
+      {
+        value: tab,
+        onChange: setTab,
+        label: "trace detail view",
+        options: [{ id: "spans", label: "Spans" }, ...logsAvailable ? [{ id: "logs", label: "Logs" }] : [], { id: "raw", label: "Raw" }]
+      }
+    ), tab === "spans" ? spans : null, tab === "logs" ? error ? /* @__PURE__ */ React.createElement(ErrorBanner, { error, prefix: "Logs" }) : logs === null ? /* @__PURE__ */ React.createElement("div", { className: "text-xs text-muted-foreground" }, "Loading\u2026") : logs.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground" }, "No log lines carry this trace id.") : /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between text-xs text-muted-foreground" }, /* @__PURE__ */ React.createElement("span", null, logs.length, " line", logs.length === 1 ? "" : "s", " carry this trace id \xB7 click a line for its attributes"), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "otel-link",
+        title: "open the Logs tab filtered to this trace",
+        onClick: () => navigate({ tab: "logs", source, trace: traceId, session: "", lookback: "720" })
+      },
+      "open in Logs tab \u2192"
+    )), /* @__PURE__ */ React.createElement("div", { className: "otel-card-bg overflow-hidden border border-border font-mono text-xs" }, logs.map((l, i) => {
+      var _a;
+      const k = String((_a = l.seq) != null ? _a : i);
+      return /* @__PURE__ */ React.createElement(LogRow, { key: k, l, absolute: true, expanded: openLog === k, onToggle: () => setOpenLog(openLog === k ? null : k), actions });
+    }))) : null, tab === "raw" ? /* @__PURE__ */ React.createElement("div", { className: "space-y-1" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-end" }, /* @__PURE__ */ React.createElement(CopyButton, { text: rawText, label: "copy JSON" })), /* @__PURE__ */ React.createElement("pre", { className: "otel-pre otel-raw" }, rawText)) : null);
+  }
+
+  // src/spantree.tsx
+  function SpanSection({
+    span,
+    depth,
+    open,
+    onToggle,
+    startMs,
+    offsetPct,
+    durPct,
+    hasKids,
+    source
+  }) {
+    const kind = kindOf(span.name, span._attrs);
+    const hex = KIND_COLOR[kind];
+    const isErr = statusCode(span.status) === "error";
+    const cost = span._attrs["hermes.cost.usage"];
+    const tokens = span._attrs["gen_ai.usage.total_tokens"] || span._attrs["llm.token_count.total"];
+    const approval = span._attrs["hermes.approval.choice"];
+    const width = Math.min(100 - offsetPct, Math.max(0.8, durPct));
+    return /* @__PURE__ */ React.createElement("div", { className: cn("otel-card-bg otel-hoverable overflow-hidden border transition-colors", isErr ? "border-destructive/40" : "border-border") }, /* @__PURE__ */ React.createElement("div", { className: "otel-track relative h-1.5 w-full", title: `+${fmtDurationMs(startMs)} \xB7 ${fmtDurationMs(span.durationMs)}` }, /* @__PURE__ */ React.createElement("div", { className: "absolute inset-y-0", style: { left: `${offsetPct}%`, width: `${width}%`, minWidth: 2, background: hex } })), /* @__PURE__ */ React.createElement(
+      Clickable,
+      {
+        onActivate: onToggle,
+        label: `${open ? "collapse" : "expand"} span ${span.name}`,
+        "aria-expanded": open,
+        className: "otel-row flex items-center gap-2 px-3 py-2",
+        style: { paddingLeft: 12 + depth * 20 }
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "w-3 shrink-0 text-xs text-muted-foreground", "aria-hidden": true }, open ? "\u25BE" : "\u25B8"),
+      /* @__PURE__ */ React.createElement("span", { className: "otel-w-2 inline-block h-2 shrink-0 rounded-full", style: { background: hex }, "aria-hidden": true }),
+      /* @__PURE__ */ React.createElement("span", { className: "truncate font-mono text-sm", title: span.name }, span.name),
+      hasKids ? /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-muted-foreground", title: "direct child spans" }, span.children.length, " child", span.children.length === 1 ? "" : "ren") : null,
+      isErr ? /* @__PURE__ */ React.createElement(Badge, { variant: "destructive", className: "shrink-0 text-[10px]" }, "error") : null,
+      approval ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "shrink-0 text-[10px]" }, "approval: ", approval) : null,
+      /* @__PURE__ */ React.createElement("div", { className: "ml-auto flex shrink-0 items-center gap-3 text-[11px] text-muted-foreground" }, tokens ? /* @__PURE__ */ React.createElement("span", { className: "tabular-nums" }, fmtTokens(tokens), " tok") : null, cost != null ? /* @__PURE__ */ React.createElement("span", { className: "tabular-nums otel-c-cost" }, fmtCostExact(Number(cost))) : null, startMs > 0.5 ? /* @__PURE__ */ React.createElement("span", { className: "tabular-nums", title: "start offset from trace begin" }, "+", fmtDurationMs(startMs)) : null, /* @__PURE__ */ React.createElement("span", { className: "otel-w-14 text-right font-medium tabular-nums text-foreground" }, fmtDurationMs(span.durationMs)))
+    ), open ? /* @__PURE__ */ React.createElement("div", { className: "space-y-3 border-t border-border/60 bg-muted/20 px-3 py-3" }, /* @__PURE__ */ React.createElement(SpanSummary, { span, source }), /* @__PURE__ */ React.createElement("details", { className: "otel-details" }, /* @__PURE__ */ React.createElement("summary", { className: "cursor-pointer text-[11px] font-medium uppercase tracking-wide text-muted-foreground" }, "all attributes"), /* @__PURE__ */ React.createElement("div", { className: "mt-2" }, /* @__PURE__ */ React.createElement(AttrGroups, { attrs: span._attrs, source })))) : null);
+  }
+  function axisTicks(totalMs, n = 5) {
+    if (!(totalMs > 0)) return [];
+    const out = [];
+    for (let i = 0; i <= n; i++) out.push({ pct: i / n * 100, label: fmtDurationMs(totalMs * i / n) });
+    return out;
+  }
+  function SpanTreeView({ roots, defaultOpen, source }) {
+    const flat = useMemo(() => flatten(roots), [roots]);
+    const [openIds, setOpenIds] = useState(() => defaultOpen ? Object.fromEntries(flat.map((n) => [n.span.spanId, true])) : {});
+    const [allOpen, setAllOpen] = useState(!!defaultOpen);
+    useEffect(() => {
+      if (allOpen) setOpenIds((p) => ({ ...Object.fromEntries(flat.map((n) => [n.span.spanId, true])), ...p }));
+    }, [flat, allOpen]);
+    if (!flat.length) return /* @__PURE__ */ React.createElement("div", { className: "py-6 text-center text-sm text-muted-foreground" }, "No spans.");
+    const t0 = Math.min(...flat.map((n) => n.span.startNs));
+    const total = Math.max(...flat.map((n) => n.span.endNs)) - t0 || 1;
+    const toggle = (id) => setOpenIds((p) => ({ ...p, [id]: !p[id] }));
+    const expandAll = () => {
+      setAllOpen(true);
+      setOpenIds(Object.fromEntries(flat.map((n) => [n.span.spanId, true])));
+    };
+    const collapseAll = () => {
+      setAllOpen(false);
+      setOpenIds({});
+    };
+    const ticks = axisTicks(total / 1e6);
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("span", { className: "text-[11px] text-muted-foreground" }, flat.length, " span", flat.length === 1 ? "" : "s", " \xB7 ", fmtDurationMs(total / 1e6), " total \xB7 ", roots.length > 1 ? `${roots.length} roots` : "1 root"), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2" }, /* @__PURE__ */ React.createElement(Button, { variant: "outline", size: "sm", onClick: expandAll }, "Expand all"), /* @__PURE__ */ React.createElement(Button, { variant: "outline", size: "sm", onClick: collapseAll }, "Collapse"))), /* @__PURE__ */ React.createElement("div", { className: "otel-axis", "aria-hidden": true }, ticks.map((t) => /* @__PURE__ */ React.createElement(React.Fragment, { key: t.pct }, /* @__PURE__ */ React.createElement("i", { style: { left: `${t.pct}%` } }), /* @__PURE__ */ React.createElement("span", { style: { left: `${t.pct}%` } }, t.label)))), /* @__PURE__ */ React.createElement("div", { className: "flex flex-col gap-1.5" }, flat.map((n) => /* @__PURE__ */ React.createElement(
+      SpanSection,
+      {
+        key: n.span.spanId,
+        span: n.span,
+        depth: n.depth,
+        open: !!openIds[n.span.spanId],
+        onToggle: () => toggle(n.span.spanId),
+        startMs: (n.span.startNs - t0) / 1e6,
+        offsetPct: (n.span.startNs - t0) / total * 100,
+        durPct: n.span.durationMs * 1e6 * 100 / total,
+        hasKids: n.span.children.length > 0,
+        source
+      }
+    ))));
+  }
+  function SubagentChip({ s }) {
+    const parts2 = [
+      s.tokens != null ? `+${fmtTokens(s.tokens)} tok` : null,
+      s.cost != null ? `+${fmtCostExact(s.cost)}` : null,
+      `${s.count} sub-agent${s.count === 1 ? "" : "s"}`
+    ].filter(Boolean);
+    return /* @__PURE__ */ React.createElement("span", { className: "tabular-nums", title: "the turn's top-level delegations, on top of its own tokens and cost (each delegation's whole subtree)" }, parts2.join(" \xB7 "));
+  }
+  function TraceCard({ row, onSelect }) {
+    const Icon = kindIcon(row.rootKind);
+    return /* @__PURE__ */ React.createElement(
+      Clickable,
+      {
+        onActivate: () => onSelect(row),
+        label: `open trace ${row.rootName}`,
+        className: cn(
+          "otel-card-bg otel-hover-parent flex cursor-pointer items-start gap-3 border p-3 transition-colors hover:bg-secondary/30",
+          row.error ? "otel-error-bg border-destructive/30" : "border-border"
+        ),
+        title: row.traceId
+      },
+      /* @__PURE__ */ React.createElement("div", { className: "shrink-0 pt-0.5", style: { color: KIND_COLOR[row.rootKind] }, "aria-hidden": true }, /* @__PURE__ */ React.createElement(Icon, { size: 16 })),
+      /* @__PURE__ */ React.createElement("div", { className: "min-w-0 flex-1 space-y-1" }, /* @__PURE__ */ React.createElement("div", { className: "flex min-w-0 items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "truncate font-mono text-sm" }, row.rootName), row.rootKind !== "other" ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "shrink-0 text-[10px]" }, row.rootKind) : null, row.error ? /* @__PURE__ */ React.createElement(Badge, { variant: "destructive", className: "shrink-0 text-[10px]" }, "error") : null, row.partial ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "shrink-0 text-[10px]", title: "the root span has not finished: name, kind and totals are provisional" }, "in progress") : null, row.toolName ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "shrink-0 font-mono text-[10px]" }, row.toolName) : null), row.inPreview || row.outPreview ? /* @__PURE__ */ React.createElement("div", { className: "otel-pl-2 space-y-0.5 border-l-2 border-border/60 text-xs" }, row.inPreview ? /* @__PURE__ */ React.createElement("div", { className: "truncate text-foreground/80" }, /* @__PURE__ */ React.createElement("span", { className: "otel-mr-2 text-[10px] text-muted-foreground" }, "in"), row.inPreview) : null, row.outPreview ? /* @__PURE__ */ React.createElement("div", { className: "truncate text-foreground/80" }, /* @__PURE__ */ React.createElement("span", { className: "otel-mr-2 text-[10px] text-muted-foreground" }, "out"), row.outPreview) : null) : null, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground" }, row.model ? /* @__PURE__ */ React.createElement("span", { className: "font-mono text-foreground/80" }, row.model) : null, row.service && row.service !== "hermes" ? /* @__PURE__ */ React.createElement("span", null, row.service) : null, /* @__PURE__ */ React.createElement("span", { className: "tabular-nums" }, row.spanCount != null ? `${row.spanCount} span${row.spanCount === 1 ? "" : "s"}` : "spans ?"), /* @__PURE__ */ React.createElement("span", { className: "text-border", "aria-hidden": true }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "tabular-nums" }, fmtDurationMs(row.durationMs)), row.tokens != null ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "text-border", "aria-hidden": true }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "tabular-nums" }, fmtTokens(row.tokens), " tok")) : null, row.cost != null ? /* @__PURE__ */ React.createElement("span", { className: "tabular-nums otel-c-cost" }, fmtCostExact(row.cost)) : null, row.subagents ? /* @__PURE__ */ React.createElement(SubagentChip, { s: row.subagents }) : null, /* @__PURE__ */ React.createElement("span", { className: "text-border", "aria-hidden": true }, "\xB7"), /* @__PURE__ */ React.createElement("span", { title: fmtAbsTime(row.startNs) }, fmtTimeAgo(row.endNs || row.startNs)))),
+      /* @__PURE__ */ React.createElement("div", { className: "otel-self-center otel-reveal shrink-0 text-muted-foreground transition-opacity", "aria-hidden": true }, /* @__PURE__ */ React.createElement(IconChevronRight, { size: 16 }))
+    );
+  }
+  function LiveTraceDetail({
+    trace,
+    roots,
+    onBack,
+    source = "live",
+    loading
+  }) {
+    const spans = trace.spans || [];
+    const root = findRoot(spans) || spans[0];
+    const startNs = spans.length ? Math.min(...spans.map((s) => s.start_time_unix_nano || 0)) : trace.startNs;
+    const endNs = spans.length ? Math.max(...spans.map((s) => s.end_time_unix_nano || s.start_time_unix_nano || 0)) : trace.endNs;
+    return /* @__PURE__ */ React.createElement(Card, null, /* @__PURE__ */ React.createElement(CardHeader, { className: "otel-space-y-0" }, /* @__PURE__ */ React.createElement(
+      TraceHeader,
+      {
+        title: trace.rootName,
+        traceId: String(trace.traceId),
+        service: trace.service,
+        durationMs: trace.durationMs,
+        rootAttrs: (root == null ? void 0 : root.attributes) || {},
+        spans: spans.map((s) => ({ name: s.name, attributes: s.attributes || {} })),
+        error: trace.error,
+        partial: !!trace.partial || spans.length > 0 && !findRoot(spans),
+        source,
+        onBack
+      }
+    )), /* @__PURE__ */ React.createElement(CardContent, null, loading ? /* @__PURE__ */ React.createElement("div", { className: "text-xs text-muted-foreground" }, "Loading spans\u2026") : null, /* @__PURE__ */ React.createElement(
+      TraceTabs,
+      {
+        traceId: String(trace.traceId),
+        source,
+        logsAvailable: true,
+        spans: /* @__PURE__ */ React.createElement(SpanTreeView, { roots, source }),
+        raw: spans,
+        windowNs: [startNs, endNs]
+      }
+    )));
+  }
+
+  // src/live.tsx
+  var POLL_MS2 = 2e3;
+  var WINDOW_H = 1;
+  var PAGE = 50;
+  var BUCKETS = 50;
+  var BUCKET_S = 2;
+  function deriveStats(rows) {
+    var _a, _b;
+    let cost = null;
+    let tokens = null;
+    let errors = 0;
+    let spans = 0;
+    let spansKnown = true;
+    const byKind = {};
+    for (const t of rows) {
+      if (t.cost != null) cost = (cost || 0) + t.cost;
+      if (t.tokens != null) tokens = (tokens || 0) + t.tokens;
+      if (((_a = t.subagents) == null ? void 0 : _a.cost) != null) cost = (cost || 0) + t.subagents.cost;
+      if (((_b = t.subagents) == null ? void 0 : _b.tokens) != null) tokens = (tokens || 0) + t.subagents.tokens;
+      if (t.error) errors++;
+      if (t.spanCount == null) spansKnown = false;
+      else spans += t.spanCount;
+      byKind[t.rootKind] = (byKind[t.rootKind] || 0) + 1;
+    }
+    return { cost, tokens, errors, turns: rows.length, spans: spansKnown ? spans : null, byKind };
+  }
+  function activityBuckets(rows, now = Date.now()) {
+    const buckets = new Array(BUCKETS).fill(0);
+    for (const t of rows) {
+      const endMs = (t.endNs || t.startNs) / 1e6;
+      const idx = BUCKETS - 1 - Math.floor((now - endMs) / (BUCKET_S * 1e3));
+      if (idx >= 0 && idx < BUCKETS) buckets[idx] += t.spanCount || 1;
+    }
+    return buckets;
+  }
+  function LivePage() {
+    const active = useActive();
+    const [rows, setRows] = useState([]);
+    const [status, setStatus] = useState(null);
+    const [error, setError] = useState(null);
+    const [paused, setPaused] = useState(false);
+    const [selected, setSelected] = useState(null);
+    const [detailSpans, setDetailSpans] = useState(null);
+    const [showPings, setShowPings] = useState(false);
+    const [loaded, setLoaded] = useState(false);
+    const inflight = useRef(false);
+    const poll = useCallback(async () => {
+      if (inflight.current) return;
+      inflight.current = true;
+      try {
+        const st = await api("/live/status");
+        setStatus(st);
+        if (!st || st.live === false) return;
+        const r = await api("/live/traces", { lookback_hours: WINDOW_H, limit: PAGE });
+        setRows((r.traces || []).map(rowFromLive));
+        setError(null);
+      } catch (e) {
+        setError(e);
+      } finally {
+        inflight.current = false;
+        setLoaded(true);
+      }
+    }, []);
+    useEffect(() => {
+      poll();
+    }, [poll]);
+    usePolling(poll, POLL_MS2, active && !paused && !selected);
+    const loadDetail = useCallback(async (id) => api(`/live/traces/${encodeURIComponent(id)}`), []);
+    useEffect(() => {
+      if (!selected) return;
+      setDetailSpans(null);
+      loadDetail(selected.traceId).then((r) => {
+        setDetailSpans(r.spans || []);
+        if (r.trace) setSelected((s) => s && s.traceId === selected.traceId ? { ...s, ...r.trace } : s);
+      }).catch(() => setDetailSpans([]));
+    }, [selected == null ? void 0 : selected.traceId, loadDetail]);
+    const refreshDetail = useCallback(() => {
+      if (!selected) return;
+      loadDetail(selected.traceId).then((r) => setDetailSpans(r.spans || [])).catch(() => void 0);
+    }, [selected == null ? void 0 : selected.traceId, loadDetail]);
+    usePolling(refreshDetail, POLL_MS2, active && !!selected && (!!selected.partial || detailSpans != null && !findRoot(detailSpans)));
+    useEffect(() => {
+      const t = readNav().trace;
+      if (!t || readNav().tab !== "live") return;
+      loadDetail(t).then((r) => {
+        if (r.trace) setSelected({ ...r.trace, spans: r.spans });
+      }).catch(() => void 0);
+    }, [loadDetail]);
+    useEffect(() => {
+      if (!active) return;
+      writeNav({ trace: selected ? String(selected.traceId) : "" });
+    }, [selected, active]);
+    const allRows = rows;
+    const shown = showPings ? allRows : allRows.filter((t) => !isMcpKeepalivePing(t.rootName, t.error));
+    const hiddenPings = allRows.length - shown.length;
+    const stats = deriveStats(shown);
+    const buckets = activityBuckets(shown);
+    const lastSession = shown.length ? shown[0].session : null;
+    if (status && status.live === false) {
+      return /* @__PURE__ */ React.createElement(Empty, { title: "Live store unavailable" }, status.reason || "Set dashboard_live: true in the plugin config (it's on by default), then run a turn.", status.path ? /* @__PURE__ */ React.createElement("div", { className: "mt-1 font-mono text-xs" }, status.path) : null);
+    }
+    if (selected) {
+      const spans = detailSpans || [];
+      const { roots } = liveTreeFromSpans(spans);
+      return /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement(LiveTraceDetail, { trace: { ...selected, spans }, roots, loading: detailSpans === null, onBack: () => setSelected(null) }));
+    }
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2.5" }, /* @__PURE__ */ React.createElement(Pulse, { active: !paused && ((status == null ? void 0 : status.spans) || 0) > 0 }), /* @__PURE__ */ React.createElement("span", { className: "text-base font-semibold tracking-tight" }, "Live agent activity"), /* @__PURE__ */ React.createElement("span", { className: "text-xs text-muted-foreground" }, fmtInt(status == null ? void 0 : status.spans), " spans buffered", lastSession ? /* @__PURE__ */ React.createElement(React.Fragment, null, " ", "\xB7 session ", /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, String(lastSession).slice(0, 12))) : null)), /* @__PURE__ */ React.createElement(Button, { variant: "outline", size: "sm", onClick: () => setPaused((p) => !p), title: paused ? "resume following" : "stop following" }, paused ? /* @__PURE__ */ React.createElement(IconPlay, { size: 12 }) : /* @__PURE__ */ React.createElement(IconPause, { size: 12 }), /* @__PURE__ */ React.createElement("span", { className: "ml-1" }, paused ? "Resume" : "Pause"))), error ? /* @__PURE__ */ React.createElement(ErrorBanner, { error }) : null, (status == null ? void 0 : status.write_error) ? /* @__PURE__ */ React.createElement(ErrorBanner, { error: `0: ${status.write_error}`, prefix: "Live store write failed" }) : null, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement(MiniLabel, null, "last ", WINDOW_H, "h \xB7 up to ", PAGE, " newest turns")), /* @__PURE__ */ React.createElement("div", { className: "otel-kpi-grid" }, /* @__PURE__ */ React.createElement(Stat, { label: "Cost", value: stats.cost != null ? fmtCost(stats.cost) : null, accent: "cost", unknownText: "no pricing data" }), /* @__PURE__ */ React.createElement(Stat, { label: "Tokens", value: stats.tokens != null ? fmtInt(stats.tokens) : null, unknownText: "not recorded" }), /* @__PURE__ */ React.createElement(Stat, { label: "Turns", value: fmtInt(stats.turns) }), /* @__PURE__ */ React.createElement(Stat, { label: "Spans", value: stats.spans != null ? fmtInt(stats.spans) : null, unknownText: "unknown" }), /* @__PURE__ */ React.createElement(Stat, { label: "Errors", value: fmtInt(stats.errors), accent: stats.errors ? "error" : void 0 })), /* @__PURE__ */ React.createElement("div", { className: "otel-card-bg flex items-center gap-4 border border-border px-3 py-2" }, /* @__PURE__ */ React.createElement(MiniLabel, null, "activity \xB7 spans per ", BUCKET_S, " s \xB7 last ", BUCKETS * BUCKET_S, " s"), /* @__PURE__ */ React.createElement("div", { className: "otel-w-44" }, /* @__PURE__ */ React.createElement(Sparkline, { values: buckets, label: `spans finished per ${BUCKET_S} seconds over the last ${BUCKETS * BUCKET_S} seconds` })), /* @__PURE__ */ React.createElement("div", { className: "ml-auto flex flex-wrap gap-3" }, Object.keys(stats.byKind).sort((a, b) => (stats.byKind[b] || 0) - (stats.byKind[a] || 0)).slice(0, 7).map((k) => /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        key: k,
+        className: "inline-flex items-center gap-1.5 text-[11px] text-muted-foreground",
+        title: `${stats.byKind[k]} turn${stats.byKind[k] === 1 ? "" : "s"} rooted in a ${k} span`
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "otel-w-2 inline-block h-2 rounded-full", style: { background: KIND_COLOR[k] }, "aria-hidden": true }),
+      k,
+      " ",
+      stats.byKind[k]
+    )))), /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between pt-1" }, /* @__PURE__ */ React.createElement(MiniLabel, null, "recent turns"), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3 text-[11px] text-muted-foreground" }, /* @__PURE__ */ React.createElement(
+      Toggle,
+      {
+        checked: showPings,
+        onChange: setShowPings,
+        label: `show MCP keepalive pings${hiddenPings ? ` (${hiddenPings} hidden)` : ""}`,
+        Switch: Checkbox
+      }
+    ), /* @__PURE__ */ React.createElement("span", null, "open a turn to see its span waterfall"))), /* @__PURE__ */ React.createElement("div", { className: "flex flex-col gap-2" }, shown.length === 0 && loaded ? /* @__PURE__ */ React.createElement(Empty, { title: "Waiting for activity\u2026" }, "Run a Hermes turn (CLI, Telegram, anything). Each turn appears here as a card \u2014 open it to see every span, timing and attribute. No backend required.") : shown.map((t) => /* @__PURE__ */ React.createElement(TraceCard, { key: t.traceId, row: t, onSelect: (r) => setSelected(r.raw) }))));
+  }
+
+  // src/filters.tsx
+  var SUPPORT_NOTE = {
+    client: "applied after the backend answers: a page can come back short",
+    none: "this source ignores this field"
+  };
+  function Field({
+    label,
+    children,
+    className,
+    support
+  }) {
+    const note = support && SUPPORT_NOTE[support];
+    const off = support === "none";
+    return /* @__PURE__ */ React.createElement("div", { className: cn("space-y-1", off ? "otel-field-off" : "", className), title: note || void 0 }, /* @__PURE__ */ React.createElement(Label, { className: "text-[10px] uppercase tracking-wide text-muted-foreground" }, label, support === "client" ? /* @__PURE__ */ React.createElement("span", { className: "otel-field-note" }, " \xB7 after fetch") : support === "none" ? /* @__PURE__ */ React.createElement("span", { className: "otel-field-note" }, " \xB7 ignored") : null), children);
+  }
+  function FilterBar({
+    filters,
+    onChange,
+    onSubmit,
+    backend,
+    status,
+    busy,
+    support,
+    hide
+  }) {
+    const set = (k, v) => onChange({ ...filters, [k]: v });
+    const sup = (k) => fieldSupport(support, k);
+    const show = (k) => !hide || !hide.includes(k);
+    const input = (k, placeholder, type = "text") => {
+      var _a;
+      return /* @__PURE__ */ React.createElement(
+        Input,
+        {
+          className: "h-8",
+          type,
+          placeholder,
+          value: String((_a = filters[k]) != null ? _a : ""),
+          onChange: (e) => set(k, e.target.value),
+          "aria-label": String(k),
+          min: type === "number" ? 0 : void 0
+        }
+      );
+    };
+    const lang = (status == null ? void 0 : status.query_lang_label) || "";
+    const rawLabel = !lang ? "native query" : /filter$/i.test(lang.trim()) ? lang : `${lang} query`;
+    return /* @__PURE__ */ React.createElement(
+      "form",
+      {
+        className: "space-y-2",
+        onSubmit: (e) => {
+          e.preventDefault();
+          onSubmit();
+        }
+      },
+      /* @__PURE__ */ React.createElement("div", { className: "otel-search-grid" }, show("status") ? /* @__PURE__ */ React.createElement(Field, { label: "status", support: sup("status") }, /* @__PURE__ */ React.createElement(Select, { value: filters.status, onValueChange: (v) => set("status", v), className: "h-8", "aria-label": "status" }, /* @__PURE__ */ React.createElement(SelectOption, { value: "" }, "any"), /* @__PURE__ */ React.createElement(SelectOption, { value: "ok" }, "ok"), /* @__PURE__ */ React.createElement(SelectOption, { value: "error" }, "error"))) : null, show("kind") ? /* @__PURE__ */ React.createElement(Field, { label: "kind", support: sup("kind") }, /* @__PURE__ */ React.createElement(Select, { value: filters.kind, onValueChange: (v) => set("kind", v), className: "h-8", "aria-label": "kind" }, /* @__PURE__ */ React.createElement(SelectOption, { value: "" }, "any"), KINDS.map((k) => /* @__PURE__ */ React.createElement(SelectOption, { key: k, value: k }, k)))) : null, show("tool") ? /* @__PURE__ */ React.createElement(Field, { label: "tool", support: sup("tool") }, input("tool", "terminal")) : null, show("model") ? /* @__PURE__ */ React.createElement(Field, { label: "model", support: sup("model") }, input("model", backend ? "exact model name" : "substring")) : null, show("session") ? /* @__PURE__ */ React.createElement(Field, { label: "session id", support: sup("session") }, input("session", "20260920_0814\u2026")) : null, show("minDurationMs") ? /* @__PURE__ */ React.createElement(Field, { label: "min duration (ms)", support: sup("minDurationMs") }, input("minDurationMs", "0", "number")) : null, show("text") ? /* @__PURE__ */ React.createElement(Field, { label: "text", support: sup("text") }, input("text", backend ? "in the prompt" : "anywhere in attributes")) : null, show("traceId") ? /* @__PURE__ */ React.createElement(Field, { label: "trace id", support: sup("traceId") }, input("traceId", "trace id")) : null, /* @__PURE__ */ React.createElement(Field, { label: "lookback" }, /* @__PURE__ */ React.createElement(Select, { value: String(filters.lookback), onValueChange: (v) => set("lookback", Number(v)), className: "h-8", "aria-label": "lookback" }, LOOKBACKS.map((l) => /* @__PURE__ */ React.createElement(SelectOption, { key: l.hours, value: String(l.hours) }, l.label))))),
+      backend && (show("q") || show("service")) ? /* @__PURE__ */ React.createElement("div", { className: "otel-search-grid" }, show("q") ? /* @__PURE__ */ React.createElement(Field, { label: rawLabel, className: "otel-span-2", support: sup("q") }, input("q", (status == null ? void 0 : status.raw_placeholder) || "")) : null, show("service") ? /* @__PURE__ */ React.createElement(Field, { label: "service", support: sup("service") }, input("service", "any")) : null, show("rootsOnly") ? /* @__PURE__ */ React.createElement(
+        "label",
+        {
+          className: "otel-self-end inline-flex cursor-pointer items-center gap-1.5 pb-2 text-xs text-muted-foreground",
+          title: sup("rootsOnly") === "client" ? SUPPORT_NOTE.client : "list whole turns, not every matching span"
+        },
+        /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: filters.rootsOnly, onChange: (e) => set("rootsOnly", e.target.checked) }),
+        "roots only",
+        sup("rootsOnly") === "client" ? " \xB7 after fetch" : ""
+      ) : null) : null,
+      /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement(Button, { type: "submit", size: "sm", disabled: !!busy }, busy ? "Searching\u2026" : "Search"), /* @__PURE__ */ React.createElement(
+        Button,
+        {
+          type: "button",
+          variant: "outline",
+          size: "sm",
+          title: "clear every field; keeps the lookback and roots-only",
+          onClick: () => onChange({ ...DEFAULT_FILTERS, lookback: filters.lookback, rootsOnly: filters.rootsOnly })
+        },
+        "Clear"
+      ))
+    );
+  }
+
+  // src/sessions.tsx
+  var POLL_MS3 = 1e4;
+  var PAGE2 = 50;
+  function SessionCard({ row, open, onToggle, children, partial }) {
+    const lookback = Math.max(1, Math.ceil((Date.now() - row.startNs / 1e6) / 36e5) + 1);
+    return /* @__PURE__ */ React.createElement("div", { className: row.errors ? "otel-card-bg border border-destructive/30" : "otel-card-bg border border-border" }, /* @__PURE__ */ React.createElement(
+      Clickable,
+      {
+        onActivate: onToggle,
+        toggle: true,
+        open,
+        label: `${open ? "collapse" : "expand"} session ${row.session}`,
+        className: "otel-row flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2"
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "font-mono text-sm", title: row.session }, row.session),
+      row.platform ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "text-[10px]" }, row.platform) : null,
+      row.errors ? /* @__PURE__ */ React.createElement(Badge, { variant: "destructive", className: "text-[10px]" }, row.errors, " error", row.errors === 1 ? "" : "s") : null,
+      partial ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "text-[10px]", title: "grouped from the traces on this page of results, not the whole session" }, "this page only") : null,
+      /* @__PURE__ */ React.createElement("span", { className: "ml-auto flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground" }, row.model ? /* @__PURE__ */ React.createElement("span", { className: "font-mono text-foreground/80" }, row.model) : null, /* @__PURE__ */ React.createElement("span", { className: "tabular-nums" }, row.turns, " turn", row.turns === 1 ? "" : "s"), row.spans != null ? /* @__PURE__ */ React.createElement("span", { className: "tabular-nums" }, row.spans, " spans") : null, row.toolCalls != null ? /* @__PURE__ */ React.createElement("span", { className: "tabular-nums" }, row.toolCalls, " tool call", row.toolCalls === 1 ? "" : "s") : null, row.tokens != null ? /* @__PURE__ */ React.createElement("span", { className: "tabular-nums" }, fmtTokens(row.tokens), " tok") : null, row.subagentTokens ? /* @__PURE__ */ React.createElement("span", { className: "tabular-nums", title: "tokens of the turns' top-level delegations, on top of the turns' own" }, "+", fmtTokens(row.subagentTokens), " sub-agents") : null, row.cost != null ? /* @__PURE__ */ React.createElement("span", { className: "tabular-nums otel-c-cost" }, fmtCostExact(row.cost)) : null, /* @__PURE__ */ React.createElement("span", { className: "tabular-nums", title: "wall time from the first turn's start to the last turn's end" }, fmtDurationMs((row.endNs - row.startNs) / 1e6), " wall"), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "otel-link text-[11px]",
+          title: "this session's log lines and events",
+          onClick: (e) => {
+            e.stopPropagation();
+            navigate({ tab: "logs", session: row.session, trace: "", lookback: String(Math.min(720, lookback)) });
+          }
+        },
+        "logs"
+      ), /* @__PURE__ */ React.createElement("span", { title: `${fmtAbsTime(row.startNs)} \u2192 ${fmtAbsTime(row.endNs)}` }, fmtTimeAgo(row.endNs)))
+    ), open ? /* @__PURE__ */ React.createElement("div", { className: "border-t border-border/60 px-3 py-2" }, children) : null);
+  }
+  function LiveSessions({
+    filters,
+    wantedSession,
+    onSelectTrace,
+    active
+  }) {
+    const [rows, setRows] = useState([]);
+    const [hasMore, setHasMore] = useState(false);
+    const [limit, setLimit] = useState(PAGE2);
+    const [error, setError] = useState(null);
+    const [open, setOpen] = useState(wantedSession || null);
+    const [turns, setTurns] = useState({});
+    const [loaded, setLoaded] = useState(false);
+    const load = useCallback(async () => {
+      try {
+        const r = await api("/live/sessions", { lookback_hours: filters.lookback, limit });
+        setRows(r.sessions || []);
+        setHasMore(!!r.has_more);
+        setError(null);
+      } catch (e) {
+        setError(e);
+      } finally {
+        setLoaded(true);
+      }
+    }, [filters.lookback, limit]);
+    useEffect(() => {
+      load();
+    }, [load]);
+    usePolling(load, POLL_MS3, active);
+    const loadTurns = useCallback(
+      async (sid) => {
+        const p = liveParams({ ...filters, session: sid }, 200);
+        try {
+          const r = await api("/live/traces", p);
+          setTurns((prev) => ({ ...prev, [sid]: r.traces || [] }));
+        } catch {
+          setTurns((prev) => ({ ...prev, [sid]: [] }));
+        }
+      },
+      [filters]
+    );
+    useEffect(() => {
+      if (open) loadTurns(open);
+    }, [open, loadTurns, rows]);
+    const toggle = (sid) => setOpen((o) => o === sid ? null : sid);
+    if (error) return /* @__PURE__ */ React.createElement(ErrorBanner, { error, prefix: "Sessions" });
+    const shown = wantedSession ? rows.filter((r) => r.session === wantedSession) : rows;
+    if (loaded && !shown.length)
+      return /* @__PURE__ */ React.createElement(
+        Empty,
+        {
+          title: wantedSession ? `Session ${wantedSession} is not in the last ${lookbackLabel(filters.lookback)}` : `No sessions in the last ${lookbackLabel(filters.lookback)}`
+        },
+        "Turns carry ",
+        /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, "hermes.session_id"),
+        "; sessions group them.",
+        wantedSession ? /* @__PURE__ */ React.createElement("div", { className: "mt-2" }, /* @__PURE__ */ React.createElement(Button, { variant: "outline", size: "sm", onClick: () => navigate({ tab: "traces", view: "sessions", session: "", trace: "" }) }, "show every session")) : null
+      );
+    return /* @__PURE__ */ React.createElement("div", { className: "flex flex-col gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-xs text-muted-foreground" }, wantedSession ? /* @__PURE__ */ React.createElement(React.Fragment, null, "one session \xB7", " ", /* @__PURE__ */ React.createElement("button", { type: "button", className: "otel-link", onClick: () => navigate({ tab: "traces", view: "sessions", session: "", trace: "" }) }, "show every session")) : `${rows.length} session${rows.length === 1 ? "" : "s"} \xB7 click one to see its turns in order`), shown.map((row) => /* @__PURE__ */ React.createElement(SessionCard, { key: row.session, row, open: open === row.session, onToggle: () => toggle(row.session) }, turns[row.session] ? turns[row.session].length ? /* @__PURE__ */ React.createElement("div", { className: "flex flex-col gap-1.5" }, turns[row.session].slice().sort((a, b) => a.startNs - b.startNs).map((t) => /* @__PURE__ */ React.createElement(TraceCard, { key: t.traceId, row: { ...rowFromLive(t) }, onSelect: () => onSelectTrace(t) })), turns[row.session].length >= 200 ? /* @__PURE__ */ React.createElement("div", { className: "text-xs text-muted-foreground" }, "Showing the first 200 turns of this session.") : null) : /* @__PURE__ */ React.createElement("div", { className: "text-xs text-muted-foreground" }, "No turns in this window.") : /* @__PURE__ */ React.createElement("div", { className: "text-xs text-muted-foreground" }, "Loading\u2026"))), hasMore && !wantedSession ? /* @__PURE__ */ React.createElement("div", { className: "flex justify-center" }, /* @__PURE__ */ React.createElement(Button, { variant: "outline", size: "sm", onClick: () => setLimit((n) => n + PAGE2) }, "Show more sessions")) : null);
+  }
+  function BackendSessions({ rows, wantedSession, renderTrace }) {
+    const [open, setOpen] = useState(wantedSession || null);
+    const grouped = groupBySession(rows.map((r) => r.raw));
+    const unattributed = rows.length - grouped.reduce((n, r) => n + r.turns, 0);
+    if (!rows.length) return null;
+    if (!grouped.length)
+      return /* @__PURE__ */ React.createElement("div", { className: "border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground" }, "None of the ", rows.length, " results carries a session id, so they cannot be grouped. The Turns view lists them.");
+    const byId = {};
+    for (const t of rows) byId[t.traceId] = t;
+    const shown = wantedSession ? grouped.filter((r) => r.session === wantedSession) : grouped;
+    return /* @__PURE__ */ React.createElement("div", { className: "flex flex-col gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-xs text-muted-foreground" }, shown.length, " session", shown.length === 1 ? "" : "s", " grouped from the ", rows.length, " results on this page", unattributed ? ` \xB7 ${unattributed} without a session id` : "", wantedSession ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("button", { type: "button", className: "otel-link", onClick: () => navigate({ tab: "traces", view: "sessions", session: "", trace: "" }) }, "show every session")) : null), shown.map((row) => /* @__PURE__ */ React.createElement(SessionCard, { key: row.session, row, open: open === row.session, partial: true, onToggle: () => setOpen(open === row.session ? null : row.session) }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col gap-1.5" }, row.traceIds.map((id) => byId[id]).filter(Boolean).sort((a, b) => a.startNs - b.startNs).map((t) => renderTrace(t))))));
+  }
+
+  // src/traces.tsx
+  var POLL_MS4 = 3e3;
+  var PAGE3 = 50;
+  var VIEW_KEY = "hermes_otel.tracesView";
+  function readView() {
+    try {
+      return localStorage.getItem(VIEW_KEY) === "sessions" ? "sessions" : "turns";
+    } catch {
+      return "turns";
+    }
+  }
+  var EMPTY_PAGE = { rows: [], total: null, hasMore: false, nextBefore: null, ignored: [] };
+  function useTracePaging(initialNav) {
+    const [filters, setFilters] = useState(() => traceFiltersFromNav(initialNav));
+    const [applied, setApplied] = useState(() => traceFiltersFromNav(initialNav));
+    const [cursors, setCursors] = useState(() => cursorsFromNav(initialNav.before));
+    const before = cursors.length ? cursors[cursors.length - 1] : null;
+    useEffect(() => {
+      writeNav({ ...navFromTraceFilters(applied), before: navFromCursors(cursors) });
+    }, [applied, cursors]);
+    const submit = () => {
+      setApplied(filters);
+      setCursors([]);
+    };
+    const older = (next) => {
+      if (next) setCursors((c) => [...c, next]);
+    };
+    const newer = () => setCursors((c) => c.slice(0, -1));
+    const newest = () => setCursors([]);
+    return { filters, setFilters, applied, submit, cursors, before, older, newer, newest, page: cursors.length + 1 };
+  }
+  function LiveTraces({ view, wanted, active }) {
+    const paging = useTracePaging(wanted);
+    const { applied, before } = paging;
+    const [page, setPage] = useState(EMPTY_PAGE);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [selected, setSelected] = useState(null);
+    const [detailSpans, setDetailSpans] = useState(null);
+    const [showPings, setShowPings] = useState(false);
+    const [paused, setPaused] = useState(false);
+    const inflight = useRef(false);
+    const load = useCallback(async () => {
+      if (inflight.current) return;
+      inflight.current = true;
+      try {
+        const r = await api("/live/traces", liveParams(applied, PAGE3, before));
+        const rows = (r.traces || []).map(rowFromLive);
+        setPage({
+          rows,
+          total: typeof r.total === "number" ? r.total : null,
+          hasMore: !!r.has_more,
+          nextBefore: r.next_before_ns != null ? String(r.next_before_ns) : rows.length === PAGE3 ? String(rows[rows.length - 1].startNs) : null,
+          ignored: []
+        });
+        setError(null);
+      } catch (e) {
+        setError(e);
+      } finally {
+        inflight.current = false;
+        setLoading(false);
+      }
+    }, [applied, before]);
+    useEffect(() => {
+      setLoading(true);
+      load();
+    }, [load]);
+    usePolling(load, POLL_MS4, active && !paused && !selected && view === "turns" && !before);
+    const loadDetail = useCallback(async (id) => {
+      const r = await api(`/live/traces/${encodeURIComponent(id)}`);
+      return r;
+    }, []);
+    useEffect(() => {
+      if (!selected) return;
+      setDetailSpans(null);
+      loadDetail(selected.traceId).then((r) => {
+        setDetailSpans(r.spans || []);
+        if (r.trace) setSelected((s) => s && s.traceId === selected.traceId ? { ...s, ...r.trace } : s);
+      }).catch(() => setDetailSpans([]));
+    }, [selected == null ? void 0 : selected.traceId, loadDetail]);
+    const refreshDetail = useCallback(() => {
+      if (!selected) return;
+      loadDetail(selected.traceId).then((r) => setDetailSpans(r.spans || [])).catch(() => void 0);
+    }, [selected == null ? void 0 : selected.traceId, loadDetail]);
+    usePolling(refreshDetail, POLL_MS4, active && !!selected && (!!selected.partial || detailSpans != null && !findRoot(detailSpans)));
+    useEffect(() => {
+      if (!wanted.trace) return;
+      loadDetail(wanted.trace).then((r) => {
+        if (r.trace) setSelected({ ...r.trace, spans: r.spans });
+      }).catch((e) => setError(e));
+    }, [wanted.trace, loadDetail]);
+    useEffect(() => {
+      if (selected) writeNav({ trace: String(selected.traceId) });
+      else if (!wanted.trace) writeNav({ trace: "" });
+    }, [selected, wanted.trace]);
+    if (selected) {
+      const spans = detailSpans || [];
+      const { roots } = liveTreeFromSpans(spans);
+      const trace = { ...selected, spans };
+      return /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement(
+        LiveTraceDetail,
+        {
+          trace,
+          roots,
+          loading: detailSpans === null,
+          onBack: () => {
+            setSelected(null);
+            writeNav({ trace: "" });
+          }
+        }
+      ));
+    }
+    const pingCount = page.rows.filter((t) => isMcpKeepalivePing(t.rootName, t.error)).length;
+    const shown = showPings ? page.rows : page.rows.filter((t) => !isMcpKeepalivePing(t.rootName, t.error));
+    const oldest = shown.length ? shown[shown.length - 1] : null;
+    const newestRow = shown.length ? shown[0] : null;
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement(Card, null, /* @__PURE__ */ React.createElement(CardContent, { className: "space-y-3 pt-4" }, /* @__PURE__ */ React.createElement(
+      FilterBar,
+      {
+        filters: paging.filters,
+        onChange: paging.setFilters,
+        onSubmit: paging.submit,
+        backend: false,
+        busy: loading,
+        support: null,
+        hide: view === "sessions" ? ["status", "kind", "tool", "model", "minDurationMs", "text", "traceId", "q", "service", "rootsOnly"] : void 0
+      }
+    ))), error ? /* @__PURE__ */ React.createElement(ErrorBanner, { error }) : null, view === "sessions" ? /* @__PURE__ */ React.createElement(LiveSessions, { filters: applied, wantedSession: wanted.session || "", onSelectTrace: setSelected, active }) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-3 text-xs text-muted-foreground" }, /* @__PURE__ */ React.createElement("span", null, shown.length, page.total != null ? ` of ${page.total}` : "", " trace", page.total === 1 ? "" : "s", isDefaultFilters({ ...applied, lookback: DEFAULT_FILTERS.lookback }) ? "" : " matching", " in the last ", lookbackLabel(applied.lookback), before ? " \xB7 older page, not following" : paused ? " \xB7 paused" : " \xB7 following"), /* @__PURE__ */ React.createElement(Toggle, { checked: showPings, onChange: setShowPings, label: `show MCP keepalive pings${pingCount ? ` (${pingCount})` : ""}`, Switch: Checkbox }), /* @__PURE__ */ React.createElement(
+      Button,
+      {
+        variant: "outline",
+        size: "sm",
+        className: "ml-auto",
+        onClick: () => setPaused((p) => !p),
+        disabled: !!before,
+        title: before ? "an older page does not follow" : paused ? "resume following new turns" : "stop following new turns"
+      },
+      paused ? /* @__PURE__ */ React.createElement(IconPlay, { size: 12 }) : /* @__PURE__ */ React.createElement(IconPause, { size: 12 }),
+      /* @__PURE__ */ React.createElement("span", { className: "ml-1" }, paused ? "Resume" : "Pause")
+    )), shown.length === 0 && !loading ? /* @__PURE__ */ React.createElement(Empty, { title: page.total ? "Nothing matched" : before ? "No older traces" : "No traces yet" }, page.total ? "Widen the lookback or clear a filter." : before ? /* @__PURE__ */ React.createElement(Button, { variant: "outline", size: "sm", onClick: paging.newer }, "\u2190 Back to the newer page") : "Run a Hermes turn \u2014 each turn appears here as a trace you can open into a span waterfall. No backend needed.") : /* @__PURE__ */ React.createElement("div", { className: "flex flex-col gap-2" }, shown.map((t) => /* @__PURE__ */ React.createElement(TraceCard, { key: t.traceId, row: t, onSelect: (r) => setSelected(r.raw) }))), shown.length || before ? /* @__PURE__ */ React.createElement(
+      Pager,
+      {
+        page: paging.page,
+        hasMore: page.hasMore,
+        onNewest: paging.newest,
+        onNewer: paging.newer,
+        onOlder: () => paging.older(page.nextBefore),
+        range: oldest && newestRow ? `${new Date(oldest.startNs / 1e6).toLocaleTimeString()} \u2192 ${new Date(newestRow.startNs / 1e6).toLocaleTimeString()}` : ""
+      }
+    ) : null));
+  }
+  function StatusBar({ status, onRefresh }) {
+    if (!status) return null;
+    const configured = status.configured;
+    const entry = (status.available || []).find((b) => b.name === status.active) || null;
+    const caps = [configured ? "traces" : null, (entry == null ? void 0 : entry.metrics) || status.metrics ? "metrics" : null, (entry == null ? void 0 : entry.logs) || status.logs ? "logs" : null].filter(Boolean);
+    return /* @__PURE__ */ React.createElement("div", { className: "flex items-start justify-between gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "min-w-0 flex-1 space-y-1.5" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: cn("h-2.5 w-2.5 rounded-full", configured ? "otel-pulse-dot" : "bg-muted-foreground/40"), "aria-hidden": true }), /* @__PURE__ */ React.createElement("span", { className: "text-base font-semibold tracking-tight" }, configured ? status.name || status.type : "Not configured"), configured && status.type && status.type !== status.name ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "text-[10px] uppercase" }, status.type) : null, caps.map((c) => /* @__PURE__ */ React.createElement(Badge, { key: c, variant: "secondary", className: "text-[10px]" }, c)), status.query_backend_pin && status.query_backend_pin === status.active ? /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-muted-foreground" }, "default (query_backend)") : null, status.default_service ? /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-muted-foreground", title: "service the adapter searches when the service field is empty" }, "service ", status.default_service) : null), configured && status.query_url ? /* @__PURE__ */ React.createElement("div", { className: "truncate font-mono text-xs text-muted-foreground" }, status.query_url) : null), /* @__PURE__ */ React.createElement(Button, { variant: "outline", size: "sm", onClick: onRefresh }, "Refresh"));
+  }
+  function BackendTraceDetail({
+    row,
+    detail,
+    loading,
+    error,
+    onBack,
+    source,
+    status
+  }) {
+    var _a;
+    const tree = useMemo(() => detail ? buildSpanTree(detail.batches || detail.trace && detail.trace.batches) : { roots: [], all: [] }, [detail]);
+    const rootSpan = tree.roots[0] || null;
+    const rootAttrs = rootSpan ? rootSpan._attrs : traceAttrs(row.raw);
+    const durationMs = rootSpan ? rootSpan.durationMs : row.durationMs;
+    const isError = tree.all.some((s) => {
+      var _a2, _b, _c;
+      return ((_c = (_a2 = s.status) == null ? void 0 : _a2.code) != null ? _c : (_b = s.status) == null ? void 0 : _b.statusCode) === 2;
+    }) || row.error;
+    const startNs = tree.all.length ? Math.min(...tree.all.map((s) => s.startNs)) : row.startNs;
+    const endNs = tree.all.length ? Math.max(...tree.all.map((s) => s.endNs)) : row.endNs;
+    return /* @__PURE__ */ React.createElement(Card, null, /* @__PURE__ */ React.createElement(CardHeader, { className: "otel-space-y-0" }, /* @__PURE__ */ React.createElement(
+      TraceHeader,
+      {
+        title: (rootSpan == null ? void 0 : rootSpan.name) || row.rootName || "\u2014",
+        traceId: row.traceId,
+        service: row.service,
+        durationMs,
+        rootAttrs,
+        spans: tree.all.map((s) => ({ name: s.name, attributes: s._attrs })),
+        error: isError,
+        truncated: !!(detail == null ? void 0 : detail.truncated),
+        spanCount: (_a = detail == null ? void 0 : detail.span_count) != null ? _a : row.spanCount,
+        uiUrl: (detail == null ? void 0 : detail.ui_url) || null,
+        uiLabel: (status == null ? void 0 : status.name) || (status == null ? void 0 : status.type) || null,
+        source,
+        onBack
+      }
+    )), /* @__PURE__ */ React.createElement(CardContent, null, loading ? /* @__PURE__ */ React.createElement("div", { className: "py-8 text-center text-sm text-muted-foreground" }, "Loading trace\u2026") : null, error ? /* @__PURE__ */ React.createElement(ErrorBanner, { error, prefix: "Trace" }) : null, !loading && !error ? /* @__PURE__ */ React.createElement(
+      TraceTabs,
+      {
+        traceId: row.traceId,
+        source,
+        logsAvailable: !!(status == null ? void 0 : status.logs),
+        spans: /* @__PURE__ */ React.createElement(SpanTreeView, { roots: tree.roots, source }),
+        raw: detail,
+        windowNs: [startNs, endNs]
+      }
+    ) : null));
+  }
+  function BackendTraces({
+    status,
+    onRefresh,
+    source,
+    view,
+    wanted,
+    support,
+    active
+  }) {
+    const paging = useTracePaging(wanted);
+    const { applied, before } = paging;
+    const [page, setPage] = useState(null);
+    const [showPings, setShowPings] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+    const [selected, setSelected] = useState(null);
+    const [detail, setDetail] = useState(null);
+    const [detailLoading, setDetailLoading] = useState(false);
+    const [detailError, setDetailError] = useState(null);
+    const inflight = useRef(false);
+    const byId = (id) => ({
+      traceId: id,
+      rootName: "(by id)",
+      rootKind: "other",
+      service: null,
+      startNs: 0,
+      endNs: 0,
+      durationMs: 0,
+      spanCount: null,
+      model: null,
+      tokens: null,
+      cost: null,
+      error: false,
+      session: null,
+      partial: false,
+      toolName: null,
+      inPreview: null,
+      outPreview: null,
+      raw: { traceID: id },
+      subagents: null
+    });
+    const search = useCallback(async () => {
+      if (!(status == null ? void 0 : status.configured) || inflight.current) return;
+      const id = applied.traceId.trim();
+      if (id) {
+        setSelected(byId(id));
+        return;
+      }
+      inflight.current = true;
+      setLoading(true);
+      setError(null);
+      try {
+        const r = await api("/traces/search", backendParams(applied, source, PAGE3, before));
+        const rows2 = (r.traces || []).map(rowFromBackend);
+        setPage({
+          rows: rows2,
+          total: null,
+          hasMore: !!r.has_more,
+          nextBefore: r.next_before_ns != null ? String(r.next_before_ns) : null,
+          ignored: r.ignored_filters || []
+        });
+      } catch (e) {
+        setError(e);
+        setPage(EMPTY_PAGE);
+      } finally {
+        inflight.current = false;
+        setLoading(false);
+      }
+    }, [applied, before, status == null ? void 0 : status.configured, source]);
+    useEffect(() => {
+      setSelected(null);
+      search();
+    }, [search]);
+    usePolling(search, POLL_MS4 * 5, active && view === "turns" && !selected && !before && !!(status == null ? void 0 : status.configured));
+    useEffect(() => {
+      if (wanted.trace && (status == null ? void 0 : status.configured)) setSelected(byId(wanted.trace));
+    }, [wanted.trace, status == null ? void 0 : status.configured]);
+    useEffect(() => {
+      if (selected) writeNav({ trace: selected.traceId });
+      else if (!wanted.trace) writeNav({ trace: "" });
+    }, [selected, wanted.trace]);
+    useEffect(() => {
+      if (!selected) return;
+      setDetail(null);
+      setDetailError(null);
+      setDetailLoading(true);
+      const p = withBackend(new URLSearchParams(), source);
+      api(`/traces/${encodeURIComponent(selected.traceId)}`, p).then(setDetail).catch((e) => setDetailError(e)).finally(() => setDetailLoading(false));
+    }, [selected, source]);
+    if (!(status == null ? void 0 : status.configured))
+      return /* @__PURE__ */ React.createElement(Card, null, /* @__PURE__ */ React.createElement(CardContent, { className: "space-y-2 pt-4 text-sm text-muted-foreground" }, /* @__PURE__ */ React.createElement("p", null, (status == null ? void 0 : status.reason) || "No queryable trace backend configured."), /* @__PURE__ */ React.createElement("p", { className: "text-xs" }, "That's fine \u2014 the ", /* @__PURE__ */ React.createElement("span", { className: "font-medium text-foreground" }, "Live"), " source needs no backend. Add a backend of a queryable type to browse historical traces here: ", /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, ((status == null ? void 0 : status.queryable_types) || []).join(", ") || "none available"), ".")));
+    if (selected)
+      return /* @__PURE__ */ React.createElement(
+        BackendTraceDetail,
+        {
+          row: selected,
+          detail,
+          loading: detailLoading,
+          error: detailError,
+          onBack: () => {
+            setSelected(null);
+            writeNav({ trace: "" });
+          },
+          source,
+          status
+        }
+      );
+    const rows = (page == null ? void 0 : page.rows) || [];
+    const pingCount = rows.filter((t) => isMcpKeepalivePing(t.rootName, t.error)).length;
+    const shown = showPings ? rows : rows.filter((t) => !isMcpKeepalivePing(t.rootName, t.error));
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement(Card, null, /* @__PURE__ */ React.createElement(CardContent, { className: "space-y-3 pt-4" }, /* @__PURE__ */ React.createElement(StatusBar, { status, onRefresh }), /* @__PURE__ */ React.createElement(
+      FilterBar,
+      {
+        filters: paging.filters,
+        onChange: paging.setFilters,
+        onSubmit: paging.submit,
+        backend: true,
+        status,
+        busy: loading,
+        support,
+        hide: view === "sessions" ? ["traceId"] : void 0
+      }
+    ), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-3" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs text-muted-foreground" }, page == null ? "Searching\u2026" : `${shown.length} trace${shown.length === 1 ? "" : "s"} on this page`, (page == null ? void 0 : page.ignored.length) ? /* @__PURE__ */ React.createElement("span", { title: "fields this backend's adapter does not honour" }, " \xB7 ignored: ", page.ignored.join(", ")) : null), /* @__PURE__ */ React.createElement(Toggle, { checked: showPings, onChange: setShowPings, label: `show MCP keepalive pings${pingCount ? ` (${pingCount})` : ""}`, Switch: Checkbox })))), error ? /* @__PURE__ */ React.createElement(ErrorBanner, { error, prefix: "Search" }) : null, page && shown.length > 0 ? view === "sessions" ? /* @__PURE__ */ React.createElement(
+      BackendSessions,
+      {
+        rows: shown,
+        wantedSession: wanted.session || "",
+        renderTrace: (t) => /* @__PURE__ */ React.createElement(TraceCard, { key: t.traceId, row: t, onSelect: setSelected })
+      }
+    ) : /* @__PURE__ */ React.createElement("div", { className: "flex flex-col gap-2" }, shown.map((t) => /* @__PURE__ */ React.createElement(TraceCard, { key: t.traceId, row: t, onSelect: setSelected }))) : page && shown.length === 0 && !error ? /* @__PURE__ */ React.createElement(Empty, { title: before ? "No older traces" : "No traces matched" }, pingCount ? `Only MCP keepalive pings matched (${pingCount} hidden): show them with the switch above.` : before ? /* @__PURE__ */ React.createElement(Button, { variant: "outline", size: "sm", onClick: paging.newer }, "\u2190 Back to the newer page") : "Widen the lookback or run a turn.") : null, page && (shown.length || before) ? /* @__PURE__ */ React.createElement(Pager, { page: paging.page, hasMore: page.hasMore, onNewest: paging.newest, onNewer: paging.newer, onOlder: () => paging.older(page.nextBefore) }) : null);
+  }
+  function TracesPage() {
+    const { source, setSource, status, refresh, isLive, filters } = useSource();
+    const active = useActive();
+    const [nav, setNav] = useState(() => readNav());
+    const [view, setViewState] = useState(nav.view || readView());
+    const setView = (v) => {
+      try {
+        localStorage.setItem(VIEW_KEY, v);
+      } catch {
+      }
+      setViewState(v);
+      writeNav({ view: v });
+    };
+    useEffect(() => {
+      const onNav = (e) => {
+        const d = e.detail || {};
+        if (d.tab && d.tab !== "traces") return;
+        if (d.source) setSource(d.source);
+        if (d.view) setViewState(d.view);
+        setNav({ ...readNav(), ...d });
+      };
+      window.addEventListener(NAV_EVENT, onNav);
+      return () => window.removeEventListener(NAV_EVENT, onNav);
+    }, [setSource]);
+    useEffect(() => {
+      if (active) writeNav({ tab: "traces", source: source === "live" ? "" : source, view });
+    }, [source, view, active]);
+    const key = `${source}:${nav.trace || ""}:${nav.session || ""}`;
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-3" }, /* @__PURE__ */ React.createElement(SourceSelect, { source, onChange: setSource, status, need: "traces" }), /* @__PURE__ */ React.createElement(
+      Segmented,
+      {
+        value: view,
+        onChange: setView,
+        label: "turns or sessions",
+        options: [
+          { id: "turns", label: "Turns" },
+          { id: "sessions", label: "Sessions" }
+        ]
+      }
+    )), isLive ? /* @__PURE__ */ React.createElement(MiniLabel, null, "queried from the in-process store") : null), isLive ? /* @__PURE__ */ React.createElement(LiveTraces, { key, view, wanted: nav, active }) : /* @__PURE__ */ React.createElement(BackendTraces, { key, status, onRefresh: refresh, source, view, wanted: nav, support: filters, active }));
+  }
+
+  // src/metrics.tsx
+  var POLL_MS5 = 3e4;
+  var UNITS = {
+    "hermes.token.usage": "tokens",
+    "hermes.cost.usage": "USD",
+    "hermes.model.usage": "calls",
+    "hermes.tool.duration": "ms",
+    "hermes.approval.count": "approvals",
+    "hermes.approval.duration": "ms",
+    "hermes.message.count": "messages",
+    "hermes.session.count": "sessions",
+    "hermes.session.turns": "turns",
+    "hermes.session.duration": "s",
+    "hermes.prompt_cache.tokens": "tokens",
+    "hermes.prompt_cache.observations": "observations",
+    "hermes.api.error.count": "errors",
+    "hermes.retry.count": "retries",
+    "hermes.subagent.count": "runs",
+    "hermes.subagent.duration": "ms",
+    "hermes.skill.inferred": "hits",
+    "gen_ai.client.token.usage": "tokens",
+    "gen_ai.client.operation.duration": "s",
+    "gen_ai.agent.token.usage": "tokens",
+    "process.cpu.utilization": "ratio",
+    "system.cpu.utilization": "ratio",
+    "hw.gpu.utilization": "ratio",
+    "hw.gpu.memory.usage": "bytes",
+    "hw.power": "W"
+  };
+  var GROUP_KEYS = ["", "model", "provider", "token_type", "tool_name", "choice", "status", "operation", "error_type"];
+  function seriesTotal(b, label) {
+    if (!b) return 0;
+    const keys = label ? [label] : Object.keys(b.series);
+    let t = 0;
+    for (const k of keys) for (const v of b.series[k] || []) if (v != null) t += v;
+    return t;
+  }
+  function totalsByLabel(b) {
+    if (!b) return [];
+    return Object.keys(b.series).map((label) => ({ label, value: seriesTotal(b, label) })).sort((x, y) => y.value - x.value);
+  }
+  function meanByLabel(b) {
+    if (!b) return [];
+    return Object.keys(b.series).map((label) => {
+      const vals = (b.series[label] || []).filter((v) => v != null);
+      return { label, value: vals.length ? vals.reduce((a, v) => a + v, 0) / vals.length : 0 };
+    }).sort((x, y) => y.value - x.value);
+  }
+  function rangeLabel(r) {
+    const b = r.bucket >= 3600 ? `${r.bucket / 3600}h` : r.bucket >= 60 ? `${r.bucket / 60}m` : `${r.bucket}s`;
+    return `last ${r.label} \xB7 ${b} buckets`;
+  }
+  function resolveInstrument(names, otlp, prefer) {
+    const all = new Set(names.map((n) => n.name));
+    const canonical = (n) => {
+      const m = /^(.*)\.(sum|count)$/.exec(n);
+      if (m && all.has(`${m[1]}.sum`) && all.has(`${m[1]}.count`)) return m[1];
+      return metricOtlpName(n);
+    };
+    const matches = names.filter((n) => n.otlp_name === otlp || n.name === otlp || canonical(n.name) === otlp).map((n) => n.name);
+    if (!matches.length) return null;
+    if (prefer) {
+      const hit = matches.find((n) => n.endsWith(prefer) || n.endsWith(prefer.replace("_", ".")));
+      if (hit) return hit;
+    }
+    return matches.find((n) => n === otlp) || matches.find((n) => !/[_.](sum|count|bucket|total)$/.test(n)) || matches[0];
+  }
+  var PALETTE = [
+    "var(--otel-chart-1)",
+    "var(--otel-chart-2)",
+    "var(--otel-chart-3)",
+    "var(--otel-chart-4)",
+    "var(--otel-chart-5)",
+    "var(--otel-chart-6)",
+    "var(--otel-chart-7)",
+    "var(--otel-chart-8)"
+  ];
+  function BarList({ rows, fmt, color }) {
+    if (!rows.length) return /* @__PURE__ */ React.createElement("div", { className: "py-3 text-xs text-muted-foreground" }, "No data in this range.");
+    const max = Math.max(1e-9, ...rows.map((r) => r.value));
+    const top = rows.slice(0, 10);
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-1.5" }, top.map((r) => /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        key: r.label,
+        className: "flex items-center gap-2",
+        title: `${r.label === "_" ? "all" : r.label}: ${fmt ? fmt(r.value) : fmtInt(Math.round(r.value))}`
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "otel-w-28 shrink-0 truncate font-mono text-[11px] text-muted-foreground" }, r.label === "_" ? "all" : r.label),
+      /* @__PURE__ */ React.createElement("div", { className: "relative h-4 flex-1 bg-muted/30", role: "img", "aria-label": `${r.label}: ${fmt ? fmt(r.value) : fmtInt(Math.round(r.value))}` }, /* @__PURE__ */ React.createElement("div", { className: "absolute inset-y-0 left-0", style: { width: `${r.value / max * 100}%`, background: color || "var(--otel-chart-2)" } })),
+      /* @__PURE__ */ React.createElement("span", { className: "otel-w-16 shrink-0 text-right tabular-nums text-xs" }, fmt ? fmt(r.value) : fmtInt(Math.round(r.value)))
+    )), rows.length > top.length ? /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-muted-foreground" }, "+", rows.length - top.length, " more series") : null);
+  }
+  function Panel({ title, sub, children }) {
+    return /* @__PURE__ */ React.createElement("div", { className: "otel-card-bg border border-border p-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-baseline justify-between gap-2" }, /* @__PURE__ */ React.createElement(MiniLabel, null, title), sub ? /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-muted-foreground" }, sub) : null), /* @__PURE__ */ React.createElement("div", { className: "mt-2" }, children));
+  }
+  function Chart({ b, fmt, error }) {
+    if (error) return /* @__PURE__ */ React.createElement(ErrorBanner, { error });
+    if (!b || !Object.keys(b.series).length) return /* @__PURE__ */ React.createElement("div", { className: "py-3 text-xs text-muted-foreground" }, "No data in this range.");
+    const all = Object.keys(b.series);
+    const series = all.slice(0, 8).map((label, i) => ({ label: label === "_" ? b.name : label, color: PALETTE[i % PALETTE.length], points: b.series[label] }));
+    const n = b.buckets.length;
+    const withDate = b.bucketS >= 3600;
+    const labels = [0, Math.floor(n / 2), n - 1].map((i) => withDate ? fmtAbsTime(b.buckets[i]).slice(5, 16) : fmtClock(b.buckets[i]));
+    const bucketLabels = b.buckets.map((t) => fmtAbsTime(t));
+    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(LineChart, { series, labels, fmt, bucketLabels }), all.length > 8 ? /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-muted-foreground" }, "showing 8 of ", all.length, " series") : null);
+  }
+  var PANELS = [
+    { key: "tokens", otlp: "hermes.token.usage", group: "token_type", agg: { live: "sum", backend: "sum" } },
+    { key: "cost", otlp: "hermes.cost.usage", group: "", agg: { live: "sum", backend: "sum" } },
+    { key: "calls", otlp: "hermes.model.usage", group: "model", agg: { live: "count", backend: "sum" } },
+    // the duration histogram: its _sum on a backend, the raw points on live
+    { key: "tools", otlp: "hermes.tool.duration", group: "tool_name", agg: { live: "avg", backend: "sum" }, prefer: "_sum" },
+    // the histogram's _count is the number of tool calls on a backend
+    { key: "toolcalls", otlp: "hermes.tool.duration", group: "tool_name", agg: { live: "count", backend: "sum" }, prefer: "_count" },
+    { key: "approvals", otlp: "hermes.approval.count", group: "choice", agg: { live: "count", backend: "sum" } },
+    { key: "cache", otlp: "hermes.prompt_cache.tokens", group: "token_type", agg: { live: "sum", backend: "sum" } },
+    { key: "cpu", otlp: "process.cpu.utilization", group: "", agg: { live: "avg", backend: "avg" } },
+    { key: "gpu", otlp: "hw.gpu.utilization", group: "", agg: { live: "avg", backend: "avg" } }
+  ];
+  function MetricsPage() {
+    var _a, _b, _c, _d, _e, _f;
+    const { source, setSource, status, isLive } = useSource();
+    const active = useActive();
+    const [ex, setEx] = useState(() => explorerFromNav(readNav()));
+    const range = ex.range;
+    const [names, setNames] = useState([]);
+    const [error, setError] = useState(null);
+    const [panels, setPanels] = useState({});
+    const [panelErrors, setPanelErrors] = useState({});
+    const [loaded, setLoaded] = useState(false);
+    const [customGroup, setCustomGroup] = useState("");
+    const [explore, setExplore] = useState(null);
+    const [exploreError, setExploreError] = useState(null);
+    const [exploring, setExploring] = useState(false);
+    const base = isLive ? "/live" : "";
+    const entry = ((status == null ? void 0 : status.available) || []).find((b) => b.name === source) || null;
+    const canQuery = isLive || !!((entry == null ? void 0 : entry.metrics) || (status == null ? void 0 : status.active) === source && (status == null ? void 0 : status.metrics));
+    useEffect(() => {
+      if (active) writeNav(navFromExplorer(ex));
+    }, [ex, active]);
+    const query = useCallback(
+      async (name, group, aggregate) => {
+        const p = withBackend(new URLSearchParams({ name, agg: aggregate, lookback_hours: String(range.hours), bucket_s: String(range.bucket) }), source);
+        if (group) p.set("group_by", group);
+        return api(`${base}/metrics/query`, p);
+      },
+      [base, range, source]
+    );
+    const load = useCallback(async () => {
+      if (!canQuery) return;
+      try {
+        const p = withBackend(new URLSearchParams({ lookback_hours: String(range.hours) }), source);
+        const r = await api(`${base}/metrics/names`, p);
+        const list = r.names || [];
+        setNames(list);
+        setError(null);
+        const out = {};
+        const errs = {};
+        await Promise.all(
+          PANELS.map(async (def) => {
+            const native = resolveInstrument(list, def.otlp, isLive ? void 0 : def.prefer);
+            if (!native) {
+              out[def.key] = null;
+              return;
+            }
+            const aggregate = isLive ? def.agg.live : def.prefer === "_count" && !/[_.]count$/.test(native) ? "count" : def.agg.backend;
+            try {
+              out[def.key] = await query(native, def.group, aggregate);
+            } catch (e) {
+              out[def.key] = null;
+              errs[def.key] = e;
+            }
+          })
+        );
+        setPanels(out);
+        setPanelErrors(errs);
+      } catch (e) {
+        setError(e);
+      } finally {
+        setLoaded(true);
+      }
+    }, [base, canQuery, isLive, query, range.hours, source]);
+    useEffect(() => {
+      setLoaded(false);
+      load();
+    }, [load]);
+    usePolling(load, POLL_MS5, active && canQuery);
+    const runExplore = useCallback(async () => {
+      if (!ex.instrument) return;
+      setExploring(true);
+      setExploreError(null);
+      try {
+        setExplore(await query(ex.instrument, ex.groupBy, ex.agg));
+      } catch (e) {
+        setExploreError(e);
+        setExplore(null);
+      } finally {
+        setExploring(false);
+      }
+    }, [ex.agg, ex.groupBy, ex.instrument, query]);
+    const ranOnce = useState({ done: false })[0];
+    useEffect(() => {
+      if (ex.instrument && !ranOnce.done && names.length) {
+        ranOnce.done = true;
+        runExplore();
+      }
+    }, [ex.instrument, names.length, runExplore, ranOnce]);
+    const tokens = panels.tokens || null;
+    const cost = panels.cost || null;
+    const calls = panels.calls || null;
+    const tools = panels.tools || null;
+    const toolCallsB = panels.toolcalls || null;
+    const toolCalls = isLive ? tools ? fmtInt(tools.points) : null : toolCallsB ? fmtInt(Math.round(seriesTotal(toolCallsB))) : null;
+    const approvals = panels.approvals || null;
+    const cache = panels.cache || null;
+    const totalTokens = tokens ? seriesTotal(tokens) : null;
+    const totalCost = cost && cost.points ? seriesTotal(cost) : null;
+    const tokenRows = useMemo(() => totalsByLabel(tokens), [tokens]);
+    const cacheRows = useMemo(() => totalsByLabel(cache), [cache]);
+    const cacheRead = (_d = (_c = (_a = tokenRows.find((r) => /cache/i.test(r.label))) == null ? void 0 : _a.value) != null ? _c : (_b = cacheRows.find((r) => /read|hit/i.test(r.label))) == null ? void 0 : _b.value) != null ? _d : null;
+    const cacheAll = (_f = (_e = tokenRows.find((r) => r.label === "input")) == null ? void 0 : _e.value) != null ? _f : cacheRows.reduce((a, r) => a + r.value, 0);
+    const unit = (n) => UNITS[n] || UNITS[metricOtlpName(n)] || "";
+    const availableSources = ((status == null ? void 0 : status.available) || []).filter((b) => b.metrics).map((b) => b.name);
+    const header = /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-3" }, /* @__PURE__ */ React.createElement(SourceSelect, { source, onChange: setSource, status, need: "metrics" }), /* @__PURE__ */ React.createElement(
+      Select,
+      {
+        value: String(range.hours),
+        onValueChange: (v) => setEx((s) => ({ ...s, range: RANGES.find((r) => String(r.hours) === v) || RANGES[1] })),
+        className: "otel-w-56 h-8",
+        "aria-label": "range"
+      },
+      RANGES.map((r) => /* @__PURE__ */ React.createElement(SelectOption, { key: r.label, value: String(r.hours) }, rangeLabel(r)))
+    )), /* @__PURE__ */ React.createElement("span", { className: "text-xs text-muted-foreground" }, names.length, " instrument", names.length === 1 ? "" : "s", isLive ? " in the store" : " in this range"));
+    if (!canQuery)
+      return /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, header, /* @__PURE__ */ React.createElement(Empty, { title: "This source does not serve metrics" }, "Pick the Live source", availableSources.length ? ` or one of: ${availableSources.join(", ")}` : ", or configure a backend whose adapter serves metrics", "."));
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, header, error ? /* @__PURE__ */ React.createElement(ErrorBanner, { error, prefix: "Metrics" }) : null, loaded && names.length === 0 && !error ? /* @__PURE__ */ React.createElement(Empty, { title: "No metrics in this range" }, "Run a Hermes turn, or widen the range. Token usage, cost, tool durations and approvals appear here.") : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "otel-kpi-grid" }, /* @__PURE__ */ React.createElement(Stat, { label: "Tokens", value: totalTokens != null ? fmtInt(Math.round(totalTokens)) : null, unknownText: "not recorded" }), /* @__PURE__ */ React.createElement(Stat, { label: "Cost", value: totalCost != null ? fmtCost(totalCost) : null, unknownText: "no pricing data", accent: "cost" }), /* @__PURE__ */ React.createElement(Stat, { label: "Model calls", value: calls ? fmtInt(Math.round(seriesTotal(calls))) : null, unknownText: "not recorded" }), /* @__PURE__ */ React.createElement(
+      Stat,
+      {
+        label: "Tool calls",
+        value: toolCalls,
+        unknownText: "not recorded",
+        sub: isLive ? "duration points, one per call" : "from the duration histogram's count"
+      }
+    ), /* @__PURE__ */ React.createElement(
+      Stat,
+      {
+        label: "Cache read",
+        value: cacheRead != null && cacheAll ? `${Math.round(cacheRead / cacheAll * 100)}%` : null,
+        sub: cacheRead != null ? `${fmtInt(Math.round(cacheRead))} of ${fmtInt(Math.round(cacheAll))} input tokens` : void 0,
+        unknownText: "no cache data"
+      }
+    )), /* @__PURE__ */ React.createElement("div", { className: "grid gap-3 lg:grid-cols-2" }, /* @__PURE__ */ React.createElement(Panel, { title: "Tokens over time", sub: `by token_type \xB7 per ${range.bucket}s` }, /* @__PURE__ */ React.createElement(Chart, { b: tokens, error: panelErrors.tokens })), /* @__PURE__ */ React.createElement(Panel, { title: "Cost over time", sub: cost && cost.points ? `USD \xB7 per ${range.bucket}s` : "no pricing data for the models used" }, /* @__PURE__ */ React.createElement(Chart, { b: cost, fmt: fmtCost, error: panelErrors.cost })), /* @__PURE__ */ React.createElement(Panel, { title: "Tokens by type" }, /* @__PURE__ */ React.createElement(BarList, { rows: totalsByLabel(tokens), color: "var(--otel-chart-1)" })), /* @__PURE__ */ React.createElement(Panel, { title: "Calls by model" }, /* @__PURE__ */ React.createElement(BarList, { rows: totalsByLabel(calls), color: "var(--otel-chart-4)" })), /* @__PURE__ */ React.createElement(Panel, { title: isLive ? "Avg tool duration" : "Tool duration (sum)", sub: "ms" }, /* @__PURE__ */ React.createElement(BarList, { rows: isLive ? meanByLabel(tools) : totalsByLabel(tools), fmt: fmtDurationMs, color: "var(--otel-chart-3)" })), /* @__PURE__ */ React.createElement(Panel, { title: "Approvals by choice" }, /* @__PURE__ */ React.createElement(BarList, { rows: totalsByLabel(approvals), color: "var(--otel-chart-5)" })), panels.cpu ? /* @__PURE__ */ React.createElement(Panel, { title: "CPU", sub: "utilisation ratio, avg per bucket" }, /* @__PURE__ */ React.createElement(Chart, { b: panels.cpu, error: panelErrors.cpu })) : null, panels.gpu ? /* @__PURE__ */ React.createElement(Panel, { title: "GPU", sub: "utilisation ratio, avg per bucket" }, /* @__PURE__ */ React.createElement(Chart, { b: panels.gpu, error: panelErrors.gpu })) : null), /* @__PURE__ */ React.createElement(Panel, { title: "Explore any instrument", sub: "server-side buckets; group by an attribute" }, /* @__PURE__ */ React.createElement(
+      "form",
+      {
+        className: "otel-search-grid",
+        onSubmit: (e) => {
+          e.preventDefault();
+          setEx((s) => ({ ...s, groupBy: customGroup.trim() || s.groupBy }));
+          runExplore();
+        }
+      },
+      /* @__PURE__ */ React.createElement(Select, { value: ex.instrument, onValueChange: (v) => setEx((s) => ({ ...s, instrument: v })), className: "h-8", "aria-label": "instrument" }, /* @__PURE__ */ React.createElement(SelectOption, { value: "" }, "pick an instrument\u2026"), names.map((n) => /* @__PURE__ */ React.createElement(SelectOption, { key: n.name, value: n.name }, `${n.name}${n.count != null ? ` (${n.count})` : ""}${unit(n.otlp_name || n.name) ? ` \xB7 ${unit(n.otlp_name || n.name)}` : ""}`))),
+      /* @__PURE__ */ React.createElement(
+        Select,
+        {
+          value: GROUP_KEYS.includes(ex.groupBy) ? ex.groupBy : "",
+          onValueChange: (v) => setEx((s) => ({ ...s, groupBy: v })),
+          className: "h-8",
+          "aria-label": "group by"
+        },
+        GROUP_KEYS.map((k) => /* @__PURE__ */ React.createElement(SelectOption, { key: k, value: k }, k ? `group by ${k}` : "no grouping"))
+      ),
+      /* @__PURE__ */ React.createElement(
+        Input,
+        {
+          className: "h-8",
+          placeholder: "or any attribute",
+          value: customGroup,
+          onChange: (e) => setCustomGroup(e.target.value),
+          "aria-label": "custom group by"
+        }
+      ),
+      /* @__PURE__ */ React.createElement(Select, { value: ex.agg, onValueChange: (v) => setEx((s) => ({ ...s, agg: v })), className: "h-8", "aria-label": "aggregation" }, AGGS.map((a) => /* @__PURE__ */ React.createElement(SelectOption, { key: a, value: a }, a))),
+      /* @__PURE__ */ React.createElement(Button, { type: "submit", size: "sm", disabled: !ex.instrument || exploring }, exploring ? "Querying\u2026" : "Query")
+    ), ex.instrument ? /* @__PURE__ */ React.createElement("div", { className: "mt-3 space-y-3" }, /* @__PURE__ */ React.createElement(Chart, { b: explore, error: exploreError }), /* @__PURE__ */ React.createElement("div", { className: "text-[11px] text-muted-foreground" }, explore ? `${explore.points} point${explore.points === 1 ? "" : "s"} \xB7 ${Object.keys(explore.series).length} series \xB7 ${explore.agg} per ${explore.bucketS}s${unit(ex.instrument) ? ` \xB7 ${unit(ex.instrument)}` : ""}${explore.cumulative ? " \xB7 cumulative counter shown as increases" : ""}${explore.instrument ? ` \xB7 ${explore.instrument}` : ""}` : exploreError ? "" : "press Query"), /* @__PURE__ */ React.createElement(BarList, { rows: ex.agg === "avg" ? meanByLabel(explore) : totalsByLabel(explore) })) : null)));
+  }
+
+  // src/settings-lib.ts
+  var SIGNALS = ["traces", "metrics", "logs"];
+  function signalPill(signal, s, typeName) {
+    const how = s.configured === "auto" ? "by default" : `${signal}: ${s.configured === "on"} in the config file`;
+    if (s.exported && s.supported) {
+      return { label: `${signal} on`, cls: "on", title: `${typeName} accepts OTLP ${signal}; exported (${how})` };
+    }
+    if (s.exported) {
+      return {
+        label: `${signal} forced`,
+        cls: "forced",
+        title: `${typeName} does not accept OTLP ${signal}, but the entry sets ${signal}: true; exports fail unless a collector fronts it`
+      };
+    }
+    if (s.supported) {
+      return { label: `${signal} off`, cls: "off", title: `${typeName} accepts OTLP ${signal}; not exported (${how})` };
+    }
+    return { label: `${signal} n/a`, cls: "na", title: `${typeName} does not accept OTLP ${signal}; not exported` };
+  }
+  function queryCapabilityLine(q, typeName) {
+    if (!q) return null;
+    if (!q.supported) {
+      return {
+        text: "not queryable from this dashboard",
+        title: `no query adapter for ${typeName}; the Traces, Metrics and Logs tabs use the Live source or another backend`
+      };
+    }
+    const what = ["traces", ...q.metrics ? ["metrics"] : [], ...q.logs ? ["logs"] : []];
+    return {
+      text: `dashboard queries ${what.join(", ")}`,
+      title: `the Traces${q.metrics ? ", Metrics" : ""}${q.logs ? ", Logs" : ""} tab${what.length > 1 ? "s" : ""} can read from this backend`
+    };
+  }
+  function showTypeBadge(b) {
+    const n = b.name.toLowerCase();
+    return n !== b.type.toLowerCase() && n !== b.display_type.toLowerCase();
+  }
+  var DOCS_BASE = "https://briancaffey.github.io/hermes-otel";
+  function renderDescription(desc) {
+    const out = [];
+    const re = /`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)/g;
+    let last = 0;
+    let m;
+    while (m = re.exec(desc)) {
+      if (m.index > last) out.push({ t: "text", v: desc.slice(last, m.index) });
+      if (m[1] != null) out.push({ t: "code", v: m[1] });
+      else out.push({ t: "link", v: m[2], href: m[3].startsWith("/") ? DOCS_BASE + m[3] : m[3] });
+      last = m.index + m[0].length;
+    }
+    if (last < desc.length) out.push({ t: "text", v: desc.slice(last) });
+    return out;
+  }
+  function fmtSettingValue(f) {
+    const v = f.value;
+    if (v == null) return "unset";
+    if (f.kind === "bool") return v ? "true" : "false";
+    if (f.kind === "backends") {
+      const n = Array.isArray(v) ? v.length : 0;
+      return n === 1 ? "1 backend" : `${n} backends`;
+    }
+    if (f.kind === "map") {
+      return Object.entries(v).map(([k, x]) => `${k}=${x}`).join(", ");
+    }
+    return String(v);
+  }
+  function filterFields(fields, opts) {
+    const q = (opts.query || "").trim().toLowerCase();
+    return fields.filter((f) => {
+      if (opts.changedOnly && !f.changed && !f.env_invalid && !f.file_invalid) return false;
+      if (!q) return true;
+      const hay = [f.key, f.group, f.description, fmtSettingValue(f), f.env_var || "", f.source].join(" ").toLowerCase();
+      return q.split(/\s+/).every((w) => hay.includes(w));
+    });
+  }
+  function groupFields(fields, groups) {
+    const order = groups.length ? groups : Array.from(new Set(fields.map((f) => f.group)));
+    return order.map((g) => ({ group: g, fields: fields.filter((f) => f.group === g) })).filter((g) => g.fields.length > 0);
+  }
+  function pathSourceLabel(ps) {
+    switch (ps) {
+      case "env":
+        return "HERMES_OTEL_CONFIG";
+      case "durable":
+        return "$HERMES_HOME/hermes_otel.yaml";
+      case "legacy":
+        return "plugin directory (legacy location)";
+      case "explicit":
+        return "explicit path";
+      default:
+        return "no config file";
+    }
+  }
+  var ENV_GROUP_LABELS = {
+    override: "Setting overrides (HERMES_OTEL_*)",
+    plugin: "Plugin",
+    hermes: "Hermes",
+    backend: "Backends: single-backend mode and credential fallbacks",
+    otel: "OpenTelemetry SDK",
+    other: "Other OTEL_* / HERMES_OTEL_* variables set here"
+  };
+  var ENV_GROUP_ORDER = ["override", "plugin", "hermes", "backend", "otel", "other"];
+  function groupEnv(env, showUnset, query = "") {
+    const seen = /* @__PURE__ */ new Set();
+    const q = query.trim().toLowerCase();
+    const matches = (e) => !q || [e.name, e.description, e.value || "", e.maps_to || ""].join(" ").toLowerCase().includes(q);
+    const groups = [...ENV_GROUP_ORDER, ...env.map((e) => e.group).filter((g) => !ENV_GROUP_ORDER.includes(g))];
+    return groups.filter((g) => seen.has(g) ? false : (seen.add(g), true)).map((g) => ({
+      group: g,
+      label: ENV_GROUP_LABELS[g] || g,
+      entries: env.filter((e) => e.group === g && (showUnset || e.set) && matches(e))
+    })).filter((g) => g.entries.length > 0);
+  }
+  function envCounts(env) {
+    return { set: env.filter((e) => e.set).length, known: env.length };
+  }
+  function sourceNote(f) {
+    if (f.env_invalid && f.env_var) return `${f.env_var}=${f.env_raw} is not a valid ${f.kind}; ignored`;
+    if (f.derived_from && f.derived_from.length) return `follows ${f.derived_from.join(", ")}`;
+    if (f.file_invalid) return `file value "${f.file_value}" is not a valid ${f.kind}; ignored`;
+    if (f.source === "env" && f.file_value != null) return `overrides the file's ${fmtSettingValue({ kind: f.kind, value: f.file_value })}`;
+    if (f.source === "env" && f.env_var) return `from ${f.env_var}`;
+    return null;
+  }
+
+  // src/settings.tsx
+  var VIEWS = [
+    { id: "structured", label: "Structured" },
+    { id: "raw", label: "Raw YAML" },
+    { id: "env", label: "Environment" }
+  ];
+  function Description({ text }) {
+    return /* @__PURE__ */ React.createElement("span", null, renderDescription(text).map(
+      (tok, i) => tok.t === "code" ? /* @__PURE__ */ React.createElement("code", { key: i, className: "otel-code" }, tok.v) : tok.t === "link" ? /* @__PURE__ */ React.createElement("a", { key: i, className: "otel-link", href: tok.href, target: "_blank", rel: "noreferrer" }, tok.v) : /* @__PURE__ */ React.createElement("span", { key: i }, tok.v)
+    ));
+  }
+  function SourceBadge({ source }) {
+    const title = source === "env" ? "set by a HERMES_OTEL_* environment variable" : source === "file" ? "set in the config file" : "the built-in default";
+    return /* @__PURE__ */ React.createElement("span", { className: cn("otel-src", `otel-src-${source}`), title }, source);
+  }
+  function Value({ f }) {
+    const v = f.value;
+    if (v == null) return /* @__PURE__ */ React.createElement("span", { className: "otel-unset" }, "unset");
+    if (f.kind === "bool") return /* @__PURE__ */ React.createElement("span", { className: cn("otel-pill", v ? "otel-pill-on" : "otel-pill-off") }, v ? "on" : "off");
+    if (f.kind === "map")
+      return /* @__PURE__ */ React.createElement("div", { className: "otel-kv" }, Object.entries(v).map(([k, x]) => /* @__PURE__ */ React.createElement("div", { key: k, className: "font-mono text-xs" }, /* @__PURE__ */ React.createElement("span", { className: "text-muted-foreground" }, k, ":"), " ", String(x))));
+    if (f.kind === "backends") {
+      const n = Array.isArray(v) ? v.length : 0;
+      return /* @__PURE__ */ React.createElement("span", { className: "font-mono text-xs" }, n, " configured");
+    }
+    return /* @__PURE__ */ React.createElement("span", { className: "font-mono text-xs break-all" }, String(v));
+  }
+  function DefaultHint({ f }) {
+    if (!f.changed || f.kind === "backends" || f.kind === "map") return null;
+    const d = f.default;
+    const text = d == null ? "unset" : f.kind === "bool" ? d ? "on" : "off" : String(d);
+    return /* @__PURE__ */ React.createElement("span", { className: "text-[11px] text-muted-foreground" }, "default ", text);
+  }
+  function FieldRow({ f }) {
+    const note = sourceNote(f);
+    const warn = f.env_invalid || f.file_invalid;
+    return /* @__PURE__ */ React.createElement("div", { className: cn("otel-settings-row", f.changed && "otel-changed") }, /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "font-mono text-xs text-foreground" }, f.key), f.env_var ? /* @__PURE__ */ React.createElement("span", { className: "font-mono text-[10px] text-muted-foreground/70", title: "environment variable that overrides this setting" }, f.env_var) : /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-muted-foreground/70" }, "yaml only")), /* @__PURE__ */ React.createElement("div", { className: "mt-0.5 text-[11px] leading-snug text-muted-foreground" }, /* @__PURE__ */ React.createElement(Description, { text: f.description }))), /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement(Value, { f }), /* @__PURE__ */ React.createElement("div", { className: "mt-0.5 flex flex-wrap items-center gap-2" }, /* @__PURE__ */ React.createElement(DefaultHint, { f }), note ? /* @__PURE__ */ React.createElement("span", { className: cn("text-[11px]", warn ? "otel-warn" : "text-muted-foreground") }, note) : null)), /* @__PURE__ */ React.createElement("div", { className: "otel-self-center" }, /* @__PURE__ */ React.createElement(SourceBadge, { source: f.source })));
+  }
+  function Row({ k, children, title }) {
+    return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "text-muted-foreground", title }, k), /* @__PURE__ */ React.createElement("span", { className: "min-w-0 break-all" }, children));
+  }
+  function BackendCard({ b, q }) {
+    var _a;
+    const href = b.ui.url;
+    const query = queryCapabilityLine(q, b.display_type);
+    const metricsOn = (_a = b.signals.metrics) == null ? void 0 : _a.exported;
+    return /* @__PURE__ */ React.createElement("div", { className: "otel-card-bg border border-border px-3 py-2.5" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2" }, href ? /* @__PURE__ */ React.createElement("a", { className: "otel-backend-name", href, target: "_blank", rel: "noreferrer noopener", title: `${b.ui.note} \xB7 opens ${href} in a new window` }, b.name, /* @__PURE__ */ React.createElement(IconExternal, { size: 12, className: "otel-backend-ext" })) : /* @__PURE__ */ React.createElement("span", { className: "text-sm font-medium", title: b.ui.note }, b.name), showTypeBadge(b) ? /* @__PURE__ */ React.createElement(Badge, { variant: "secondary", className: "text-[10px] uppercase" }, b.display_type) : null, b.docs_path ? /* @__PURE__ */ React.createElement(
+      "a",
+      {
+        className: "otel-link text-[11px] text-muted-foreground",
+        href: DOCS_BASE + b.docs_path,
+        target: "_blank",
+        rel: "noreferrer",
+        title: `${b.display_type} backend docs`
+      },
+      "docs"
+    ) : null, /* @__PURE__ */ React.createElement("span", { className: "ml-auto flex flex-wrap items-center gap-1", title: "what the plugin exports to this backend" }, /* @__PURE__ */ React.createElement("span", { className: "text-[10px] uppercase tracking-wide text-muted-foreground" }, "export"), SIGNALS.map((sig) => {
+      const st = b.signals[sig];
+      if (!st) return null;
+      const pill = signalPill(sig, st, b.display_type);
+      return /* @__PURE__ */ React.createElement("span", { key: sig, className: cn("otel-pill", `otel-pill-${pill.cls}`), title: pill.title }, pill.label);
+    }))), query ? /* @__PURE__ */ React.createElement("div", { className: "mt-1 text-[11px] text-muted-foreground", title: query.title }, /* @__PURE__ */ React.createElement("span", { className: "text-[10px] uppercase tracking-wide" }, "query"), " \xB7 ", query.text) : null, /* @__PURE__ */ React.createElement("div", { className: "otel-attr-table mt-2 text-xs" }, Object.entries(b.fields).map(([k, v]) => /* @__PURE__ */ React.createElement(Row, { key: k, k }, /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, String(v)))), /* @__PURE__ */ React.createElement(Row, { k: "ui", title: "the link the name opens; set ui_url on the entry to override" }, href ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("a", { className: "otel-link font-mono", href, target: "_blank", rel: "noreferrer noopener" }, href), /* @__PURE__ */ React.createElement("span", { className: "text-muted-foreground" }, " \xB7 ", b.ui.source === "file" ? "ui_url" : "derived")) : /* @__PURE__ */ React.createElement("span", { className: "otel-unset" }, b.ui.note)), metricsOn ? /* @__PURE__ */ React.createElement(Row, { k: "temporality", title: "aggregation temporality of this backend's metric reader" }, /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, b.metrics_temporality.value), /* @__PURE__ */ React.createElement("span", { className: "text-muted-foreground" }, " \xB7 ", b.metrics_temporality.source)) : null, Object.entries(b.query_fields || {}).map(([k, v]) => /* @__PURE__ */ React.createElement(Row, { key: `q-${k}`, k, title: "read by the dashboard's query adapter, not by the exporter" }, /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, String(v)), /* @__PURE__ */ React.createElement("span", { className: "text-muted-foreground" }, " \xB7 query"))), b.headers ? Object.entries(b.headers).map(([k, v]) => /* @__PURE__ */ React.createElement(Row, { key: `h-${k}`, k: `header ${k}` }, /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, String(v)))) : null, b.credentials.map((c) => {
+      var _a2;
+      return /* @__PURE__ */ React.createElement(Row, { key: c.field, k: c.field }, c.set ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, (_a2 = c.value) != null ? _a2 : "set"), /* @__PURE__ */ React.createElement("span", { className: "text-muted-foreground" }, " \xB7 ", c.source)) : /* @__PURE__ */ React.createElement("span", { className: "otel-warn" }, c.source || "not set"));
+    })));
+  }
+  function ConfigFileLine({ r }) {
+    const c = r.config;
+    return /* @__PURE__ */ React.createElement("div", { className: "otel-card-bg border border-border px-3 py-2 text-xs" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-x-3 gap-y-1" }, /* @__PURE__ */ React.createElement(MiniLabel, null, "config file"), c.path ? /* @__PURE__ */ React.createElement("span", { className: "font-mono break-all" }, c.path) : /* @__PURE__ */ React.createElement("span", { className: "text-muted-foreground" }, "none found"), /* @__PURE__ */ React.createElement("span", { className: "otel-pill", title: "how the file was chosen: HERMES_OTEL_CONFIG, then $HERMES_HOME/hermes_otel.yaml, then the plugin directory" }, pathSourceLabel(c.path_source)), c.exists && c.mtime ? /* @__PURE__ */ React.createElement("span", { className: "text-muted-foreground", title: fmtAbsTime(c.mtime * 1e9) }, "edited ", fmtTimeAgo(c.mtime * 1e9)) : null, c.path && !c.exists ? /* @__PURE__ */ React.createElement("span", { className: "otel-warn" }, "file does not exist; defaults and environment variables apply") : null, c.exists && !c.parse_ok ? /* @__PURE__ */ React.createElement("span", { className: "otel-warn" }, "file could not be parsed; defaults and environment variables apply") : null), !c.path ? /* @__PURE__ */ React.createElement("div", { className: "mt-1 text-muted-foreground" }, "Create ", /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, c.durable_path), " to change settings; see the", " ", /* @__PURE__ */ React.createElement("a", { className: "otel-link", href: `${DOCS_BASE}/configuration/overview`, target: "_blank", rel: "noreferrer" }, "configuration guide"), ".") : null, c.unknown_keys.length ? /* @__PURE__ */ React.createElement("div", { className: "mt-1 text-muted-foreground" }, "Also in the file:", " ", c.unknown_keys.map((u, i) => /* @__PURE__ */ React.createElement("span", { key: u.key }, i ? ", " : "", /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, u.key), u.note ? /* @__PURE__ */ React.createElement(React.Fragment, null, " ", "(", /* @__PURE__ */ React.createElement(Description, { text: u.note }), ")") : /* @__PURE__ */ React.createElement("span", { className: "otel-warn" }, " (not a known setting)")))) : null, c.deprecated_keys && c.deprecated_keys.length ? /* @__PURE__ */ React.createElement("div", { className: "mt-1 text-muted-foreground" }, /* @__PURE__ */ React.createElement("span", { className: "otel-warn" }, "deprecated spelling:"), " ", c.deprecated_keys.map((u, i) => /* @__PURE__ */ React.createElement("span", { key: u.key }, i ? ", " : "", /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, u.key))), " ", "(the ", /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, "logs:"), " block is the preferred form; see the", " ", /* @__PURE__ */ React.createElement("a", { className: "otel-link", href: `${DOCS_BASE}/configuration/logs#configuration`, target: "_blank", rel: "noreferrer" }, "logs configuration"), ")") : null);
+  }
+  function SettingsPage() {
+    var _a, _b;
+    const { status } = useSource();
+    const [report, setReport] = useState(null);
+    const [error, setError] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [view, setView] = useState("structured");
+    const [reveal, setReveal] = useState(false);
+    const [confirming, setConfirming] = useState(false);
+    const [query, setQuery] = useState("");
+    const [changedOnly, setChangedOnly] = useState(false);
+    const [rawMode, setRawMode] = useState("file");
+    const [showUnset, setShowUnset] = useState(false);
+    const load = useCallback(async () => {
+      setLoading(true);
+      try {
+        const r = await api("/settings", { reveal: reveal ? "true" : "false" });
+        setReport(r);
+        setError(null);
+      } catch (e) {
+        setError(e);
+      } finally {
+        setLoading(false);
+      }
+    }, [reveal]);
+    useEffect(() => {
+      load();
+    }, [load]);
+    const fields = (report == null ? void 0 : report.fields) || [];
+    const shown = useMemo(() => filterFields(fields, { query, changedOnly }), [fields, query, changedOnly]);
+    const groups = useMemo(() => groupFields(shown, (report == null ? void 0 : report.groups) || []), [shown, report]);
+    const backends = ((_a = fields.find((f) => f.key === "backends")) == null ? void 0 : _a.value) || [];
+    const invalidEnv = useMemo(() => {
+      const out = {};
+      for (const f of fields) if (f.env_invalid && f.env_var) out[f.env_var] = `not a valid ${f.kind}; ignored`;
+      return out;
+    }, [fields]);
+    const cap = report == null ? void 0 : report.capture_summary;
+    const queryCaps = useMemo(() => {
+      const out = {};
+      for (const a of (status == null ? void 0 : status.available) || []) out[a.name] = { supported: a.supported, metrics: a.metrics, logs: a.logs };
+      return out;
+    }, [status]);
+    const q = query.trim().toLowerCase();
+    const rawText = rawMode === "file" ? (report == null ? void 0 : report.config.raw) || "" : (report == null ? void 0 : report.effective_yaml) || "";
+    const rawMatches = q ? rawText.split("\n").filter((l) => l.toLowerCase().includes(q)).length : 0;
+    return /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "text-base font-semibold tracking-tight" }, "Settings"), report ? /* @__PURE__ */ React.createElement("span", { className: "text-xs text-muted-foreground" }, "hermes-otel ", report.process.plugin_version || "?", report.config.fingerprint ? /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 config ", /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        className: "font-mono",
+        title: "Fingerprint of the resolved configuration (secrets hashed). The plugin logs the same value when it builds its pipeline; a match means this is the configuration the gateway runs."
+      },
+      report.config.fingerprint
+    )) : null, " \xB7 resolved ", fmtTimeAgo(report.resolved_at * 1e9)) : null, /* @__PURE__ */ React.createElement("div", { className: "ml-auto flex flex-wrap items-center gap-2" }, /* @__PURE__ */ React.createElement(Segmented, { value: view, onChange: setView, label: "settings view", options: VIEWS }), reveal ? /* @__PURE__ */ React.createElement(Button, { variant: "outline", size: "sm", onClick: () => setReveal(false), title: "mask credential values again" }, "hide secrets") : confirming ? /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-2 text-[11px] text-muted-foreground" }, "credential values will be shown on this page", /* @__PURE__ */ React.createElement(
+      Button,
+      {
+        variant: "outline",
+        size: "sm",
+        onClick: () => {
+          setConfirming(false);
+          setReveal(true);
+        }
+      },
+      "show them"
+    ), /* @__PURE__ */ React.createElement(Button, { variant: "ghost", size: "sm", onClick: () => setConfirming(false) }, "keep masked")) : /* @__PURE__ */ React.createElement(Button, { variant: "outline", size: "sm", onClick: () => setConfirming(true), title: "credential values are masked unless you ask" }, "show secrets\u2026"), /* @__PURE__ */ React.createElement(Button, { variant: "outline", size: "sm", onClick: load, disabled: loading, title: "re-read the file and environment" }, /* @__PURE__ */ React.createElement(IconRefresh, { size: 13, className: loading ? "otel-spin" : "" }), /* @__PURE__ */ React.createElement("span", { className: "ml-1" }, "reload")))), error ? /* @__PURE__ */ React.createElement(ErrorBanner, { error, prefix: "Settings" }) : null, !report && !error ? /* @__PURE__ */ React.createElement("div", { className: "text-sm text-muted-foreground" }, "Loading settings\u2026") : null, report ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(ConfigFileLine, { r: report }), /* @__PURE__ */ React.createElement("div", { className: "otel-kpi-grid" }, /* @__PURE__ */ React.createElement(Stat, { label: "Settings", value: report.fields.length, sub: `${report.counts.changed} changed from default` }), /* @__PURE__ */ React.createElement(Stat, { label: "From file", value: report.counts.file, sub: report.config.exists ? "in the config file" : "no file" }), /* @__PURE__ */ React.createElement(Stat, { label: "From env", value: report.counts.env, sub: "HERMES_OTEL_* variables" }), /* @__PURE__ */ React.createElement(Stat, { label: "Backends", value: backends.length, sub: backends.map((b) => b.name).join(", ") || "live store only" }), /* @__PURE__ */ React.createElement(Stat, { label: "Content", value: cap ? cap.mode : "?", sub: cap ? cap.detail : "", accent: (cap == null ? void 0 : cap.mode) === "full" ? "cost" : void 0 })), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-3" }, /* @__PURE__ */ React.createElement(
+      Input,
+      {
+        value: query,
+        onChange: (e) => setQuery(e.target.value),
+        placeholder: view === "structured" ? "filter by name, value, description\u2026" : view === "raw" ? "find in the YAML\u2026" : "filter variables\u2026",
+        className: "otel-w-56 h-8 text-xs",
+        "aria-label": "filter"
+      }
+    ), view === "structured" ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("label", { className: "inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: changedOnly, onChange: (e) => setChangedOnly(e.target.checked) }), "changed from default only"), /* @__PURE__ */ React.createElement("span", { className: "ml-auto text-[11px] text-muted-foreground" }, shown.length, " of ", fields.length, " \xB7 precedence: ", /* @__PURE__ */ React.createElement("span", { className: "otel-src otel-src-env" }, "env"), " over", " ", /* @__PURE__ */ React.createElement("span", { className: "otel-src otel-src-file" }, "file"), " over ", /* @__PURE__ */ React.createElement("span", { className: "otel-src otel-src-default" }, "default"))) : view === "raw" && q ? /* @__PURE__ */ React.createElement("span", { className: "text-[11px] text-muted-foreground" }, rawMatches, " line", rawMatches === 1 ? "" : "s", " match") : null), view === "structured" ? /* @__PURE__ */ React.createElement(React.Fragment, null, groups.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground" }, "No setting matches.") : null, groups.map((g) => /* @__PURE__ */ React.createElement("div", { key: g.group, className: "space-y-1" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 pt-1" }, /* @__PURE__ */ React.createElement(MiniLabel, null, g.group), /* @__PURE__ */ React.createElement("span", { className: "text-[11px] text-muted-foreground/70" }, g.fields.length)), g.group === "Backends" ? /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, g.fields.map((f) => /* @__PURE__ */ React.createElement(FieldRow, { key: f.key, f })), backends.length ? /* @__PURE__ */ React.createElement("div", { className: "otel-backend-grid" }, backends.map((b, i) => /* @__PURE__ */ React.createElement(BackendCard, { key: `${b.name}-${i}`, b, q: queryCaps[b.name] }))) : /* @__PURE__ */ React.createElement("div", { className: "text-xs text-muted-foreground" }, "No ", /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, "backends:"), " entry. Telemetry stays in the live store on this machine; single-backend environment variables, if any, are listed under Environment.")) : /* @__PURE__ */ React.createElement("div", { className: "otel-settings-list" }, g.fields.map((f) => /* @__PURE__ */ React.createElement(FieldRow, { key: f.key, f })))))) : null, view === "raw" ? /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2" }, /* @__PURE__ */ React.createElement(
+      Segmented,
+      {
+        value: rawMode,
+        onChange: setRawMode,
+        label: "raw view",
+        options: [
+          { id: "file", label: "File as written" },
+          { id: "effective", label: "Effective config" }
+        ]
+      }
+    ), /* @__PURE__ */ React.createElement("span", { className: "min-w-0 flex-1 truncate text-[11px] text-muted-foreground", title: rawMode === "file" ? report.config.path || "" : "" }, rawMode === "file" ? report.config.exists ? `${report.config.path}${reveal ? "" : " \xB7 secrets masked"}` : "no config file to show" : "every setting after env, file and defaults are applied; each key notes its source"), /* @__PURE__ */ React.createElement("span", { className: "shrink-0" }, /* @__PURE__ */ React.createElement(CopyButton, { text: rawText, label: "copy" }))), rawMode === "file" ? report.config.raw != null ? /* @__PURE__ */ React.createElement("pre", { className: "otel-pre otel-raw" }, q ? highlightLines(report.config.raw, q) : report.config.raw) : /* @__PURE__ */ React.createElement("div", { className: "border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground" }, /* @__PURE__ */ React.createElement("div", { className: "mb-1 text-base font-medium text-foreground" }, "No config file"), report.config.raw_error ? report.config.raw_error : /* @__PURE__ */ React.createElement(React.Fragment, null, "Create ", /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, report.config.durable_path), ". The Effective config view is a starting point you can paste in.")) : /* @__PURE__ */ React.createElement("pre", { className: "otel-pre otel-raw" }, q ? highlightLines(report.effective_yaml, q) : report.effective_yaml)) : null, view === "env" ? /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, ((_b = report.env_notices) != null ? _b : []).map((n) => /* @__PURE__ */ React.createElement("div", { key: n, className: "border border-dashed border-border px-3 py-2 text-[11px] text-muted-foreground", role: "status" }, n)), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-3" }, /* @__PURE__ */ React.createElement("span", { className: "text-[11px] text-muted-foreground" }, envCounts(report.env).set, " set of ", envCounts(report.env).known, " the plugin reads, as seen by the process that answered (pid", " ", report.process.pid, "); the gateway may differ"), /* @__PURE__ */ React.createElement("label", { className: "ml-auto inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: showUnset, onChange: (e) => setShowUnset(e.target.checked) }), "show unset variables")), groupEnv(report.env, showUnset, q).length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground" }, /* @__PURE__ */ React.createElement("div", { className: "mb-1 text-base font-medium text-foreground" }, q ? "No variable matches" : "No plugin environment variables set"), q ? "" : 'Every setting comes from the file or its default. Tick "show unset variables" to see every variable the plugin would read.') : null, groupEnv(report.env, showUnset, q).map((g) => /* @__PURE__ */ React.createElement("div", { key: g.group, className: "space-y-1" }, /* @__PURE__ */ React.createElement(MiniLabel, null, g.label), /* @__PURE__ */ React.createElement("div", { className: "otel-settings-list" }, g.entries.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.name, className: cn("otel-env-row", e.set && "otel-changed") }, /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "font-mono text-xs break-all" }, e.name), e.maps_to ? /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-muted-foreground/70" }, "sets ", /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, e.maps_to)) : null), /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, e.set ? /* @__PURE__ */ React.createElement("span", { className: "font-mono text-xs break-all" }, e.value) : /* @__PURE__ */ React.createElement("span", { className: "otel-unset" }, "unset"), invalidEnv[e.name] ? /* @__PURE__ */ React.createElement("div", { className: "otel-warn text-[11px]" }, invalidEnv[e.name]) : null), /* @__PURE__ */ React.createElement("div", { className: "text-[11px] leading-snug text-muted-foreground" }, /* @__PURE__ */ React.createElement(Description, { text: e.description })))))))) : null, /* @__PURE__ */ React.createElement("div", { className: "text-[11px] text-muted-foreground" }, report.process.note)) : null);
+  }
+  function highlightLines(text, q) {
+    const needle = q.toLowerCase();
+    return text.split("\n").map((line, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, line.toLowerCase().includes(needle) ? /* @__PURE__ */ React.createElement("mark", { className: "otel-mark" }, line) : line, "\n"));
+  }
+
+  // src/index.tsx
+  var TABS = [
+    { id: "live", label: "Live", Icon: IconActivity, Page: LivePage },
+    { id: "traces", label: "Traces", Icon: IconList, Page: TracesPage },
+    { id: "metrics", label: "Metrics", Icon: IconChart, Page: MetricsPage },
+    { id: "logs", label: "Logs", Icon: IconScrollText, Page: LogsPage },
+    { id: "settings", label: "Settings", Icon: IconSettings, Page: SettingsPage }
+  ];
+  var ActiveContext = createContext ? createContext(true) : null;
+  function useActive() {
+    if (!ActiveContext || !useContext) return true;
+    const v = useContext(ActiveContext);
+    return v == null ? true : v;
+  }
+  var PageBoundaryImpl = class extends React.Component {
+    constructor() {
+      super(...arguments);
+      this.state = { error: null };
+    }
+    static getDerivedStateFromError(error) {
+      return { error };
+    }
+    componentDidCatch(error) {
+      console.error("[hermes_otel] page crashed", error);
+    }
+    render() {
+      const { error } = this.state;
+      const { name, children } = this.props;
+      if (!error) return children;
+      return /* @__PURE__ */ React.createElement("div", { role: "alert", className: "otel-error-banner" }, /* @__PURE__ */ React.createElement(IconAlert, { size: 14, className: "shrink-0" }), /* @__PURE__ */ React.createElement("div", { className: "min-w-0 space-y-1" }, /* @__PURE__ */ React.createElement("div", null, "The ", name, " tab hit an error while rendering."), /* @__PURE__ */ React.createElement("pre", { className: "otel-pre otel-error-detail" }, String((error == null ? void 0 : error.stack) || error)), /* @__PURE__ */ React.createElement("button", { type: "button", className: "otel-btn", onClick: () => this.setState({ error: null }) }, "Try again")));
+    }
+  };
+  var PageBoundary = PageBoundaryImpl;
+  function schemeOf(background) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(background.trim()) || null;
+    let rgb = null;
+    if (m) rgb = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
+    else {
+      const n = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i.exec(background);
+      const c = /color\(\s*srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i.exec(background);
+      if (n) rgb = [Number(n[1]), Number(n[2]), Number(n[3])];
+      else if (c) rgb = [Number(c[1]) * 255, Number(c[2]) * 255, Number(c[3]) * 255];
+      else {
+        const o = /oklch\(\s*([\d.]+%?)/i.exec(background);
+        if (o) {
+          const l = o[1].endsWith("%") ? Number(o[1].slice(0, -1)) / 100 : Number(o[1]);
+          return l > 0.6 ? "light" : "dark";
+        }
+        const h = /hsla?\(\s*[\d.]+[,\s]+[\d.]+%?[,\s]+([\d.]+)%/i.exec(background);
+        if (h) return Number(h[1]) > 60 ? "light" : "dark";
+      }
+    }
+    if (!rgb) return "dark";
+    const lum = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
+    return lum > 0.6 ? "light" : "dark";
+  }
+  function useScheme() {
+    const theme = useTheme ? useTheme() : void 0;
+    const name = (theme == null ? void 0 : theme.themeName) || "";
+    return useMemo(() => {
+      try {
+        const painted = getComputedStyle(document.body).backgroundColor;
+        if (painted && !/rgba\(\s*0,\s*0,\s*0,\s*0\)|transparent/i.test(painted)) return schemeOf(painted);
+        const probe = document.createElement("div");
+        probe.style.background = "var(--background, var(--color-background))";
+        probe.style.display = "none";
+        document.body.appendChild(probe);
+        const bg = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return schemeOf(bg);
+      } catch {
+        return "dark";
+      }
+    }, [name]);
+  }
+  function OtelDashboard() {
+    const [tab, setTabState] = useState(() => {
+      const t = readNav().tab;
+      return TABS.some((x) => x.id === t) ? t : "live";
+    });
+    const setTab = (id) => {
+      setTabState(id);
+      writeNav({ tab: id, ...clearOtherTabs(id) });
+    };
+    useEffect(() => {
+      const onNav = (e) => {
+        const d = e.detail || {};
+        if (d.tab && TABS.some((t) => t.id === d.tab)) setTabState(d.tab);
+      };
+      window.addEventListener(NAV_EVENT, onNav);
+      return () => window.removeEventListener(NAV_EVENT, onNav);
+    }, []);
+    const [visited, setVisited] = useState(() => ({ [tab]: true }));
+    useEffect(() => {
+      setVisited((v) => v[tab] ? v : { ...v, [tab]: true });
+    }, [tab]);
+    const scheme = useScheme();
+    const tz = useMemo(() => localTimezone(), []);
+    const onKey = (e, i) => {
+      var _a, _b, _c;
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft" && e.key !== "Home" && e.key !== "End") return;
+      e.preventDefault();
+      const j = e.key === "Home" ? 0 : e.key === "End" ? TABS.length - 1 : (i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length;
+      setTab(TABS[j].id);
+      (_c = (_b = (_a = e.currentTarget.parentElement) == null ? void 0 : _a.children[j]) == null ? void 0 : _b.focus) == null ? void 0 : _c.call(_b);
+    };
+    return /* @__PURE__ */ React.createElement("div", { className: "otel-root space-y-4", "data-otel-scheme": scheme }, /* @__PURE__ */ React.createElement("div", { className: "otel-tabs flex items-center gap-1 border-b border-border", role: "tablist", "aria-label": "OTel views" }, TABS.map((t, i) => {
+      const on = t.id === tab;
+      const Icon = t.Icon;
+      return /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          key: t.id,
+          role: "tab",
+          id: `otel-tab-${t.id}`,
+          "aria-selected": on,
+          "aria-controls": `otel-panel-${t.id}`,
+          tabIndex: on ? 0 : -1,
+          onClick: () => setTab(t.id),
+          onKeyDown: (e) => onKey(e, i),
+          className: cn(
+            "otel-tab inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors",
+            on ? "otel-tab-active text-foreground" : "text-muted-foreground hover:text-foreground"
+          )
+        },
+        /* @__PURE__ */ React.createElement(Icon, { size: 15 }),
+        t.label
+      );
+    }), /* @__PURE__ */ React.createElement("span", { className: "ml-auto pr-1 font-mono text-[11px] text-muted-foreground", title: "absolute times are shown in this timezone" }, tz ? `${tz} \xB7 ` : "", "hermes-otel")), /* @__PURE__ */ React.createElement(SourceProvider, null, TABS.map((t) => {
+      const on = t.id === tab;
+      const Page = t.Page;
+      const body = /* @__PURE__ */ React.createElement(PageBoundary, { name: t.label }, /* @__PURE__ */ React.createElement(Page, null));
+      return /* @__PURE__ */ React.createElement("div", { key: t.id, role: "tabpanel", id: `otel-panel-${t.id}`, "aria-labelledby": `otel-tab-${t.id}`, hidden: !on }, !visited[t.id] && !on ? null : ActiveContext ? /* @__PURE__ */ React.createElement(ActiveContext.Provider, { value: on }, body) : body);
+    })));
+  }
+  if (sdkOk) {
+    register("hermes_otel", OtelDashboard);
+  } else {
+    console.error("[hermes_otel] dashboard SDK unavailable \u2014 not registering");
+  }
+})();

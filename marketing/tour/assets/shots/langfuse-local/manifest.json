@@ -1,0 +1,81 @@
+{
+ "source": "langfuse-local",
+ "token": "V261013-langfuse",
+ "traces": {
+  "hero-research": "3c11976b544790d26b02e9d4f88cb44f",
+  "multi-tool": "dae3738bea143a4a02225cb0f3907ce7",
+  "missing-file": "2e0e4c0cc2875258ae08dbd2630ca2c8",
+  "web-fetch": "8e2b268fd4c1a0f015c995569ebfcb58",
+  "skill-load": "e82016ce0ba8a819cf14098137a68e65",
+  "slow-tools": "3abaaf6aa2c091673d386e3debfdd6a0",
+  "file-roundtrip": "b587254a097901e53931977944f05c23",
+  "shell-echo": "903bd442c672b43fd57d2f5863b344f8",
+  "no-tools": "4e9bbdeb2ff8b411cec35391f4ba6e52",
+  "long-output": "2e45234c84a5fc023ab9fd1f9a175308",
+  "shell-nonzero": "a3670115a4f4f013abf64a7bd035dd08"
+ },
+ "captured_at": "2026-10-12T21:08:26",
+ "status": {
+  "type": "langfuse",
+  "metrics": false,
+  "logs": false,
+  "query_url": "http://localhost:3002"
+ },
+ "backend_links": {
+  "hero-research": {
+   "trace_id": "3c11976b544790d26b02e9d4f88cb44f",
+   "ui_url": "http://localhost:3002/project/test-project/traces/3c11976b544790d26b02e9d4f88cb44f",
+   "span_count": 15
+  },
+  "multi-tool": {
+   "trace_id": "dae3738bea143a4a02225cb0f3907ce7",
+   "ui_url": "http://localhost:3002/project/test-project/traces/dae3738bea143a4a02225cb0f3907ce7",
+   "span_count": 10
+  },
+  "missing-file": {
+   "trace_id": "2e0e4c0cc2875258ae08dbd2630ca2c8",
+   "ui_url": "http://localhost:3002/project/test-project/traces/2e0e4c0cc2875258ae08dbd2630ca2c8",
+   "span_count": 6
+  },
+  "web-fetch": {
+   "trace_id": "8e2b268fd4c1a0f015c995569ebfcb58",
+   "ui_url": "http://localhost:3002/project/test-project/traces/8e2b268fd4c1a0f015c995569ebfcb58",
+   "span_count": 6
+  },
+  "skill-load": {
+   "trace_id": "e82016ce0ba8a819cf14098137a68e65",
+   "ui_url": "http://localhost:3002/project/test-project/traces/e82016ce0ba8a819cf14098137a68e65",
+   "span_count": 7
+  },
+  "slow-tools": {
+   "trace_id": "3abaaf6aa2c091673d386e3debfdd6a0",
+   "ui_url": "http://localhost:3002/project/test-project/traces/3abaaf6aa2c091673d386e3debfdd6a0",
+   "span_count": 8
+  },
+  "file-roundtrip": {
+   "trace_id": "b587254a097901e53931977944f05c23",
+   "ui_url": "http://localhost:3002/project/test-project/traces/b587254a097901e53931977944f05c23",
+   "span_count": 8
+  },
+  "shell-echo": {
+   "trace_id": "903bd442c672b43fd57d2f5863b344f8",
+   "ui_url": "http://localhost:3002/project/test-project/traces/903bd442c672b43fd57d2f5863b344f8",
+   "span_count": 6
+  },
+  "no-tools": {
+   "trace_id": "4e9bbdeb2ff8b411cec35391f4ba6e52",
+   "ui_url": "http://localhost:3002/project/test-project/traces/4e9bbdeb2ff8b411cec35391f4ba6e52",
+   "span_count": 4
+  },
+  "long-output": {
+   "trace_id": "2e45234c84a5fc023ab9fd1f9a175308",
+   "ui_url": "http://localhost:3002/project/test-project/traces/2e45234c84a5fc023ab9fd1f9a175308",
+   "span_count": 6
+  },
+  "shell-nonzero": {
+   "trace_id": "a3670115a4f4f013abf64a7bd035dd08",
+   "ui_url": "http://localhost:3002/project/test-project/traces/a3670115a4f4f013abf64a7bd035dd08",
+   "span_count": 6
+  }
+ }
+}

@@ -8,7 +8,7 @@ other source (#194).
 
 Self-hosted SigNoz OSS requires authentication even on localhost. Add
 an ``api_key`` (or ``api_key_env``) to the backend entry in
-``config.yaml`` — generate a key in SigNoz's "Settings → API Keys".
+``hermes_otel.yaml`` — generate a key in SigNoz's "Settings → API Keys".
 
 Without a key the adapter reports ``auth_required`` in ``status()``
 and raises a clear error when the UI actually tries to query.
@@ -20,25 +20,56 @@ import re
 from typing import Any, Dict, List, Optional
 from urllib import parse as _urlparse
 
+from hermes_otel.severity import otel_severity
+
 from . import register
 from .base import (
     BackendAdapter,
-    HTTPException,
+    BackendError,
+    LogColumns,
     LogFilter,
     StructuredFilter,
-    bucketize,
+    bearer,
+    first_accepted,
     http_get_json,
     http_post_json,
-    log_end_ns,
-    ns_from_any,
-    otlp_attrs_from_dict,
-    otlp_status,
+    log_row,
+    not_found,
+    query_origin,
+    require_credential,
     resolve_env_or_literal,
-    rewrite_host_for_docker,
-    strictly_older,
 )
+from .metrics_math import bucketize, increases_per_process
+from .paging import (
+    log_end_ns,
+    strictly_older,
+    strictly_older_traces,
+    trace_end_bound,
+    trace_page,
+    widened_fetch,
+)
+from .shapes import (
+    CARD_ATTRIBUTE_KEYS,
+    SpanRow,
+    card_row,
+    otlp_kind,
+    otlp_status,
+    recard_roots,
+    trace_detail,
+)
+from .timeconv import ns_from_any
 
 _DEFAULT_SIGNOZ_PORT = 3301
+# The trace detail asks for this many spans and says so when there are more.
+_DETAIL_SPAN_CAP = 500
+# The autocomplete API answers one bounded page; the catalogue is assembled
+# from one search per namespace the plugin (and its host mirror) emits.
+_CATALOG_NAMESPACES = ("hermes", "gen_ai", "process", "system", "hw")
+
+
+def _re_esc(text: str) -> str:
+    """Escape a literal for the query builder's ``regex`` operator."""
+    return re.sub(r"([.^$*+?()\[\]{}|\\])", r"\\\1", text)
 
 
 def _ms(ts_s: int) -> int:
@@ -64,20 +95,22 @@ _SIGNOZ_SELECT_COLUMNS: List[Dict[str, Any]] = [
     {"key": "kind", "isColumn": True, "dataType": "int64", "type": "tag"},
 ]
 
-_TAG_KEYS_TO_COLLECT = (
-    "llm.model_name",
-    "llm.provider",
-    "llm.api_mode",
-    "gen_ai.usage.input_tokens",
-    "gen_ai.usage.output_tokens",
-    "gen_ai.usage.total_tokens",
-    "llm.response.finish_reason",
-    "llm.response.tool_calls",
-    "tool.name",
-    "input.value",
-    "output.value",
-    "llm.output.content",
+# The card attributes are span tags, not columns; a ``list`` panel returns
+# only the columns it is asked for, so they are requested explicitly (#297).
+# Numeric attributes live in SigNoz's number map: asked for as strings they
+# come back empty, so the card's token counts need their real type (#297).
+_NUMERIC_TAG_KEYS = frozenset(
+    {
+        "gen_ai.usage.input_tokens",
+        "gen_ai.usage.output_tokens",
+        "gen_ai.usage.total_tokens",
+        "hermes.turn.number",
+    }
 )
+_SIGNOZ_SELECT_COLUMNS += [
+    {"key": k, "type": "tag", "dataType": "float64" if k in _NUMERIC_TAG_KEYS else "string"}
+    for k in CARD_ATTRIBUTE_KEYS
+]
 
 
 # ── metrics & logs vocabulary (#194) ─────────────────────────────────
@@ -100,20 +133,14 @@ _SPACE_AGGREGATION: Dict[str, str] = {
 # Histogram internals never make useful "instrument" rows; ``.sum``/``.count`` stay.
 _METRIC_NAME_SKIP_SUFFIXES = (".bucket", ".min", ".max")
 
-# Python logging levels → the smallest OTel severity number of that band
-# (the exporter maps DEBUG→5, INFO→9, WARNING→13, ERROR→17, CRITICAL→21).
-_OTEL_SEVERITY_FLOOR = {10: 5, 20: 9, 30: 13, 40: 17, 50: 21}
-
-
-def _otel_severity_for(min_level: int) -> int:
-    """The ``severity_number`` lower bound matching a Python ``min_level``."""
-    band = max((lvl for lvl in _OTEL_SEVERITY_FLOOR if lvl <= int(min_level)), default=0)
-    return _OTEL_SEVERITY_FLOOR.get(band, 1)
-
 
 def _column(key: str, data_type: str = "string") -> Dict[str, Any]:
     """A filter/group key that is a real column of the logs table."""
     return {"key": key, "type": "", "dataType": data_type, "isColumn": True}
+
+
+# The resource attribute that tells one exporting process from another.
+_INSTANCE_KEY = "service.instance.id"
 
 
 def _tag(key: str, data_type: str = "string") -> Dict[str, Any]:
@@ -156,20 +183,30 @@ class SigNozAdapter(BackendAdapter):
     raw_placeholder = "serviceName=hermes-agent"
     supports_metrics = True
     supports_logs = True
+    filter_support = {
+        "service": "server",
+        "name": "server",
+        "model": "server",
+        "session": "server",
+        "tool": "server",
+        "min_duration": "server",
+        "status_error": "server",
+        "status_ok": "server",
+        "free_text": "server",
+        "raw": "server",
+        "roots_only": "server",
+    }
 
     def __init__(self, cfg: Dict[str, Any]):
         super().__init__(cfg)
-        endpoint = cfg.get("endpoint") or ""
-        parsed = _urlparse.urlparse(endpoint)
-        host = parsed.hostname or "localhost"
-        scheme = parsed.scheme or "http"
-        port = cfg.get("query_port") or _DEFAULT_SIGNOZ_PORT
-        self.query_url = f"{scheme}://{rewrite_host_for_docker(host)}:{port}"
+        self.query_url = query_origin(cfg, _DEFAULT_SIGNOZ_PORT)
         self.api_key = resolve_env_or_literal(cfg, "api_key", "api_key_env")
+        # The metrics catalog, once per instance (instances are cached while
+        # the config is unchanged, #290): one request per chart, not two.
+        self._catalog_cache: Optional[List[Dict[str, Any]]] = None
 
     def status(self) -> Dict[str, Any]:
         base = super().status()
-        base["query_url"] = self.query_url
         base["auth_required"] = self.api_key is None
         if self.api_key is None:
             base["auth_hint"] = (
@@ -182,16 +219,15 @@ class SigNozAdapter(BackendAdapter):
     # ── HTTP helpers ─────────────────────────────────────────────────
 
     def _headers(self) -> Dict[str, str]:
-        if not self.api_key:
-            raise HTTPException(
-                status_code=502,
-                detail=(
-                    "SigNoz requires an api_key. Add api_key or api_key_env "
-                    "to the signoz backend entry in config.yaml."
-                ),
-            )
-        # SigNoz accepts both ``SIGNOZ-API-KEY`` and standard Bearer.
-        return {"SIGNOZ-API-KEY": self.api_key}
+        key = require_credential(
+            self.api_key,
+            "SigNoz requires an api_key. Add api_key or api_key_env "
+            "to the signoz backend entry in hermes_otel.yaml.",
+        )
+        # A personal access token is honoured as ``SIGNOZ-API-KEY``; a session
+        # JWT (what ``/api/v2/sessions/email_password`` returns) only as a
+        # Bearer. Send both so either kind of key works (verified on v0.119).
+        return {"SIGNOZ-API-KEY": key, **bearer(key)}
 
     # ── Query-builder JSON construction ──────────────────────────────
 
@@ -203,9 +239,8 @@ class SigNozAdapter(BackendAdapter):
             ``!=``   not equal
             ``~=``   regex
             ``>=``   numeric ≥
-        The raw grammar is intentionally terse; power users can bypass
-        it by editing config.yaml's ``raw_query`` escape hatch when we
-        expose one.
+        The raw grammar is intentionally terse: it is the query builder's
+        own filter items, one per token.
         """
         if not raw:
             return []
@@ -235,6 +270,14 @@ class SigNozAdapter(BackendAdapter):
                     "value": f.service,
                 }
             )
+        if f.name_prefix:
+            items.append(
+                {
+                    "key": {"key": "name", "type": "tag"},
+                    "op": "regex",
+                    "value": "^" + _re_esc(f.name_prefix),
+                }
+            )
         if f.name_regex:
             items.append(
                 {
@@ -243,12 +286,12 @@ class SigNozAdapter(BackendAdapter):
                     "value": f.name_regex,
                 }
             )
-        if f.status == "error":
+        if f.status in ("error", "ok"):
             items.append(
                 {
                     "key": {"key": "hasError", "type": "tag"},
                     "op": "=",
-                    "value": True,
+                    "value": f.status == "error",
                 }
             )
         for k, v in f.attr_equals.items():
@@ -277,9 +320,13 @@ class SigNozAdapter(BackendAdapter):
     def _build_query_body(
         self, f: StructuredFilter, start_s: int, end_s: int, limit: int
     ) -> Dict[str, Any]:
+        # ``limit`` counts span rows; without roots-only several rows of one
+        # trace share a page, so ask for more and dedupe (#297).
+        rows_wanted = widened_fetch(limit, f.roots_only)
         body = {
             "start": _ms(start_s),
-            "end": _ms(end_s),
+            # SigNoz bounds time in ms: the cursor rounds up so its row stays inside.
+            "end": trace_end_bound(f, end_s, "ms", round_up=True),
             "step": 60,
             "compositeQuery": {
                 "queryType": "builder",
@@ -295,7 +342,7 @@ class SigNozAdapter(BackendAdapter):
                         "stepInterval": 60,
                         "filters": self._build_filters(f),
                         "orderBy": [{"columnName": "timestamp", "order": "desc"}],
-                        "limit": int(limit),
+                        "limit": rows_wanted,
                         "selectColumns": _SIGNOZ_SELECT_COLUMNS,
                     }
                 },
@@ -330,64 +377,110 @@ class SigNozAdapter(BackendAdapter):
             if trace_id in seen:
                 continue
             seen[trace_id] = row
-            start_ns = _ns_from_row(row)
-            duration_ns = int(row.get("durationNano") or 0)
+            # SigNoz always has a status: ``ok`` is said, not only ``error``.
             attrs_map: Dict[str, Any] = {
                 "name": row.get("name"),
                 "status": "error" if row.get("hasError") or row.get("statusCode") == 2 else "ok",
             }
-            for k in _TAG_KEYS_TO_COLLECT:
-                v = row.get(k)
-                if v is not None:
-                    attrs_map[k] = v
+            attrs_map.update({k: row[k] for k in CARD_ATTRIBUTE_KEYS if row.get(k) is not None})
             traces.append(
-                {
-                    "traceID": trace_id,
-                    "rootServiceName": row.get("serviceName") or "",
-                    "rootTraceName": row.get("name") or "",
-                    "startTimeUnixNano": str(start_ns) if start_ns else "0",
-                    "durationMs": duration_ns // 1_000_000 if duration_ns else 0,
-                    "spanSets": [
-                        {
-                            "spans": [
-                                {
-                                    "spanID": row.get("spanID") or row.get("spanId"),
-                                    "name": row.get("name") or "",
-                                    "attributes": otlp_attrs_from_dict(attrs_map),
-                                }
-                            ],
-                            "matched": 1,
-                        }
-                    ],
-                }
+                card_row(
+                    trace_id,
+                    span_id=row.get("spanID") or row.get("spanId"),
+                    name=row.get("name"),
+                    attrs=attrs_map,
+                    start_ns=ns_from_any(row.get("timestamp")) or 0,
+                    duration_ms=int(row.get("durationNano") or 0) // 1_000_000,
+                    service=row.get("serviceName") or "",
+                    # The list is one row per trace; the trace's span count is
+                    # not among the columns, so none is claimed.
+                )
             )
-        return {"traces": traces}
+        page = trace_page(strictly_older_traces(traces, f), limit)
+        if not f.roots_only and not f.name_prefix:
+            # A tool filter widens to any span, but the row stands for the
+            # trace: its root, the matched span its span set (#558).
+            ids = [t["traceID"] for t in page["traces"]]
+            recard_roots(page, self._roots(ids, f.service, start_s, end_s))
+        return page
+
+    def _roots(
+        self, trace_ids: List[str], service: Optional[str], start_s: int, end_s: int
+    ) -> Dict[str, SpanRow]:
+        """The root spans of these traces, by trace id (one list query: the
+        roots-only filter plus ``traceID IN``). A root outside the window, or
+        a failed query, leaves its trace's matched card."""
+        if not trace_ids:
+            return {}
+        body = self._build_query_body(StructuredFilter(service=service), start_s, end_s, 0)
+        query = body["compositeQuery"]["builderQueries"]["A"]
+        query["limit"] = len(trace_ids)
+        query["filters"]["items"].append(
+            {
+                "key": {"key": "traceID", "isColumn": True, "type": "tag", "dataType": "string"},
+                "op": "in",
+                "value": list(trace_ids),
+            }
+        )
+        try:
+            data = http_post_json(
+                f"{self.query_url}/api/v4/query_range", body, headers=self._headers(), timeout=15.0
+            )
+        except BackendError:
+            return {}
+        out: Dict[str, SpanRow] = {}
+        for row in _extract_v4_list_rows(data):
+            tid = row.get("traceID") or row.get("traceId")
+            if not tid or row.get("parentSpanID"):
+                continue
+            start = ns_from_any(row.get("timestamp")) or 0
+            out.setdefault(
+                tid,
+                SpanRow(
+                    tid,
+                    row.get("spanID") or row.get("spanId"),
+                    None,
+                    str(row.get("name") or ""),
+                    start_ns=start,
+                    end_ns=start + int(row.get("durationNano") or 0),
+                    attrs={},
+                    service=str(row.get("serviceName") or ""),
+                ),
+            )
+        return out
+
+    def trace_url(self, trace_id: str) -> Optional[str]:
+        """The trace in SigNoz's UI: ``ui_url`` on the entry when set, else the
+        query origin (the UI and the API share the port)."""
+        base = str(self.cfg.get("ui_url") or self.query_url or "").rstrip("/")
+        return f"{base}/trace/{trace_id}" if base else None
 
     def get_trace(self, trace_id: str) -> Dict[str, Any]:
-        # SigNoz v0.40+ exposes a POST /api/v1/traces/{traceID} that
-        # accepts a json body with ``spansRenderLimit``. Older builds
-        # use GET on the same path. Try both.
+        # ``GET /api/v1/traces/{traceID}`` is the span list (columns/events)
+        # on every build seen, v0.119 included; the POST with
+        # ``spansRenderLimit`` that some builds accept answers the SPA page on
+        # v0.119 (verified live, #297), so it is only a fallback for a GET
+        # refused as a request (4xx), never after a network failure.
         headers = self._headers()
-        last_err: Optional[Exception] = None
-        for method in ("POST", "GET"):
-            url = f"{self.query_url}/api/v1/traces/{trace_id}"
-            try:
-                if method == "POST":
-                    data = http_post_json(
-                        url,
-                        {"spansRenderLimit": 500, "uncollapsedSpans": []},
-                        headers=headers,
-                        timeout=20.0,
-                    )
-                else:
-                    data = http_get_json(url, headers=headers, timeout=20.0)
-                return _signoz_trace_to_otlp(data)
-            except HTTPException as e:
-                last_err = e
-                continue
-        if last_err:
-            raise last_err
-        return {"batches": []}
+        url = f"{self.query_url}/api/v1/traces/{trace_id}"
+        try:
+            data = first_accepted(
+                lambda: http_get_json(url, headers=headers, timeout=20.0),
+                lambda: http_post_json(
+                    url,
+                    {"spansRenderLimit": _DETAIL_SPAN_CAP, "uncollapsedSpans": []},
+                    headers=headers,
+                    timeout=20.0,
+                ),
+            )
+        except BackendError as exc:
+            if exc.kind == "not_found":
+                raise not_found(trace_id, "SigNoz")
+            raise
+        out = signoz_trace_to_otlp(data)
+        if not out["span_count"]:
+            raise not_found(trace_id, "SigNoz")
+        return out
 
     # ── metrics (#194) ────────────────────────────────────────────────
 
@@ -403,16 +496,37 @@ class SigNozAdapter(BackendAdapter):
         catalog is everything the store has ever seen, which for a plugin
         namespace like ``hermes.*`` is exactly the instrument list.
         """
-        qs = _urlparse.urlencode(
-            {"aggregateOperator": "sum", "dataSource": "metrics", "searchText": search}
-        )
-        data = http_get_json(
-            f"{self.query_url}/api/v3/autocomplete/aggregate_attributes?{qs}",
-            headers=self._headers(),
-            timeout=15.0,
-        )
-        keys = ((data.get("data") or {}).get("attributeKeys")) if isinstance(data, dict) else None
-        return [k for k in keys or [] if isinstance(k, dict) and k.get("key")]
+        if not search and self._catalog_cache is not None:
+            return self._catalog_cache
+
+        def fetch(text: str) -> List[Dict[str, Any]]:
+            qs = _urlparse.urlencode(
+                {"aggregateOperator": "sum", "dataSource": "metrics", "searchText": text}
+            )
+            data = http_get_json(
+                f"{self.query_url}/api/v3/autocomplete/aggregate_attributes?{qs}",
+                headers=self._headers(),
+                timeout=15.0,
+            )
+            keys = (
+                ((data.get("data") or {}).get("attributeKeys")) if isinstance(data, dict) else None
+            )
+            return [k for k in keys or [] if isinstance(k, dict) and k.get("key")]
+
+        if search:
+            return fetch(search)
+        # The autocomplete answers a bounded page (``hermes.token.usage`` fell
+        # off a 41-entry list on v0.119); one search per namespace the plugin
+        # emits keeps every instrument.
+        out: List[Dict[str, Any]] = []
+        seen: set = set()
+        for ns in _CATALOG_NAMESPACES:
+            for k in fetch(ns):
+                if k["key"] not in seen:
+                    seen.add(k["key"])
+                    out.append(k)
+        self._catalog_cache = out
+        return out
 
     def metric_names(self, start_s: int, end_s: int) -> List[Dict[str, Any]]:
         names = sorted(
@@ -425,7 +539,13 @@ class SigNozAdapter(BackendAdapter):
         return [{"name": n} for n in names]
 
     def _metric_kind(self, name: str) -> str:
-        """``Sum`` / ``Gauge`` / ``Histogram`` for one instrument (``Sum`` if unknown)."""
+        """``Sum`` / ``Gauge`` / ``Histogram`` for one instrument (``Sum`` if unknown).
+
+        Answered from the cached catalog when it has the name, so a chart
+        refresh is one request."""
+        for k in self._metric_catalog():
+            if k.get("key") == name:
+                return str(k.get("type") or "Sum")
         for k in self._metric_catalog(name):
             if k.get("key") == name:
                 return str(k.get("type") or "Sum")
@@ -441,26 +561,65 @@ class SigNozAdapter(BackendAdapter):
         agg: str = "sum",
     ) -> Dict[str, Any]:
         kind = self._metric_kind(name)
-        time_agg = _TIME_AGGREGATION.get(kind, _TIME_AGGREGATION["Sum"]).get(agg, "sum")
+        cumulative = kind == "Sum" and agg in ("sum", "count", "last")
+        if cumulative:
+            # A counter's value is per exporting process. SigNoz's own
+            # ``increase`` over-counted one-shot turns that share a step
+            # (verified on v0.119: four turns of 2+1+2+4 calls read 10), so
+            # the adapter reads the latest cumulative value per process and
+            # step (``service.instance.id`` joins the grouping as a series key,
+            # never a label) and takes the increases itself, a series that
+            # starts inside the window counting its first value (#297).
+            time_agg = "latest"
+            group = ([_tag(group_by)] if group_by else []) + [_tag(_INSTANCE_KEY)]
+        else:
+            time_agg = _TIME_AGGREGATION.get(kind, _TIME_AGGREGATION["Sum"]).get(agg, "sum")
+            group = [_tag(group_by)] if group_by else []
         query = _builder_query(
             dataSource="metrics",
             aggregateAttribute={"key": name, "dataType": "float64", "type": kind, "isColumn": True},
             timeAggregation=time_agg,
             spaceAggregation=_SPACE_AGGREGATION.get(agg, "sum"),
-            groupBy=[_tag(group_by)] if group_by else [],
+            groupBy=group,
             stepInterval=int(bucket_s),
         )
-        data = self._query_range(_composite(query, "graph", start_s, end_s, bucket_s))
-        points = [
-            (ts_ns, value, labels.get(group_by, "_") if group_by else "_")
-            for labels, ts_ns, value in _iter_series_points(data)
-        ]
+        # SigNoz stamps each step's value at the step's START on a grid aligned
+        # to multiples of ``stepInterval`` since the epoch, so a sample taken 11 s
+        # into a minute comes back at the minute boundary, *before* a window
+        # that opened at :11. Ask from that boundary and treat it as the
+        # window's start, otherwise the first-value rule below drops every
+        # series that began inside a short window (verified on v0.119:
+        # a 46 s batch read 0 tokens / 0 calls, #297).
+        step = max(1, int(bucket_s))
+        grid_start_s = int(start_s) - int(start_s) % step
+        data = self._query_range(_composite(query, "graph", grid_start_s, end_s, bucket_s))
+        if cumulative:
+            points = increases_per_process(
+                (
+                    (
+                        ts_ns,
+                        value,
+                        labels.get(group_by, "—") if group_by else "_",
+                        labels.get(_INSTANCE_KEY, ""),
+                    )
+                    for labels, ts_ns, value in _iter_series_points(data)
+                ),
+                window_start_ns=grid_start_s * 1_000_000_000,
+            )
+        else:
+            points = [
+                (ts_ns, value, labels.get(group_by, "_") if group_by else "_")
+                for labels, ts_ns, value in _iter_series_points(data)
+            ]
         # SigNoz already reduced each bucket, so folding one point per bucket
         # with ``sum`` reproduces its values on the shared bucket grid.
         out = bucketize(points, start_s * 1_000_000_000, end_s * 1_000_000_000, bucket_s, "sum")
         out["agg"] = agg
         out["name"] = name
         out["kind"] = kind
+        # True only when the counter fold above ran: ``avg`` / ``max`` of a Sum
+        # are SigNoz's own aggregates of the raw cumulative values, not increases.
+        out["cumulative"] = cumulative
         return out
 
     # ── logs (#194) ───────────────────────────────────────────────────
@@ -469,6 +628,8 @@ class SigNozAdapter(BackendAdapter):
         items: List[Dict[str, Any]] = []
         if f.trace_id:
             items.append({"key": _column("trace_id"), "op": "=", "value": f.trace_id})
+        if f.span_id:
+            items.append({"key": _column("span_id"), "op": "=", "value": f.span_id})
         if f.session:
             items.append({"key": _tag("hermes.session_id"), "op": "=", "value": f.session})
         if f.logger:
@@ -480,11 +641,18 @@ class SigNozAdapter(BackendAdapter):
                 {
                     "key": _column("severity_number", "int64"),
                     "op": ">=",
-                    "value": _otel_severity_for(f.min_level),
+                    "value": otel_severity(f.min_level),
                 }
             )
         if f.text:
             items.append({"key": _column("body"), "op": "contains", "value": f.text})
+        # Structured events carry their name as the ``event.name`` attribute
+        # (SigNoz keeps no column for the OTLP ``event_name`` field); verified
+        # against SigNoz v0.119 (#268).
+        if f.event_name:
+            items.append({"key": _tag("event.name"), "op": "=", "value": f.event_name})
+        elif f.events_only:
+            items.append({"key": _tag("event.name"), "op": "exists"})
         if f.before_ns:
             # Keyset paging at nanosecond precision (``timestamp`` is a ns column).
             items.append(
@@ -562,18 +730,42 @@ def _iter_series_points(data: Any):
                 yield labels, int(point.get("timestamp") or 0) * 1_000_000, value
 
 
+# The entry's own columns, read off it and put beside the attributes; the
+# session id stays among the attributes too (``session_id`` is not a column).
+_LOG_COLUMNS = LogColumns(level="severity_text", logger="scope_name")
+_ENTRY_COLUMNS = (
+    "severity_text",
+    "severity_number",
+    "scope_name",
+    "body",
+    "trace_id",
+    "span_id",
+    "event_name",
+)
+
+
 def _log_record(entry: Dict[str, Any]) -> Dict[str, Any]:
-    """One SigNoz log entry → the live store's record shape."""
+    """One SigNoz log entry → the live store's record shape (#268: with span id,
+    severity number, event name and every attribute, the resource's under
+    ``resource.``)."""
     row = entry.get("data") or {}
-    attrs = row.get("attributes_string") or {}
-    return {
-        "level": str(row.get("severity_text") or "INFO").upper(),
-        "logger": row.get("scope_name") or "",
-        "body": row.get("body") or "",
-        "time_unix_nano": ns_from_any(entry.get("timestamp")) or 0,
-        "trace_id": row.get("trace_id") or None,
-        "session_id": attrs.get("hermes.session_id") or None,
-    }
+    attrs: Dict[str, Any] = {}
+    for bucket in (
+        "attributes_string",
+        "attributes_number",
+        "attributes_bool",
+        "attributes_float64",
+        "attributes_int64",
+    ):
+        values = row.get(bucket)
+        if isinstance(values, dict):
+            attrs.update(values)
+    resources = row.get("resources_string")
+    if isinstance(resources, dict):
+        attrs.update({f"resource.{k}": v for k, v in resources.items()})
+    raw = {**attrs, **{k: row.get(k) for k in _ENTRY_COLUMNS}}
+    raw["session_id"] = attrs.get("hermes.session_id")
+    return log_row(raw, _LOG_COLUMNS, time_ns=ns_from_any(entry.get("timestamp")) or 0)
 
 
 def _extract_v4_list_rows(data: Any) -> List[Dict[str, Any]]:
@@ -586,41 +778,28 @@ def _extract_v4_list_rows(data: Any) -> List[Dict[str, Any]]:
         for entry in series.get("list") or []:
             row = entry.get("data") if isinstance(entry, dict) else None
             if isinstance(row, dict):
+                # the span's start time is on the entry, not in its columns
+                if not row.get("timestamp") and entry.get("timestamp"):
+                    row = {**row, "timestamp": entry["timestamp"]}
                 rows.append(row)
     return rows
-
-
-def _ns_from_row(row: Dict[str, Any]) -> Optional[int]:
-    ts = row.get("timestamp")
-    if isinstance(ts, str) and ts:
-        try:
-            from datetime import datetime
-
-            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-            return int(dt.timestamp() * 1_000_000_000)
-        except Exception:
-            return None
-    if isinstance(ts, (int, float)):
-        # SigNoz sometimes returns ns directly; sometimes ms. Scale by magnitude.
-        n = int(ts)
-        return n if n > 10**15 else n * 1_000_000
-    return None
 
 
 _REF_SPAN = re.compile(r"SpanId=([0-9a-fA-F]*)")
 
 
-def _signoz_rows_to_spans(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Rows of the columns/events trace shape as the older ``spans`` dicts.
+def _signoz_rows_to_spans(entry: Dict[str, Any]) -> List[SpanRow]:
+    """The rows of one ``{columns, events}`` entry of the current trace shape.
 
     Columns seen: ``__time`` (ms), ``SpanId``, ``TraceId``, ``ServiceName``,
     ``Name``, ``Kind``, ``DurationNano``, ``TagsKeys`` / ``TagsValues``,
     ``References`` (``"{TraceId=…, SpanId=<parent>, RefType=CHILD_OF}"``
     strings; an empty SpanId marks the root), ``HasError``,
-    ``StatusMessage``, ``StatusCodeString``, ``SpanKind``.
+    ``StatusMessage``, ``StatusCodeString``, ``SpanKind``. SigNoz always
+    has a status: ``ok`` is said, not only ``error``.
     """
     cols = [str(c) for c in entry.get("columns") or []]
-    out: List[Dict[str, Any]] = []
+    out: List[SpanRow] = []
     for row in entry.get("events") or []:
         if not isinstance(row, list):
             continue
@@ -635,103 +814,66 @@ def _signoz_rows_to_spans(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
         tags = (
             dict(zip(keys, values)) if isinstance(keys, list) and isinstance(values, list) else {}
         )
+        start_ns = ns_from_any(r.get("__time")) or 0
         out.append(
-            {
-                "spanID": r.get("SpanId"),
-                "traceID": r.get("TraceId"),
-                "parentSpanID": parent,
-                "name": r.get("Name"),
-                "serviceName": r.get("ServiceName"),
-                "timestamp": r.get("__time"),
-                "durationNano": r.get("DurationNano"),
-                "kind": r.get("Kind"),
-                "hasError": bool(r.get("HasError")),
-                "tagMap": tags,
-            }
+            SpanRow(
+                r.get("TraceId"),
+                r.get("SpanId"),
+                parent,
+                str(r.get("Name") or ""),
+                start_ns=start_ns,
+                end_ns=(start_ns + int(r.get("DurationNano") or 0)) if start_ns else 0,
+                attrs=tags,
+                service=str(r.get("ServiceName") or ""),
+                kind=otlp_kind(r.get("Kind")),
+                status=otlp_status(
+                    "error" if r.get("HasError") else "ok", str(r.get("StatusMessage") or "")
+                ),
+            )
         )
     return out
 
 
-def _signoz_trace_to_otlp(data: Any) -> Dict[str, Any]:
-    """Translate SigNoz's trace response shape into OTLP batches.
+def _span_dict_row(sp: Dict[str, Any]) -> SpanRow:
+    """One span of the older ``{spans: [...]}`` trace shape (what the POST
+    form of the detail route answers; ids in either case) as a row, its tags
+    from ``tagMap``."""
+    tags = sp.get("tagMap")
+    start_ns = ns_from_any(sp.get("timestamp")) or 0
+    return SpanRow(
+        sp.get("traceID") or sp.get("traceId"),
+        sp.get("spanID") or sp.get("spanId"),
+        sp.get("parentSpanID") or sp.get("parentSpanId"),
+        str(sp.get("name") or ""),
+        start_ns=start_ns,
+        end_ns=(start_ns + int(sp.get("durationNano") or 0)) if start_ns else 0,
+        attrs=dict(tags) if isinstance(tags, dict) else {},
+        service=str(sp.get("serviceName") or ""),
+        kind=otlp_kind(sp.get("kind")),
+        status=otlp_status(
+            "error" if sp.get("hasError") else "ok", str(sp.get("statusMessage") or "")
+        ),
+    )
 
-    SigNoz's shape varies by version; we handle the two known forms:
 
-    * ``{spans: [{spanID, parentSpanID, name, serviceName,
-      timestamp, durationNano, tagMap/tagsMap: {...}}]}``
-    * ``{data: {spans: [...]}}``
+def signoz_trace_to_otlp(data: Any) -> Dict[str, Any]:
+    """Translate SigNoz's trace response shape into the detail every adapter
+    answers (see :func:`trace_detail`; truncated at ``_DETAIL_SPAN_CAP``).
+
+    Two shapes, by build: the current ``[{columns: [...], events: [[...],
+    ...]}]`` (v0.90+, one row per span with the columns named apart) and the
+    older ``{spans: [{spanID, parentSpanID, name, serviceName, timestamp,
+    durationNano, tagMap: {...}}]}``. Anything else has no spans.
     """
+    rows: List[SpanRow]
     if isinstance(data, list):
-        # Current SigNoz (v0.90+): ``[{columns: [...], events: [[...], ...]}]``,
-        # one row per span with the columns named in ``columns``.
-        data = {
-            "spans": [
-                sp
-                for entry in data
-                if isinstance(entry, dict) and entry.get("columns")
-                for sp in _signoz_rows_to_spans(entry)
-            ]
-        }
-    if not isinstance(data, dict):
-        return {"batches": []}
-    spans_raw = data.get("spans")
-    if spans_raw is None:
-        spans_raw = (data.get("data") or {}).get("spans")
-    if not isinstance(spans_raw, list):
-        return {"batches": []}
-
-    by_service: Dict[str, List[Dict[str, Any]]] = {}
-    for sp in spans_raw:
-        if not isinstance(sp, dict):
-            continue
-        service = sp.get("serviceName") or ""
-        attrs: Dict[str, Any] = {}
-        tagmap = sp.get("tagMap") or sp.get("tagsMap") or sp.get("tags") or {}
-        if isinstance(tagmap, dict):
-            for k, v in tagmap.items():
-                attrs[k] = v
-        elif isinstance(tagmap, list):
-            for t in tagmap:
-                if isinstance(t, dict) and "key" in t:
-                    attrs[t["key"]] = t.get("value")
-
-        start_ns: Optional[int] = None
-        ts = sp.get("timestamp")
-        if isinstance(ts, (int, float)):
-            n = int(ts)
-            start_ns = n if n > 10**15 else n * 1_000_000
-        elif isinstance(ts, str):
-            try:
-                from datetime import datetime
-
-                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                start_ns = int(dt.timestamp() * 1_000_000_000)
-            except Exception:
-                start_ns = None
-
-        duration_ns = int(sp.get("durationNano") or 0)
-        end_ns = (start_ns + duration_ns) if start_ns else 0
-
-        otlp_span = {
-            "traceId": sp.get("traceID") or sp.get("traceId"),
-            "spanId": sp.get("spanID") or sp.get("spanId"),
-            "parentSpanId": sp.get("parentSpanID") or sp.get("parentSpanId") or None,
-            "name": sp.get("name") or "",
-            "kind": int(sp.get("kind") or 1),
-            "startTimeUnixNano": str(start_ns) if start_ns else "0",
-            "endTimeUnixNano": str(end_ns) if end_ns else "0",
-            "attributes": otlp_attrs_from_dict(attrs),
-            "status": otlp_status("error" if sp.get("hasError") else "ok"),
-        }
-        by_service.setdefault(service, []).append(otlp_span)
-
-    batches = []
-    for service, spans in by_service.items():
-        resource_attrs = otlp_attrs_from_dict({"service.name": service} if service else {})
-        batches.append(
-            {
-                "resource": {"attributes": resource_attrs},
-                "scopeSpans": [{"spans": spans}],
-            }
-        )
-    return {"batches": batches}
+        rows = [
+            row
+            for entry in data
+            if isinstance(entry, dict) and entry.get("columns")
+            for row in _signoz_rows_to_spans(entry)
+        ]
+    else:
+        spans = data.get("spans") if isinstance(data, dict) else None
+        rows = [_span_dict_row(sp) for sp in spans or [] if isinstance(sp, dict)]
+    return trace_detail(rows, truncated=len(rows) >= _DETAIL_SPAN_CAP)

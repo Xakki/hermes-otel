@@ -40,10 +40,11 @@ python3 ${HERMES_SKILL_DIR}/scripts/otel.py <command> [options]
 | `sessions` | one row per session: turns, spans, tool calls, errors, tokens, cost, first/last |
 | `stats` | the window's totals: turns, sessions, errors, tokens, cost, a table per model and per tool, skills loaded, approvals, the slowest turns |
 | `metrics [name]` | the instruments with data, or one instrument's totals per group (`--group-by model`) and per time bucket (`--buckets`) |
-| `logs` | captured log records (`capture_logs: true`), filterable by level, logger, text, trace, session |
+| `logs` | captured log records and structured events (`logs.capture` / `logs.events.enabled`), filterable by level, logger, text, trace, session, `--event <name>` and `--events-only`; `--follow` keeps printing new live-store records |
 | `sql "<select …>"` | read-only SQL against the live store, for anything the commands above do not cover |
+| `mcp-config` | the `opentelemetry-mcp` server config for a configured Jaeger or Tempo entry: the `mcp_servers:` block, the `hermes mcp add` command, Claude Code and Cursor snippets; `--apply` runs the add (`--force` to replace) |
 
-Options every command takes: `--json` for machine-readable output, `--since 30m|2h|3d|1w|2026-09-20T10:00` and `--until` for the window, `--limit N`, and `--source <backend name or type>` to query a configured backend instead of the live store. `traces` and `stats` also take `--session`, `--status error`, `--model`, `--tool bash`, `--name skill.foo`, `--text`, `--min-duration MS`. `trace` takes `--attrs` (every attribute under each span) and `--io` (captured input/output under llm, api and tool spans).
+Every command takes `--json` for machine-readable output. All but `sql` and `mcp-config` take `--source <backend name or type>` to query a configured backend instead of the live store, and `--db <path>` to name the live store file (`mcp-config --source` picks which Jaeger or Tempo entry to describe). `traces`, `trace`, `sessions`, `stats`, `metrics` and `logs` take a window: `--since 30m|2h|3d|1w|2026-09-20T10:00` and `--until`. `traces`, `sessions`, `stats`, `logs` and `sql` take `--limit N`. `traces` also takes `--session`, `--status error`, `--model`, `--tool bash`, `--name skill.foo`, `--text` and `--min-duration MS`; `stats` takes `--session`. `trace` takes `--attrs` (every attribute under each span) and `--io` (captured input/output under llm, api and tool spans).
 
 A tree looks like this (a real `hermes -z` turn that loaded this skill and ran the tool three times):
 
@@ -70,8 +71,8 @@ is `ERROR` ends with `ERROR: <message>`.
 ## Recipes
 
 Start with `status` once per conversation so you know the window you have (the
-live store keeps the last `dashboard_live_max_spans` rows, 168 hours by
-default) and which sources exist. Then:
+live store keeps the newest `dashboard_live_max_spans` rows of each kind,
+1000 by default, for at most 168 hours) and which sources exist. Then:
 
 | Question | Run |
 |---|---|
@@ -95,6 +96,22 @@ Anything else: the live store is one table, `events`, with a `kind` column
 ```bash
 python3 ${HERMES_SKILL_DIR}/scripts/otel.py sql "select name, json_extract(data, '\$.attributes.\"hermes.tool.outcome\"') as outcome, count(*) from events where kind='span' and name like 'tool.%' group by 1, 2"
 ```
+
+## Traces over MCP
+
+If tools named `mcp__otel__*` (or `<server>__search_traces`, `get_llm_usage`,
+`find_errors`, `get_trace`, …) are available, an `opentelemetry-mcp` server is
+registered and reads the same Jaeger or Tempo backend the plugin exports to.
+Prefer those tools for cross-session trace search, error hunting and per-model
+token totals when the user asks about traces in that backend; use `otel.py` for
+metrics, logs, SQL, the live store and any backend the server does not read.
+Two caveats to state when you report their numbers: the server drops the
+`api.*` spans, so its `request_count` is two per turn (the `agent` and `llm`
+spans) rather than the number of model calls, and `get_trace` is short by those
+spans; token totals are right. `list_llm_tools_tool` fails in 0.2.2; use
+`search_spans_tool` with `operation_name: "tool.<name>"`. Without the server
+nothing here changes: `otel.py` is complete on its own, and `mcp-config` prints
+the registration for the user.
 
 ## Report evidence, not impressions
 
@@ -147,8 +164,9 @@ backends:
 capture_logs: true
 ```
 
-The startup banner prints `✓ Multi-backend fan-out active` when a backend is
-configured. Knobs that change what this tool can show: `dashboard_live`
+At startup the log prints one `[hermes-otel] ✓ <Backend> at <endpoint>` line
+per configured backend (and `✓ Multi-backend fan-out active` when there are two
+or more). Knobs that change what this tool can show: `dashboard_live`
 (the live store; on by default), `dashboard_live_max_spans` and
 `dashboard_live_retention_hours` (how much it keeps), `capture_logs` (logs),
 `content_capture` (`full`, `preview` or `off`: how much of prompts, responses

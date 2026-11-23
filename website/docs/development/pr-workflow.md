@@ -21,12 +21,16 @@ merged PR. It's written down in two places that stay in sync:
 1. **Branch** off up-to-date `main` (`feat/…`, `fix/…`, `docs/…`). Never commit
    features straight to `main`.
 2. **Implement** following the plugin's conventions:
-   - New hook → add to `provides_hooks` in `plugin.yaml` and register it in
-     `__init__.py` inside the forward-compatible `try/except` loop.
+   - New hook → add to `provides_hooks` in `plugin.yaml` and to `hooks.HOOKS`,
+     the one `(hook name, callback)` table `register()` loops over inside its
+     forward-compatible `try/except`.
    - Handlers in the `hooks/` package accept `**kwargs` and **fail open** (guard on
      `tracer.is_enabled`, never raise into the agent loop).
    - Emit **dual-convention** attributes (OpenInference for Phoenix + `gen_ai.*`
-     for Langfuse). Put pure logic in `helpers.py` so it's testable without OTel.
+     for Langfuse). Keep pure logic in plain functions beside the hook that
+     uses them (or a leaf module such as `helpers.py` for text or `coerce.py`
+     for scalars when several modules share them) so it's testable without a
+     tracer.
    - Real failures → `ERROR`; benign/unknown outcomes stay `OK`.
 3. **Test** with the in-memory fixtures (`inmemory_otel_setup`,
    `two_exporter_pipeline`, `inmemory_otel_with_metrics`). Keep tests
@@ -34,15 +38,18 @@ merged PR. It's written down in two places that stay in sync:
    [Testing](/development/testing)).
 4. **Run the exact CI checks locally** before pushing:
    ```bash
-   uv run --extra dev ruff check .
-   uv run --extra dev black --check .
-   uv run --extra dev pytest --cov=hermes_otel --cov-fail-under=85
+   make ci        # every job of .github/workflows/test.yml, in order
+   make ci-fast   # lint, scan, vocabulary check and tests; skips the npm builds
    ```
-   The coverage gate is 85%. `black --check` is part of CI — don't skip it.
+   `make ci` covers the lockfile check, ruff, black, the plugin scan, the
+   telemetry vocabulary check, the tests with the 85% coverage gate and the
+   per-module floors, the dashboard bundle, the docs build and the wheel. Use
+   `make ci-fast` only when you did not touch `dashboard-ui/` or `website/`.
+   See [Testing](/development/testing#ci-behavior) for what `make ci` does not run.
 5. **Update docs in the same PR** (they're acceptance criteria): the relevant
    pages under `website/docs/` (hooks, span-attributes, span-hierarchy,
-   limitations) plus `README.md`. Then `cd website && npm run build` and confirm
-   it's clean.
+   limitations) plus `README.md`. `make ci` builds the site; `cd website && npm run build`
+   does it on its own.
 6. **(Observability changes) verify against a real backend** — capture a
    before/after in Phoenix or Langfuse to prove the change does what it claims.
 7. **Open the PR** with a body that starts with `Closes #<issue>`, using

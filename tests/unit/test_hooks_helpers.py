@@ -1,17 +1,15 @@
-"""Tests for pure helper functions in helpers.py and the hooks package."""
+"""Tests for the pure helper functions of the hooks package."""
 
-import pytest
-
-from hermes_otel.helpers import (
-    classify_approval_choice,
+from hermes_otel.hooks._common import session_id_from_turn_id
+from hermes_otel.hooks.approval import classify_approval_choice
+from hermes_otel.hooks.llm import count_user_turns
+from hermes_otel.hooks.session import cron_job_id_from_session, detect_session_kind
+from hermes_otel.hooks.tools import (
     classify_block_provenance,
-    detect_session_kind,
-    detect_skill,
-    session_id_from_turn_id,
-    to_int,
-    truncate_string,
+    extract_tool_result_status,
+    resolve_tool_identity,
 )
-from hermes_otel.hooks import _genai_metric_dims, _normalize_usage, _usage_attributes
+from hermes_otel.hooks.usage import genai_metric_dims, normalize_usage, usage_attributes
 
 
 class TestSessionIdFromTurnId:
@@ -74,6 +72,92 @@ class TestClassifyApprovalChoice:
         assert classify_approval_choice("once")["decided_by"] == ""
 
 
+class TestResolveToolIdentity:
+    def test_path_key_wins(self):
+        t, c = resolve_tool_identity({"path": "/tmp/foo", "target": "/other"})
+        assert t == "/tmp/foo"
+        assert c is None
+
+    def test_file_path_fallback(self):
+        t, _ = resolve_tool_identity({"file_path": "/etc/hosts"})
+        assert t == "/etc/hosts"
+
+    def test_target_fallback(self):
+        t, _ = resolve_tool_identity({"target": "widget"})
+        assert t == "widget"
+
+    def test_url_fallback(self):
+        t, _ = resolve_tool_identity({"url": "https://example.com"})
+        assert t == "https://example.com"
+
+    def test_uri_fallback(self):
+        t, _ = resolve_tool_identity({"uri": "file:///x"})
+        assert t == "file:///x"
+
+    def test_command_key(self):
+        _, c = resolve_tool_identity({"command": "ls -la"})
+        assert c == "ls -la"
+
+    def test_cmd_fallback(self):
+        _, c = resolve_tool_identity({"cmd": "pwd"})
+        assert c == "pwd"
+
+    def test_both_target_and_command(self):
+        t, c = resolve_tool_identity({"path": "/x", "command": "cat"})
+        assert t == "/x"
+        assert c == "cat"
+
+    def test_none_args(self):
+        assert resolve_tool_identity(None) == (None, None)
+
+    def test_non_dict_args(self):
+        assert resolve_tool_identity("not-a-dict") == (None, None)
+
+    def test_empty_values_ignored(self):
+        t, c = resolve_tool_identity({"path": "  ", "command": ""})
+        assert t is None
+        assert c is None
+
+    def test_non_string_values_ignored(self):
+        t, c = resolve_tool_identity({"path": 42, "command": [1, 2]})
+        assert t is None
+        assert c is None
+
+
+class TestExtractToolResultStatus:
+    def test_explicit_status_string(self):
+        assert extract_tool_result_status({"status": "timeout"}) == "timeout"
+
+    def test_explicit_status_wins_over_error(self):
+        assert extract_tool_result_status({"status": "blocked", "error": "x"}) == "blocked"
+
+    def test_explicit_status_lowercased(self):
+        assert extract_tool_result_status({"status": "Error"}) == "error"
+
+    def test_error_field_maps_to_error(self):
+        assert extract_tool_result_status({"error": "boom"}) == "error"
+
+    def test_empty_error_is_ignored(self):
+        assert extract_tool_result_status({"error": ""}) is None
+
+    def test_whitespace_error_is_ignored(self):
+        assert extract_tool_result_status({"error": "   "}) is None
+
+    def test_timeout_flag(self):
+        assert extract_tool_result_status({"timeout": True}) == "timeout"
+
+    def test_blocked_flag(self):
+        assert extract_tool_result_status({"blocked": True}) == "blocked"
+
+    def test_non_dict_returns_none(self):
+        assert extract_tool_result_status("ok") is None
+        assert extract_tool_result_status(None) is None
+        assert extract_tool_result_status(42) is None
+
+    def test_empty_dict_returns_none(self):
+        assert extract_tool_result_status({}) is None
+
+
 class TestClassifyBlockProvenance:
     def test_deny_rule(self):
         msg = (
@@ -114,112 +198,6 @@ class TestClassifyBlockProvenance:
         assert classify_block_provenance(None) is None
 
 
-class TestDetectSkill:
-    def test_skill_view_name_arg(self):
-        assert detect_skill("skill_view", {"name": "axolotl"}) == ("axolotl", "skill_view")
-
-    def test_skill_view_skill_arg(self):
-        assert detect_skill("skill_view", {"skill": "deploy"}) == ("deploy", "skill_view")
-
-    def test_skill_view_strips_plugin_namespace(self):
-        assert detect_skill("skill_view", {"name": "myplugin:foo"}) == ("foo", "skill_view")
-
-    def test_path_match_on_read(self):
-        got = detect_skill("read", {"path": "/h/.hermes/skills/bar/SKILL.md"})
-        assert got == ("bar", "path_match")
-
-    def test_skill_view_with_manifest_path_value(self):
-        got = detect_skill("skill_view", {"name": "x/.hermes/skills/baz/SKILL.md"})
-        assert got == ("baz", "skill_view")
-
-    def test_skill_view_with_unverifiable_path_value_is_not_guessed(self):
-        # Neither the category nor the file name is a skill name (#157).
-        assert detect_skill("skill_view", {"name": "x/.hermes/skills/baz/refs.md"}) == (None, None)
-
-    def test_non_skill_tool(self):
-        assert detect_skill("bash", {"command": "ls"}) == (None, None)
-
-    def test_non_dict_args(self):
-        assert detect_skill("skill_view", None) == (None, None)
-
-
-class TestTruncateString:
-    def test_normal_string(self):
-        assert truncate_string("hello") == "hello"
-
-    def test_integer_input(self):
-        assert truncate_string(42) == "42"
-
-    def test_none_input(self):
-        assert truncate_string(None) == "None"
-
-    def test_truncates_at_default_max(self):
-        long = "x" * 1500
-        result = truncate_string(long)
-        assert len(result) == 1003  # 1000 + "..."
-        assert result.endswith("...")
-
-    def test_truncates_at_custom_max(self):
-        result = truncate_string("abcdefghij", max_len=5)
-        assert result == "abcde..."
-
-    def test_exact_max_len_not_truncated(self):
-        result = truncate_string("abcde", max_len=5)
-        assert result == "abcde"
-
-    def test_unserializable_object(self):
-        class BadStr:
-            def __str__(self):
-                raise RuntimeError("nope")
-
-        result = truncate_string(BadStr())
-        assert result == "<unserializable>"
-
-    def test_empty_string(self):
-        assert truncate_string("") == ""
-
-
-class TestToInt:
-    def test_int_input(self):
-        assert to_int(42) == 42
-
-    def test_float_input(self):
-        assert to_int(3.7) == 3
-
-    def test_string_integer(self):
-        assert to_int("42") == 42
-
-    def test_string_float(self):
-        assert to_int("3.7") == 3
-
-    def test_empty_string(self):
-        assert to_int("") == 0
-
-    def test_whitespace_string(self):
-        assert to_int("  ") == 0
-
-    def test_none_returns_zero(self):
-        assert to_int(None) == 0
-
-    def test_bool_true_returns_zero(self):
-        assert to_int(True) == 0
-
-    def test_bool_false_returns_zero(self):
-        assert to_int(False) == 0
-
-    def test_non_numeric_string(self):
-        assert to_int("abc") == 0
-
-    def test_negative_int(self):
-        assert to_int(-5) == -5
-
-    def test_zero(self):
-        assert to_int(0) == 0
-
-    def test_list_returns_zero(self):
-        assert to_int([1, 2]) == 0
-
-
 class TestDetectSessionKind:
     def test_explicit_session_type(self):
         assert detect_session_kind("api_server", {"session_type": "cron"}) == "cron"
@@ -242,6 +220,13 @@ class TestDetectSessionKind:
     def test_trigger_contains_cron(self):
         assert detect_session_kind("cli", {"trigger": "my_cron"}) == "cron"
 
+    def test_cron_job_id_from_session(self):
+        assert cron_job_id_from_session("cron_eaa1d152fa2e_20261013_210945") == "eaa1d152fa2e"
+        assert cron_job_id_from_session("cron_my_job_20261013_210945") == "my_job"
+        assert cron_job_id_from_session("20261013_210419_e2ebf6") == ""
+        assert cron_job_id_from_session("cron_x") == ""
+        assert cron_job_id_from_session(None) == ""
+
     def test_job_id_present(self):
         assert detect_session_kind("cli", {"job_id": "j123"}) == "cron"
 
@@ -258,48 +243,44 @@ class TestDetectSessionKind:
 
 class TestNormalizeUsageReasoning:
     def test_reasoning_tokens_parsed(self):
-        totals = _normalize_usage(
-            {"input_tokens": 100, "output_tokens": 50, "reasoning_tokens": 15}
-        )
+        totals = normalize_usage({"input_tokens": 100, "output_tokens": 50, "reasoning_tokens": 15})
         assert totals["reasoning_tokens"] == 15
 
     def test_reasoning_absent_defaults_zero(self):
-        totals = _normalize_usage({"input_tokens": 100, "output_tokens": 50})
+        totals = normalize_usage({"input_tokens": 100, "output_tokens": 50})
         assert totals["reasoning_tokens"] == 0
 
     def test_reasoning_not_added_to_total(self):
         # Reasoning is a subset of output, so it must never inflate the total.
-        totals = _normalize_usage(
-            {"input_tokens": 100, "output_tokens": 50, "reasoning_tokens": 30}
-        )
+        totals = normalize_usage({"input_tokens": 100, "output_tokens": 50, "reasoning_tokens": 30})
         assert totals["total_tokens"] == 150  # 100 + 50, reasoning excluded
 
 
 class TestGenAIMetricDims:
     def test_default_operation_is_chat(self):
-        dims = _genai_metric_dims("gpt-4", "openai")
+        dims = genai_metric_dims("gpt-4", "openai")
         assert dims["gen_ai.operation.name"] == "chat"
         assert dims["gen_ai.provider.name"] == "openai"
         assert dims["gen_ai.request.model"] == "gpt-4"
 
     def test_response_model_and_operation_override(self):
-        dims = _genai_metric_dims("gpt-4", "openai", "gpt-4o", operation="invoke_agent")
+        dims = genai_metric_dims("gpt-4", "openai", "gpt-4o", operation="invoke_agent")
         assert dims["gen_ai.operation.name"] == "invoke_agent"
         assert dims["gen_ai.response.model"] == "gpt-4o"
 
     def test_no_high_cardinality_keys(self):
-        dims = _genai_metric_dims("gpt-4", "openai", "gpt-4")
+        dims = genai_metric_dims("gpt-4", "openai", "gpt-4")
         assert "session_id" not in dims
         assert "task_id" not in dims
 
     def test_empty_provider_and_model_omitted(self):
-        dims = _genai_metric_dims("", "")
+        dims = genai_metric_dims("", "")
         assert dims == {"gen_ai.operation.name": "chat"}
 
 
 class TestUsageAttributesReasoning:
     def test_reasoning_dual_convention_attributes(self):
-        attrs = _usage_attributes(
+        attrs = usage_attributes(
             {
                 "prompt_tokens": 100,
                 "completion_tokens": 50,
@@ -314,7 +295,7 @@ class TestUsageAttributesReasoning:
         assert attrs["gen_ai.usage.reasoning.output_tokens"] == 15
 
     def test_zero_reasoning_omitted(self):
-        attrs = _usage_attributes(
+        attrs = usage_attributes(
             {
                 "prompt_tokens": 100,
                 "completion_tokens": 50,
@@ -328,8 +309,8 @@ class TestUsageAttributesReasoning:
         assert "gen_ai.usage.reasoning.output_tokens" not in attrs
 
     def test_missing_reasoning_key_tolerated(self):
-        # _usage_attributes uses .get for reasoning so older totals dicts work.
-        attrs = _usage_attributes(
+        # usage_attributes uses .get for reasoning so older totals dicts work.
+        attrs = usage_attributes(
             {
                 "prompt_tokens": 100,
                 "completion_tokens": 50,
@@ -339,3 +320,18 @@ class TestUsageAttributesReasoning:
             }
         )
         assert "gen_ai.usage.reasoning.output_tokens" not in attrs
+
+
+class TestCountUserTurns:
+    def test_counts_user_messages_only(self):
+        convo = [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "a"},
+            {"role": "assistant", "content": "b"},
+            {"role": "tool", "content": "c"},
+            {"role": "user", "content": "d"},
+            "not a message",
+        ]
+        assert count_user_turns(convo) == 2
+        assert count_user_turns(None) == 0
+        assert count_user_turns("user") == 0

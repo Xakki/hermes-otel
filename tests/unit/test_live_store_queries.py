@@ -3,49 +3,12 @@
 from __future__ import annotations
 
 import sqlite3
-import time
 
-import pytest
+from helpers.live import NOW  # noqa: E402
+from helpers.live import span as _span  # noqa: E402
 
-from hermes_otel.live_store import (
-    SCHEMA_VERSION,
-    LiveStore,
-    span_kind,
-    summarize_trace,
-    trace_totals,
-)
-
-NOW = time.time_ns()
-
-
-def _span(
-    trace,
-    name,
-    sid,
-    parent,
-    attrs=None,
-    start=NOW - 2_000_000_000,
-    end=NOW - 1_000_000_000,
-    status="OK",
-):
-    return {
-        "trace_id": trace,
-        "span_id": sid,
-        "parent_span_id": parent,
-        "name": name,
-        "start_time_unix_nano": start,
-        "end_time_unix_nano": end,
-        "duration_ms": (end - start) / 1e6,
-        "status": status,
-        "attributes": attrs or {},
-    }
-
-
-@pytest.fixture()
-def store(tmp_path):
-    s = LiveStore(db_path=str(tmp_path / "live.db"))
-    yield s
-    s.close()
+from hermes_otel.live_store import SCHEMA_VERSION, LiveStore
+from hermes_otel.live_summary import span_kind, summarize_trace, trace_totals
 
 
 class TestSchema:
@@ -109,6 +72,23 @@ class TestHelpers:
         spans[-1]["attributes"] = {}
         assert trace_totals(spans)["tokens"] == 30.0  # api spans only, llm mirror ignored
 
+    def test_trace_totals_leave_auxiliary_api_spans_out(self):
+        # An auxiliary attempt (#389) is an api.* span too, but the turn's
+        # totals are the main loop's; the root reports it as
+        # hermes.turn.auxiliary.* instead.
+        spans = [
+            _span("t", "api.m", "a1", "r", {"gen_ai.usage.total_tokens": 10}),
+            _span(
+                "t",
+                "api.cheap",
+                "x1",
+                "r",
+                {"gen_ai.usage.total_tokens": 999, "hermes.query_source": "auxiliary"},
+            ),
+            _span("t", "agent", "r", None, {}),
+        ]
+        assert trace_totals(spans)["tokens"] == 10.0
+
     def test_summarize_trace(self):
         spans = [
             _span("t", "tool.terminal", "x", "r", status="ERROR"),
@@ -162,6 +142,14 @@ class TestQueries:
             {"name": "token_usage", "count": 4, "lastTs": base + 90_000_000_000}
         ]
 
+    def test_metric_buckets_count_every_stored_row(self, store):
+        base = NOW - NOW % 60_000_000_000
+        store.add_metric("m", 3, {}, base)
+        store.add_metric("m", "not a number", {}, base + 1_000_000_000)  # stored valueless
+        out = store.metric_buckets("m", base, base + 60_000_000_000, 60)
+        assert out["name"] == "m" and out["agg"] == "sum" and out["bucketS"] == 60
+        assert out["series"] == {"_": [3.0, None]} and out["points"] == 2
+
     def test_logs_and_loggers(self, store):
         store.add_log(
             {
@@ -198,41 +186,70 @@ class TestLogAttribution:
             pass
 
         class Root:
+            attributes = {"hermes.platform": "cli"}
+
             def get_span_context(self):
                 c = Ctx()
                 c.trace_id = trace_id
+                c.span_id = trace_id & 0xFFFF
+                c.trace_flags = 1
                 return c
 
         return Root()
 
-    def test_one_active_session_attributes_the_line(self, store):
+    def _emit(self, store, tracker, logger_name, msg):
+        """One record through the real provider: enricher first, then the live sink."""
         import logging
 
+        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+        from opentelemetry.sdk.resources import Resource
+
+        from hermes_otel.log_handler import HermesLogProcessor, LiveLogProcessor
+
+        def resolve():
+            found = tracker.single_active_session()
+            if not found:
+                return None
+            sid, root = found
+            return str(sid), tracker.get_current_parent(str(sid)) or root
+
+        provider = LoggerProvider(resource=Resource.create({}))
+        provider.add_log_record_processor(HermesLogProcessor(resolve=resolve, tracker=tracker))
+        provider.add_log_record_processor(LiveLogProcessor(store))
+        handler = LoggingHandler(level=logging.INFO, logger_provider=provider)
+        lg = logging.getLogger(f"test.live.{logger_name}")
+        previous = (lg.propagate, lg.level)
+        lg.propagate = False
+        lg.setLevel(logging.INFO)
+        lg.addHandler(handler)
+        try:
+            lg.info(msg)
+        finally:
+            lg.removeHandler(handler)
+            lg.propagate, lg.level = previous
+
+    def test_one_active_session_attributes_the_line(self, store):
         from hermes_otel.span_tracker import SpanTracker
-        from hermes_otel.tracer import _LiveLogHandler
 
         tracker = SpanTracker()
         tracker.push_parent(self._root(0xABC), session_id="sess-1")
-        h = _LiveLogHandler(store, tracker=tracker)
-        h.emit(logging.LogRecord("agent.loop", logging.INFO, __file__, 1, "hello", None, None))
+        self._emit(store, tracker, "agent.loop", "hello")
         (rec,) = store.logs()
         assert rec["session_id"] == "sess-1"
         assert rec["trace_id"] == format(0xABC, "032x")
+        assert rec["attributes"]["hermes.log.attribution"] == "single_session"
         assert [l["body"] for l in store.query_logs(session="sess-1")] == ["hello"]
 
     def test_two_active_sessions_stay_unattributed(self, store):
-        import logging
-
         from hermes_otel.span_tracker import SpanTracker
-        from hermes_otel.tracer import _LiveLogHandler
 
         tracker = SpanTracker()
         tracker.push_parent(self._root(1), session_id="a")
         tracker.push_parent(self._root(2), session_id="b")
-        h = _LiveLogHandler(store, tracker=tracker)
-        h.emit(logging.LogRecord("x", logging.INFO, __file__, 1, "ambiguous", None, None))
+        self._emit(store, tracker, "x", "ambiguous")
         (rec,) = store.logs()
         assert rec["session_id"] is None and rec["trace_id"] is None
+        assert "hermes.log.attribution" not in rec["attributes"]
         assert tracker.single_active_session() is None
         tracker.pop_parent(session_id="b")
         assert tracker.single_active_session()[0] == "a"

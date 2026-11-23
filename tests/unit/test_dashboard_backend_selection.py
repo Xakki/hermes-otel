@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,12 +9,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-_DASHBOARD = Path(__file__).resolve().parent.parent.parent / "hermes_otel" / "dashboard"
-if str(_DASHBOARD) not in sys.path:
-    sys.path.insert(0, str(_DASHBOARD))
-import backends  # noqa: E402
-import plugin_api  # noqa: E402
-from backends.base import bucketize, counter_increases  # noqa: E402
+from hermes_otel.buckets import bucketize
+from hermes_otel.dashboard import backends, plugin_api
+from hermes_otel.dashboard.backends import langfuse
+from hermes_otel.dashboard.backends.base import filter_support_of
+from hermes_otel.dashboard.backends.metrics_math import counter_increases
 
 CFG = [
     {"type": "phoenix", "name": "phx", "endpoint": "http://localhost:6006"},
@@ -30,20 +28,37 @@ CFG = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _fresh_adapters():
+    """Adapter instances are cached per config identity (#290); never let one
+    test's instance (and its project / schema caches) reach the next."""
+    backends.clear_caches()
+    yield
+    backends.clear_caches()
+
+
 @pytest.fixture()
 def client(monkeypatch):
     monkeypatch.setattr(backends, "load_config", lambda: (Path("/x/hermes_otel.yaml"), CFG, "oo"))
-    monkeypatch.setattr("backends.top_level_config", lambda: {})
+    monkeypatch.setattr("hermes_otel.dashboard.backends.top_level_config", lambda: {})
     app = FastAPI()
     app.include_router(plugin_api.router)
     with TestClient(app) as c:
         yield c
 
 
+def _core(row):
+    """The pre-#268 row keys; the richer fields (span_id, severity_number, event_name, attributes) are asserted separately."""
+    return {
+        k: row.get(k)
+        for k in ("level", "logger", "body", "time_unix_nano", "trace_id", "session_id")
+    }
+
+
 class TestResolveAdapter:
     def test_pin_then_first_supported(self, monkeypatch):
         monkeypatch.setattr(backends, "load_config", lambda: (None, CFG, "oo"))
-        with patch("backends.top_level_config", return_value={}):
+        with patch("hermes_otel.dashboard.backends.top_level_config", return_value={}):
             a, _, _, pin = backends.resolve_adapter()
             assert a.cfg["name"] == "oo" and pin == "oo"
             monkeypatch.setattr(backends, "load_config", lambda: (None, CFG, None))
@@ -52,7 +67,7 @@ class TestResolveAdapter:
 
     def test_by_name_and_by_type(self, monkeypatch):
         monkeypatch.setattr(backends, "load_config", lambda: (None, CFG, "oo"))
-        with patch("backends.top_level_config", return_value={}):
+        with patch("hermes_otel.dashboard.backends.top_level_config", return_value={}):
             assert backends.resolve_adapter("phx")[0].cfg["name"] == "phx"
             assert backends.resolve_adapter("phoenix")[0].cfg["name"] == "phx"
             # configured but no adapter for the type
@@ -69,7 +84,7 @@ class TestResolveAdapter:
             {"type": "lgtm", "name": "lgtm", "endpoint": "https://lgtm.lan/v1/traces"},
         ]
         monkeypatch.setattr(backends, "load_config", lambda: (None, cfg, None))
-        with patch("backends.top_level_config", return_value={}):
+        with patch("hermes_otel.dashboard.backends.top_level_config", return_value={}):
             assert backends.resolve_adapter("lgtm")[0].cfg["name"] == "lgtm"
             assert backends.resolve_adapter("lgtm-local")[0].cfg["name"] == "lgtm-local"
 
@@ -79,6 +94,7 @@ class TestStatusAndRoutes:
         st = client.get("/status").json()
         assert st["active"] == "oo" and st["query_backend_pin"] == "oo"
         by = {b["name"]: b for b in st["available"]}
+        phx_filters = by["phx"].pop("filters")
         assert by["phx"] == {
             "type": "phoenix",
             "name": "phx",
@@ -87,7 +103,10 @@ class TestStatusAndRoutes:
             "metrics": False,
             "logs": False,
         }
+        # The adapter's declared search-bar support rides along (#292).
+        assert phx_filters["model"] == "server" and phx_filters["service"] == "none"
         assert by["oo"]["metrics"] and by["oo"]["logs"] and by["oo"]["supported"]
+        assert by["oo"]["filters"]["roots_only"] == "server"
         assert by["hc"] == {
             "type": "honeycomb",
             "name": "hc",
@@ -97,6 +116,43 @@ class TestStatusAndRoutes:
             "logs": False,
         }
         assert st["metrics"] is True and st["logs"] is True
+        assert st["filters"]["free_text"] == "server"  # the active (oo) adapter's
+
+    def test_status_filters_agree_between_the_top_level_and_the_row(self, monkeypatch):
+        # Langfuse's v4 override widens the class declaration (roots_only and
+        # status_error become server-side). The top level used to spread the
+        # declaration while the same backend's row applied the override, so one
+        # response said two things about one backend (#519).
+        cfg = [
+            {
+                "type": "langfuse",
+                "name": "lf4",
+                "endpoint": "http://localhost:3002",
+                "public_key": "pk",
+                "secret_key": "sk",
+                "query_api": "v4",
+            }
+        ]
+        monkeypatch.setattr(backends, "load_config", lambda: (None, cfg, None))
+        monkeypatch.setattr("hermes_otel.dashboard.backends.top_level_config", lambda: {})
+        app = FastAPI()
+        app.include_router(plugin_api.router)
+        with TestClient(app) as c:
+            st = c.get("/status").json()
+        row = {b["name"]: b for b in st["available"]}["lf4"]
+        assert st["filters"] == row["filters"]
+        assert st["filters"]["roots_only"] == "server" and st["filters"]["status_error"] == "server"
+        assert filter_support_of(langfuse.LangfuseAdapter)["roots_only"] == "none"
+
+    def test_status_without_a_config_names_hermes_otel_yaml(self, monkeypatch):
+        monkeypatch.setattr(backends, "load_config", lambda: (None, [], None))
+        app = FastAPI()
+        app.include_router(plugin_api.router)
+        with TestClient(app) as c:
+            st = c.get("/status").json()
+        assert st["configured"] is False
+        assert st["reason"].startswith("No hermes_otel.yaml found. Looked at: ")
+        assert "config.yaml found" not in st["reason"]
 
     def test_status_for_a_chosen_backend(self, client):
         st = client.get("/status", params={"backend": "phx"}).json()
@@ -116,7 +172,7 @@ class TestStatusAndRoutes:
 
     def test_search_goes_to_the_chosen_adapter(self, client):
         with patch(
-            "backends.phoenix.PhoenixAdapter.search",
+            "hermes_otel.dashboard.backends.phoenix.PhoenixAdapter.search",
             return_value={"traces": [{"traceID": "t", "spanCount": 3}]},
         ) as m:
             r = client.get("/traces/search", params={"backend": "phx", "lookback_hours": 2})
@@ -134,17 +190,20 @@ class TestStatusAndRoutes:
             "points": 1,
         }
         with (
-            patch("backends.openobserve.OpenObserveAdapter.metrics_query", return_value=fake),
             patch(
-                "backends.openobserve.OpenObserveAdapter.metric_names",
+                "hermes_otel.dashboard.backends.openobserve.OpenObserveAdapter.metrics_query",
+                return_value=fake,
+            ),
+            patch(
+                "hermes_otel.dashboard.backends.openobserve.OpenObserveAdapter.metric_names",
                 return_value=[{"name": "hermes_token_usage", "count": 2}],
             ),
             patch(
-                "backends.openobserve.OpenObserveAdapter.logs_search",
+                "hermes_otel.dashboard.backends.openobserve.OpenObserveAdapter.logs_search",
                 return_value=[{"level": "INFO", "logger": "x", "body": "b", "time_unix_nano": 1}],
             ),
             patch(
-                "backends.openobserve.OpenObserveAdapter.loggers",
+                "hermes_otel.dashboard.backends.openobserve.OpenObserveAdapter.loggers",
                 return_value=[{"logger": "x", "count": 1}],
             ),
         ):
@@ -175,6 +234,22 @@ class TestStatusAndRoutes:
 
 
 class TestBucketHelpers:
+    def test_counter_increases_count_a_series_that_started_in_the_window(self):
+        # "a" existed before the window (baseline at t=1), "b" starts inside it
+        samples = [(1, 10.0, "a"), (5, 12.0, "a"), (6, 7.0, "b"), (9, 7.0, "b")]
+        assert counter_increases(samples, window_start_ns=4) == [
+            (5, 2.0, "a"),
+            (6, 7.0, "b"),
+            (9, 0.0, "b"),
+        ]
+        assert counter_increases(samples, started_in_window={"b"}) == [
+            (5, 2.0, "a"),
+            (6, 7.0, "b"),
+            (9, 0.0, "b"),
+        ]
+        # without either hint the first sample stays a baseline
+        assert counter_increases(samples) == [(5, 2.0, "a"), (9, 0.0, "b")]
+
     def test_counter_increases_per_series_and_reset(self):
         samples = [(1, 10.0, "a"), (2, 15.0, "a"), (3, 3.0, "a"), (1, 100.0, "b"), (2, 100.0, "b")]
         assert counter_increases(samples) == [(2, 5.0, "a"), (3, 3.0, "a"), (2, 0.0, "b")]
@@ -189,10 +264,15 @@ class TestBucketHelpers:
         assert out["points"] == 3 and out["bucketS"] == 60
         assert bucketize([(s, 1, "x"), (s, 3, "x")], s, s, 60, agg="avg")["series"] == {"x": [2.0]}
 
+    def test_bucketize_counts_a_valueless_point_without_plotting_it(self):
+        s = 1_020_000_000_000
+        out = bucketize([(s, None, "x"), (s + 1e9, 2, "x"), (s - 61e9, 5, "x")], s, s, 60)
+        assert out["series"] == {"x": [2.0]} and out["points"] == 3
+
 
 class TestOpenObserveMetrics:
     def test_cumulative_rows_become_increases_grouped_by_label(self):
-        from backends.openobserve import OpenObserveAdapter
+        from hermes_otel.dashboard.backends.openobserve import OpenObserveAdapter
 
         a = OpenObserveAdapter(CFG[1])
         base_us = 1_700_000_000_000_000
@@ -223,8 +303,8 @@ class TestOpenObserveMetrics:
         assert sum(v for v in out["series"]["output"] if v) == 6.0
 
     def test_log_rows_map_to_the_live_shape_and_level_filter(self):
-        from backends.base import LogFilter
-        from backends.openobserve import OpenObserveAdapter
+        from hermes_otel.dashboard.backends.base import LogFilter
+        from hermes_otel.dashboard.backends.openobserve import OpenObserveAdapter
 
         a = OpenObserveAdapter(CFG[1])
         rows = [
@@ -245,24 +325,31 @@ class TestOpenObserveMetrics:
         with patch.object(a, "_search", return_value=rows) as m:
             out = a.logs_search(LogFilter(min_level=30, text="o"), 0, 10, 50)
             sql = m.call_args[0][0]
-        assert out == [
-            {
-                "level": "ERROR",
-                "logger": "tools.terminal",
-                "body": "boom",
-                "time_unix_nano": 1_700_000_000_000_000_000,
-                "trace_id": "t1",
-                "session_id": None,
-            }
-        ]
+        assert all(r["attributes"] == {} and r["severity_number"] for r in out)
+        assert _core(out[0]) == {
+            "level": "ERROR",
+            "logger": "tools.terminal",
+            "body": "boom",
+            "time_unix_nano": 1_700_000_000_000_000_000,
+            "trace_id": "t1",
+            "session_id": None,
+        }
+        # The level is part of the query (#299), not a filter over the page:
+        # WARN and above, in every spelling OpenObserve stores.
+        assert "severity IN ('WARN', 'WARNING'" in sql and "'ERROR'" in sql and "'FATAL'" in sql
+        assert "'INFO'" not in sql
         assert "body LIKE '%o%'" in sql and 'FROM "default"' in sql
+        assert "LIMIT 50" in sql
 
 
 def test_trace_detail_carries_the_backend_ui_link(client):
     with (
-        patch("backends.phoenix.PhoenixAdapter.get_trace", return_value={"batches": []}),
         patch(
-            "backends.phoenix.PhoenixAdapter.trace_url",
+            "hermes_otel.dashboard.backends.phoenix.PhoenixAdapter.get_trace",
+            return_value={"batches": []},
+        ),
+        patch(
+            "hermes_otel.dashboard.backends.phoenix.PhoenixAdapter.trace_url",
             return_value="http://localhost:6006/projects/P/traces/abc",
         ),
     ):

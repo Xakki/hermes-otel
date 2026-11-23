@@ -38,10 +38,11 @@ You can run the same script yourself; on a default install it is at `~/.hermes/p
 | `sessions` | one row per session: turns, spans, tool calls, errors, tokens, cost, first and last |
 | `stats` | the window's totals: turns, sessions, errors, tokens, cost, one table per model and per tool, skills loaded, approvals, the slowest turns |
 | `metrics [name]` | the instruments with data, or one instrument's totals per group and per time bucket |
-| `logs` | captured log records, filterable by level, logger, text, trace and session |
+| `logs` | captured log records and structured events (an `event_name` field marks an event, `⚡` in the text output), filterable by level, logger, text, trace and session, `--event <name>` for one kind and `--events-only` for all of them; `--follow` keeps printing new records from the live store (`--interval` seconds) |
 | `sql "<select …>"` | read-only SQL against the live store |
+| `mcp-config` | the [opentelemetry-mcp](/configuration/mcp-query-server) server config for a configured Jaeger or Tempo entry: the `mcp_servers:` block, the `hermes mcp add` command, Claude Code and Cursor snippets, which entries cannot be read and why; `--source` picks the entry, `--name` the server name, `--apply` runs `hermes mcp add` (refuses to overwrite without `--force`), `--json` for machines |
 
-Common options: `--json` on every command; `--since 30m|2h|3d|1w|<ISO time>` and `--until` for the window; `--limit`; `--source <backend name or type>` to query a backend instead of the live store; `--db <file>` to point at a live store other than `$HERMES_HOME/hermes_otel_live.db`. `traces` and `stats` filter with `--session`, `--status error`, `--model`, `--tool`, `--name`, `--text` and `--min-duration`. While a turn is running, `trace last` is that turn (its root span arrives when it ends); `last-2` is the previous one. `trace` adds `--attrs` (every attribute under each span), `--io` (captured input and output under `llm`, `api` and `tool` spans, clipped to `--io-chars`), `--width` and `--no-bars`.
+Common options: `--json` on every command; `--since 30m|2h|3d|1w|<ISO time>` and `--until` for the window; `--limit`; `--source <backend name or type>` to query a backend instead of the live store; `--db <file>` to point at a live store other than `$HERMES_HOME/hermes_otel_live.db`. `traces` filters with `--session`, `--status error`, `--model`, `--tool`, `--name`, `--text` and `--min-duration` (milliseconds); `stats` takes `--session`. While a turn is running, `trace last` is that turn (its root span arrives when it ends); `last-2` is the previous one. `trace` adds `--attrs` (every attribute under each span), `--io` (captured input and output under `llm`, `api` and `tool` spans, clipped to `--io-chars`), `--width` and `--no-bars`.
 
 ## What a tree looks like
 
@@ -82,11 +83,11 @@ A span in `ERROR` status ends its line with `ERROR: <message>`. When the summary
 
 **The live store** is the default. It is on by default (`dashboard_live`), local, immediate, and holds every span the plugin produced whether or not a backend is configured, bounded by `dashboard_live_max_spans` and `dashboard_live_retention_hours`. It is the same file the [dashboard tab](/dashboard) reads.
 
-**A configured backend** (`--source phoenix`, or the entry's `name:`) is queried through the same adapters the dashboard uses, so the same backends and capabilities apply: Phoenix, Langfuse, Jaeger, Tempo, SigNoz, OpenObserve and Uptrace for traces; metrics and logs only where the [dashboard's table](/dashboard#which-backends-can-the-tab-query) says so. `sessions` is a live-store view; on a backend use `traces --session`. `status` reports each backend's capabilities.
+**A configured backend** (`--source phoenix`, or the entry's `name:`) is queried through the same adapters the dashboard uses, so the same backends and capabilities apply: Phoenix, Langfuse, SigNoz, Jaeger, Zipkin, GreptimeDB, ClickStack, the VictoriaMetrics family, Aspire, Gigapipe, Agenta, Tempo, LGTM, Uptrace and OpenObserve for traces; metrics and logs only where the [dashboard's table](/dashboard#which-backends-can-the-tab-query) says so. `sessions` is a live-store view; on a backend use `traces --session`. `status` reports each backend's capabilities.
 
 ## The SQL escape hatch
 
-The live store is one table, `events`. `kind` is `span`, `metric` or `log`; `data` holds the full record as JSON with attributes under `$.attributes`; the columns `ts`, `trace_id`, `span_id`, `parent_span_id`, `session_id`, `name`, `status`, `start_ns`, `end_ns`, `duration_ms`, `level`, `logger` and `value` are extracted and indexed. The file is opened read-only and only `SELECT`, `WITH`, `EXPLAIN` and `PRAGMA` statements are accepted.
+The live store is one table, `events`. `kind` is `span`, `metric` or `log`; `data` holds the full record as JSON with attributes under `$.attributes`; the columns `ts`, `trace_id`, `span_id`, `parent_span_id`, `session_id`, `name`, `status`, `start_ns`, `end_ns`, `duration_ms`, `level`, `logger` and `value` are copied out of it for fast filtering (the common ones are indexed together with `kind`). The file is opened read-only and only `SELECT`, `WITH`, `EXPLAIN` and `PRAGMA` statements are accepted.
 
 ```bash
 otel.py sql "select name, json_extract(data, '\$.attributes.\"hermes.tool.outcome\"') as outcome, count(*) \
@@ -95,10 +96,10 @@ otel.py sql "select name, json_extract(data, '\$.attributes.\"hermes.tool.outcom
 
 ## How the skill guides the agent
 
-Besides the commands, the skill text carries the method: run `status` first to learn the window; state the retention window, the number of turns and the exact filter with every count; inspect one trace before aggregating; treat a `skill.<name>` span as proof of a load, not of a decision; never dump full prompts across many spans (`--io` and `span` are for one turn at a time); expect backends to lag and Prometheus-style metrics to go stale after the process exits; remember that `logs` is empty unless `capture_logs` is on.
+Besides the commands, the skill text carries the method: run `status` first to learn the window; state the retention window, the number of turns and the exact filter with every count; inspect one trace before aggregating; treat a `skill.<name>` span as proof of a load, not of a decision; never dump full prompts across many spans (`--io` and `span` are for one turn at a time); expect backends to lag and Prometheus-style metrics to go stale after the process exits; remember that `logs` is empty unless `logs.capture` or `logs.events.enabled` is on.
 
 ## Limits
 
 - The script reads what the plugin recorded. With `content_capture: off`, `--io` and `span` show no prompts or tool output; with `preview`, clipped ones.
 - The live store is bounded. For history beyond its window, query a backend.
-- Backend queries go through adapters, so a backend type without one (Honeycomb, LangSmith, W&B Weave, Parseable, generic `otlp`) is listed by `status` as not queryable from here. Its own UI is the way in.
+- Backend queries go through adapters, so a backend type without one (Parseable, Honeycomb, Elastic, OpenLIT, MLflow, Opik, Laminar, LangWatch, Latitude, W&B Weave, LangSmith, generic `otlp`) is listed by `status` as not queryable from here. Its own UI is the way in.

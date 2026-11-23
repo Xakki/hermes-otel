@@ -29,6 +29,8 @@ jobs:
         run: uv run --extra dev ruff check .
       - name: Black format check
         run: uv run --extra dev black --check .
+      - name: Telemetry vocabulary is current (semconv.generated.ts, span-attributes.md, #404)
+        run: uv run python scripts/gen_semconv.py --check
 
   plugin-scan:
     # Hermes scans a plugin's file tree before install; one `critical` finding
@@ -41,7 +43,13 @@ jobs:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.13"
+      - uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .cache/hermes-scanner
+          key: hermes-scanner-${{ hashFiles('scripts/hermes_scanner.lock.json') }}
       - name: Scan install artifact and repository
+        env:
+          HERMES_SCANNER_CACHE_DIR: ${{ github.workspace }}/.cache/hermes-scanner
         run: python scripts/scan_plugin_artifact.py
 
   test:
@@ -57,9 +65,10 @@ jobs:
       - uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
         with:
           enable-cache: true
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: ${{ matrix.python-version }}
+      # uv's managed CPython, not setup-python: ubuntu-latest moved to 26.04,
+      # which setup-python has no 3.9 build for.
+      - name: Install Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
 
       - name: Run unit and integration tests with coverage
         # --python pins uv to the matrix interpreter (otherwise it may pick a
@@ -68,9 +77,15 @@ jobs:
           uv run --python ${{ matrix.python-version }} --extra dev pytest
           --tb=short -q
           --cov=hermes_otel
+          --cov-branch
           --cov-report=term
           --cov-report=xml
+          --cov-report=json
           --cov-fail-under=85
+
+      - name: Per-module coverage floors (coverage-floors.json, #412)
+        if: matrix.python-version == '3.13'
+        run: uv run --python 3.13 python scripts/coverage_floor.py
 
       - name: Upload coverage artifact
         if: matrix.python-version == '3.13'
@@ -79,6 +94,80 @@ jobs:
           name: coverage-xml
           path: coverage.xml
           if-no-files-found: warn
+
+  test-otel-floor:
+    # The declared OpenTelemetry floor (``>=1.35`` in pyproject.toml,
+    # hermes_otel/requirements.txt and plugin.yaml) is a measured value, and
+    # this job is what keeps it true: a fresh venv with the four packages
+    # pinned to exactly the floor, then the full suite. Bump all four places
+    # together when the plugin starts needing a newer SDK API (#257).
+    name: Tests on the OpenTelemetry floor (1.35)
+    runs-on: ubuntu-latest
+    env:
+      OTEL_FLOOR: "1.35.0"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+      - name: Install the project with the OTel packages pinned to the floor
+        run: >
+          uv venv --python 3.11 .venv-floor &&
+          uv pip install --python .venv-floor/bin/python -e ".[dev]"
+          "opentelemetry-api==$OTEL_FLOOR"
+          "opentelemetry-sdk==$OTEL_FLOOR"
+          "opentelemetry-exporter-otlp-proto-http==$OTEL_FLOOR"
+          "opentelemetry-exporter-otlp-proto-grpc==$OTEL_FLOOR"
+      - name: Confirm the floor is what runs
+        run: >
+          .venv-floor/bin/python -c
+          "import sys, opentelemetry.sdk.version as v; assert v.__version__ == sys.argv[1], v.__version__; print('opentelemetry-sdk', v.__version__)"
+          "$OTEL_FLOOR"
+      - name: Run unit and integration tests on the floor
+        run: .venv-floor/bin/python -m pytest --tb=short -q
+
+  e2e-hermes:
+    # The real `hermes` binary, at the version the maintainer runs, driven
+    # through this checkout's plugin: a one-shot turn, a tool-call turn and a
+    # resumed turn against a scripted OpenAI-compatible provider and an
+    # in-process OTLP receiver, both on the loopback interface. No model, no
+    # secret, no backend (#482; tests/e2e_ci). Bump HERMES_VERSION with
+    # `hermes --version`. e2e-hermes-main.yml runs the same tier weekly
+    # against hermes-agent main and files an issue when it breaks.
+    name: End-to-end with a pinned Hermes
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      HERMES_VERSION: v0.22.2
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          # hermes-agent's core pins carry `python_version >= '3.14'` markers
+          # (see catalog-admission.yml): older interpreters install a CLI
+          # that fails at import.
+          python-version: "3.14"
+      - name: Install Hermes Agent ${{ env.HERMES_VERSION }}
+        run: |
+          set -euo pipefail
+          git clone --quiet --depth 1 --branch "$HERMES_VERSION" https://github.com/NousResearch/hermes-agent "$RUNNER_TEMP/hermes-agent"
+          echo "hermes-agent $HERMES_VERSION @ $(git -C "$RUNNER_TEMP/hermes-agent" rev-parse --short HEAD)"
+          # A pip-installed Hermes manages no plugin venv, so the plugin's own
+          # dependencies go into the same interpreter (hermes_otel/requirements.txt).
+          # Through uv with hermes-agent's own overrides, which pip ignores (#637).
+          scripts/install_hermes_checkout.sh "$RUNNER_TEMP/hermes-agent" -r hermes_otel/requirements.txt
+          hermes --version
+      - name: Run the e2e tier (make ci-e2e)
+        # The `runner` context is a step-level thing; a job-level env cannot use it.
+        env:
+          HERMES_E2E_HOME: ${{ runner.temp }}/hermes-e2e-home
+        run: make ci-e2e
 
   dashboard-dist:
     # hermes_otel/dashboard/dist/ is committed build output of dashboard-ui/src.
@@ -96,7 +185,9 @@ jobs:
         run: cd dashboard-ui && npm ci && npm run build
       - name: Fail on a stale bundle
         run: git diff --exit-code -- hermes_otel/dashboard/dist
-      - name: Front-end unit tests (src/lib.ts)
+      - name: Type check, lint, format (tsc, eslint, prettier)
+        run: cd dashboard-ui && npm run check
+      - name: Front-end unit tests (pure helpers + rendered page smoke tests)
         run: cd dashboard-ui && npm test
 
   website-build:
@@ -131,56 +222,3 @@ jobs:
           for f in hermes_otel/plugin.yaml hermes_otel/dashboard/dist/index.js hermes_otel/skills/observability/SKILL.md hermes_otel/hooks/__init__.py hermes_otel/hooks/tools.py; do
             echo "$listing" | grep -q "$f" || { echo "missing from wheel: $f"; exit 1; }
           done
-
-  catalog-admission:
-    # The Hermes plugin catalog gates admission, and every later sha bump, on
-    # `hermes plugins validate --install-deps` at the pinned commit, a
-    # structural check of the entry and a grep for self-updating code
-    # (NousResearch/hermes-agent .github/workflows/plugin-catalog-ci.yml).
-    # Run the same gates here against the latest Hermes release so a red
-    # admission check never shows up first in the upstream PR (#133).
-    name: Catalog admission checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      HERMES_HOME: ${{ github.workspace }}/.hermes-home
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          # hermes-agent's PM toolchain locks CPython 3.14 (pm/lock.json) and,
-          # since 2026-09-23, its core pins carry `python_version >= '3.14'`
-          # markers: on an older interpreter `pip install -e .` installs the
-          # CLI without ruamel, rich, etc. and `hermes` fails at import.
-          python-version: "3.14"
-      - name: Install Hermes Agent from main (what the upstream catalog CI installs)
-        # Upstream runs `pip install -e .` on its own checkout, i.e. hermes-agent
-        # main, so the gate is main's validator (`--install-deps` is newer than
-        # the latest tag). The sha is logged for the record.
-        run: |
-          set -euo pipefail
-          git clone --quiet --depth 1 --branch main https://github.com/NousResearch/hermes-agent "$RUNNER_TEMP/hermes-agent"
-          echo "hermes-agent main @ $(git -C "$RUNNER_TEMP/hermes-agent" rev-parse --short HEAD)"
-          pip install --quiet -e "$RUNNER_TEMP/hermes-agent" pyyaml
-          mkdir -p "$HERMES_HOME"
-          hermes --version
-      - name: hermes plugins validate --install-deps (the catalog gate)
-        run: hermes plugins validate --install-deps ./hermes_otel
-      - name: hermes plugins doctor --ci
-        run: hermes plugins doctor ./hermes_otel --ci
-      - name: Render the catalog entry and run the upstream structural validator
-        run: |
-          set -euo pipefail
-          python scripts/render_catalog_entry.py --sha "$GITHUB_SHA" -o "$RUNNER_TEMP/plugin-catalog/hermes-otel.yaml"
-          cat "$RUNNER_TEMP/plugin-catalog/hermes-otel.yaml"
-          python "$RUNNER_TEMP/hermes-agent/scripts/validate_plugin_catalog.py" "$RUNNER_TEMP/plugin-catalog/hermes-otel.yaml"
-      - name: No self-updating code in the install artifact (catalog rule 3)
-        run: |
-          set -euo pipefail
-          hits=$(grep -rlE 'releases/latest|raw\.githubusercontent\.com' \
-              --include='*.js' --include='*.mjs' --include='*.cjs' --include='*.ts' hermes_otel \
-            | xargs -r grep -lE 'writeTextFile|renamePath|writeFile\(' || true)
-          if [ -n "$hits" ]; then
-            echo "self-updating code in the install artifact: $hits"; exit 1
-          fi
-          echo "no self-updater patterns"

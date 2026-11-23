@@ -1,7 +1,8 @@
 """Which signals each backend type receives by default (#160)."""
 
-from hermes_otel.backends import _TRACES_ONLY, resolve
-from hermes_otel.plugin_config import BackendConfig
+from hermes_otel.backend_config import BackendConfig
+from hermes_otel.backend_specs import SPECS
+from hermes_otel.backends import resolve
 
 
 class TestPhoenixIsTracesOnly:
@@ -18,4 +19,16 @@ class TestPhoenixIsTracesOnly:
         assert rb.supports_metrics is True
 
     def test_traces_only_set_matches_the_docs(self):
-        assert _TRACES_ONLY == {"phoenix", "langfuse", "jaeger", "tempo", "weave"}
+        assert {s.type for s in SPECS if s.traces_only} == {
+            "phoenix",
+            "langfuse",
+            "langsmith",
+            "jaeger",
+            "zipkin",
+            "tempo",
+            "weave",
+            "mlflow",
+            "opik",
+            "latitude",
+            "agenta",
+        }

@@ -1,0 +1,51 @@
+<template>
+  <style>
+    @font-face { font-family: "Rules Compressed"; src: url("assets/fonts/RulesCompressed-Medium.woff2") format("woff2"); font-weight: 500; }
+    @font-face { font-family: "Collapse"; src: url("assets/fonts/Collapse-Bold.woff2") format("woff2"); font-weight: 700; }
+    @font-face { font-family: "JB Mono"; src: url("assets/fonts/JetBrainsMono-Bold.woff2") format("woff2"); font-weight: 700; }
+    #root { position: absolute; inset: 0; background: #f2f2f2; overflow: hidden; }
+    /* Hermes at the telescope (OpenTelemetry's mark is a telescope); the stars join into a tree */
+    #s03-plate { position: absolute; left: 800px; top: 0; width: 1120px; height: 1080px; overflow: hidden; }
+    #s03-plate img { position: absolute; left: -420px; top: 0; width: 1920px; height: 1080px; transform-origin: 1300px 420px; }
+    #s03-kick { position: absolute; left: 120px; top: 96px; font-family: "JB Mono"; font-weight: 700; font-size: 28px;
+      letter-spacing: 0.22em; color: #0000f2; }
+    #s03-title { position: absolute; left: 112px; top: 150px; font-family: "Rules Compressed"; font-weight: 500;
+      font-size: 250px; line-height: 0.84; color: #0000f2; letter-spacing: -0.01em; }
+    #s03-sub { position: absolute; left: 120px; top: 596px; width: 660px; white-space: nowrap; font-family: "Collapse"; font-weight: 700; font-size: 40px; color: #0000f2; }
+    #s03-otel { position: absolute; left: 120px; top: 680px; display: flex; align-items: center; gap: 18px;
+      background: #0000f2; padding: 10px 22px 10px 12px; }
+    #s03-otel img { width: 56px; height: 56px; border-radius: 8px; background: #f2f2f2; }
+    #s03-otel span { font-family: "JB Mono"; font-weight: 700; font-size: 28px; letter-spacing: 0.16em; color: #f2f2f2; }
+    .s03-sig { position: absolute; top: 800px; font-family: "Rules Compressed"; font-weight: 500; font-size: 96px; line-height: 0.9; }
+    #s03-t { left: 120px; color: #0a7fc0; }
+    #s03-m { left: 368px; color: #0f9466; }
+    #s03-l { left: 650px; color: #b87800; }
+  </style>
+  <div id="root" data-composition-id="s03" data-width="1920" data-height="1080" data-layout-allow-overflow>
+    <div id="s03-plate"><img src="assets/gen/a03-telescope.png" alt="Engraving: Hermes on a rooftop looks through a brass telescope; the stars join into a branching tree" /></div>
+    <div id="s03-kick">THE TELESCOPE</div>
+    <div id="s03-title">HERMES<br />OTEL</div>
+    <div id="s03-sub">OpenTelemetry for Hermes Agent</div>
+    <div id="s03-otel"><img src="assets/logos/otel-gh.png" alt="OpenTelemetry" /><span>THE OPEN STANDARD</span></div>
+    <div class="s03-sig" id="s03-t">TRACES</div>
+    <div class="s03-sig" id="s03-m">METRICS</div>
+    <div class="s03-sig" id="s03-l">LOGS</div>
+  </div>
+  <script>
+    (function () {
+      const C = /*CUES*/{"dur": 7.043, "lead": 0.35, "sents": [[0.35, 6.543]], "w": [{"t": "hermes", "s": 0.5, "e": 0.98}, {"t": "hotel", "s": 1.14, "e": 1.38}, {"t": "brings", "s": 1.46, "e": 1.62}, {"t": "the", "s": 1.62, "e": 1.7}, {"t": "tracks", "s": 1.78, "e": 2.1}, {"t": "back", "s": 2.18, "e": 2.26}, {"t": "with", "s": 2.42, "e": 2.5}, {"t": "open", "s": 2.74, "e": 2.9}, {"t": "telemetry", "s": 2.98, "e": 3.78}, {"t": "the", "s": 3.78, "e": 3.86}, {"t": "open", "s": 4.02, "e": 4.18}, {"t": "standard", "s": 4.26, "e": 4.5}, {"t": "for", "s": 4.58, "e": 4.66}, {"t": "traces", "s": 4.74, "e": 5.7}, {"t": "metrics", "s": 5.7, "e": 6.02}, {"t": "and", "s": 5.94, "e": 6.02}, {"t": "logs", "s": 6.1, "e": 6.42}]}/*END*/;
+      const W = C.w || [], D = C.dur || 8;
+      const at = (re, n, fb) => { const h = W.filter((w) => re.test(w.t)); return h.length > (n || 0) ? h[n || 0].s : fb; };
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo("#s03-plate img", { scale: 1.0, x: 0 }, { scale: 1.14, x: 60, duration: D, ease: "power1.inOut" }, 0);
+      const h = at(/hermes/, 0, 0.5);
+      tl.fromTo("#s03-title", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.6, ease: "expo.out" }, h - 0.1);
+      tl.fromTo("#s03-sub", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: "expo.out" }, at(/open|telemetry/, 0, h + 1.4) - 0.1);
+      tl.fromTo("#s03-otel", { opacity: 0, x: -30 }, { opacity: 1, x: 0, duration: 0.5, ease: "expo.out" }, at(/standard/, 0, h + 3) - 0.2);
+      [["#s03-t", /traces?/], ["#s03-m", /metrics?/], ["#s03-l", /logs?/]].forEach(([el, re], i) => {
+        tl.fromTo(el, { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.35, ease: "expo.out" }, at(re, 0, h + 4 + i * 0.6) - 0.05);
+      });
+      window.__timelines["s03"] = tl;
+    })();
+  </script>
+</template>

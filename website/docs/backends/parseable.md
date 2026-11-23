@@ -10,6 +10,17 @@ description: "Send Hermes traces, metrics and logs to Parseable and inspect agen
 OTLP/HTTP. The dedicated backend sends traces, metrics and logs to separate
 datasets and supplies the Parseable routing headers for each signal.
 
+:::warning Parseable OSS needs a collector
+The `type: parseable` backend assumes Parseable **Cloud or Enterprise**: it authenticates
+with `X-API-Key` and sends OTLP/protobuf. Parseable OSS has no API keys and answers
+`400 Protobuf ingestion is not supported in Parseable OSS`, so with OSS put an
+OpenTelemetry Collector in front that re-encodes to OTLP/JSON with Basic auth and the
+`X-P-Stream` / `X-P-Log-Source` headers, and point the plugin at the collector with
+`type: otlp`. `docker-compose/parseable/docker-compose.yaml` in the repo is exactly that pair
+(Parseable OSS v3.2.4 + collector; UI http://localhost:8010, plugin endpoint
+`http://localhost:4348/v1/traces`); all three datasets fill up. See issue #238.
+:::
+
 ## Prerequisites
 
 - A Parseable ingestor URL
@@ -32,7 +43,8 @@ backends:
     metrics_dataset: hermes-metrics
     logs_dataset: hermes-logs
 
-capture_logs: true
+logs:
+  capture: true   # send Python log lines as OTel logs too
 ```
 
 ```bash
@@ -52,8 +64,10 @@ plugin adds these headers automatically:
 | Metrics | `X-P-Stream: hermes-metrics` | `X-P-Log-Source: otel-metrics` |
 | Logs    | `X-P-Stream: hermes-logs`    | `X-P-Log-Source: otel-logs`    |
 
-All three exporters authenticate with `X-API-Key`. Prefer `api_key_env` over
-an inline key so credentials do not enter source control.
+All three exporters authenticate with `X-API-Key`. The key comes from
+`api_key`, else the variable `api_key_env` names, else `OTEL_PARSEABLE_API_KEY`,
+else `PARSEABLE_API_KEY`; without one the entry is skipped at startup. Prefer
+`api_key_env` over an inline key so credentials do not enter source control.
 
 ## Environment-only setup
 
@@ -61,7 +75,7 @@ Without a `backends:` list, hermes-otel can detect Parseable from:
 
 ```bash
 export OTEL_PARSEABLE_ENDPOINT="https://parseable.example.com/v1/traces"
-export PARSEABLE_API_KEY="<parseable-api-key>"
+export OTEL_PARSEABLE_API_KEY="<parseable-api-key>"   # or PARSEABLE_API_KEY
 ```
 
 Optional dataset overrides are `PARSEABLE_TRACES_DATASET`,

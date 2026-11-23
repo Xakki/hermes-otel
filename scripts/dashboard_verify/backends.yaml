@@ -1,0 +1,106 @@
+# What the dashboard-verification harness expects of each backend type.
+# Mirrors the matrix in .claude/skills/hermes-otel-dashboard-verify/SKILL.md.
+#
+#   metrics / logs   whether /status must report the capability
+#   ui               whether trace_url (the "open in" link) must be present
+#   status_semantics root | any   what `status=error` means for this backend
+#                    (root: the root span errored; any: any span in the trace).
+#                    Every backend filters the root span (roots-only search);
+#                    only the live store means "any span errored".
+#   start_tolerance_ms  how far a list row's start may sit from the live root's (default 5)
+#   loggers          false when the backend keeps no logger (scope) field, so L4 is a SKIP
+#   quirks           free text copied into the report
+types:
+  lgtm:
+    metrics: true
+    logs: true
+    ui: true
+    status_semantics: root
+    quirks: counters from raw range-vector samples with first-sample counting; roots via nestedSetParent < 0; regex prefixes carry .*; ids padded to 32 hex; Grafana Explore link needs ui_url
+  openobserve:
+    metrics: true
+    logs: true
+    ui: true
+    status_semantics: root
+    quirks: healthcheck false-negative (no wget in image); process identity from start_time; trace link to /web/traces/trace-details
+  signoz:
+    metrics: true
+    logs: true
+    ui: true
+    status_semantics: root
+    quirks: 30-min JWT (no PAT API in CE); detail via GET /api/v1/traces/{id}; counters read as latest-per-process and increased by the adapter; numeric list columns need float64
+  uptrace:
+    metrics: true
+    logs: true
+    ui: true
+    status_semantics: root
+    quirks: needs endpoint + dsn + user_token; cumulative $m per process (service_instance_id in the grouping); histogram count = sum/avg; roots server-side on 2.1 (_parent_id = ""); one heavy ClickHouse stack at a time on this VM
+  jaeger:
+    metrics: false
+    logs: false
+    ui: true
+    status_semantics: root
+    quirks: status_ok and free_text are none; roots client-side
+  zipkin:
+    metrics: false
+    logs: false
+    ui: true
+    status_semantics: root
+    quirks: zipkin-otel contrib image (stock Zipkin has no OTLP); every tag is a string, coerced back on read; status_ok and free_text are none; roots client-side; spanName exact; window = endTs + lookback
+  greptime:
+    metrics: true
+    logs: true
+    ui: false   # the embedded dashboard has no documented deep link to one trace
+    status_semantics: root
+    quirks: Jaeger-compatible API under /v1/jaeger (v1 grammar, service required, roots client-side); metrics as raw SQL samples per table with first-sample counting (PromQL range vectors answer empty); logs via SQL with json_get_string bracket paths; status_ok and free_text are none
+  clickstack:
+    metrics: true
+    logs: true
+    ui: optional   # a HyperDX search link when the entry sets ui_url
+    status_semantics: root
+    quirks: ClickHouse SQL over HTTP (user api/api on the all-in-one); every map value a string, coerced back; dotted metric names, histograms listed as .sum/.count; counters from raw cumulative samples with first-sample counting; SeverityText lower-cased by the collector
+  victoria:
+    metrics: optional   # true when the entry names metrics_endpoint / prometheus_url
+    logs: optional      # true when the entry names logs_endpoint / logs_url
+    ui: false           # vmui's TraceID mode has no documented deep link
+    status_semantics: root
+    quirks: VictoriaTraces Jaeger-compatible API under /select/jaeger (v1 grammar, every tag a string, error tag true/false); metrics through the Prometheus reader on VictoriaMetrics (Prometheus naming flag); logs through LogsQL NDJSON; status_ok and free_text are none; roots client-side
+  aspire:
+    metrics: false   # the read API has no metrics route (the UI alone shows them)
+    logs: true
+    ui: true
+    status_semantics: root
+    quirks: /api/telemetry/* answers OTLP JSON with no time window and only resource/limit/offset (+ traceId/search on logs) filters, so the adapter fetches a bounded page and applies window, filters, roots and cursor itself; .NET severity spellings mapped from severityNumber
+  gigapipe:
+    metrics: true
+    logs: true
+    ui: false   # qryn-view has no documented deep link; ui_url offers one
+    loggers: false   # Gigapipe keeps no scope label: no logger filter, no loggers list
+    status_semantics: root
+    quirks: the LGTM adapter on one port; select() returns no attributes so cards come from the trace detail; detail JSON is pre-1.0 (instrumentationLibrarySpans, string values) and reshaped; counters via query_range on the 15 s rollup (range-vector instant queries answer empty); Loki labels only, no scope label (logger filter and loggers list unsupported), level label instead of severity
+  agenta:
+    metrics: false
+    logs: false
+    ui: false   # the observability page is /w/<workspace>/p/<project>/…, ids the entry cannot know
+    status_semantics: root
+    quirks: POST /api/spans/query with the project ApiKey (ingest is async, a few seconds); parent_id is null for roots, attributes with dotted keys, status is/is_not, contains for free text; no duration field (client-side); resource attributes not stored; service filter none (the key is the project)
+  tempo:
+    metrics: optional   # true when the entry sets prometheus_url
+    logs: optional      # true when the entry sets loki_url (not "off")
+    ui: optional        # a Grafana link when the entry sets ui_url
+    status_semantics: root
+    quirks: TraceQL; same engine as lgtm traces; metrics/logs/ui only with prometheus_url / loki_url / ui_url on the entry
+  phoenix:
+    metrics: false
+    logs: false
+    ui: true
+    status_semantics: root
+    quirks: status=error filters on the root span's status
+  langfuse:
+    metrics: false
+    logs: false
+    ui: true
+    status_semantics: root
+    # the trace's timestamp is set by Langfuse within a few tens of ms of the root span's start
+    start_tolerance_ms: 100
+    quirks: v4 events-only deployments answer 404 on /api/public/traces (#246) -> kind=config error expected; the list caps limit at 100; TOOL observations lose the tool. prefix (restored); kind filter widens over /api/public/observations by type

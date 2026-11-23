@@ -112,12 +112,17 @@ export type SettingsReport = {
     durable_path: string;
     legacy_path: string;
     unknown_keys: { key: string; note: string | null }[];
+    deprecated_keys?: { key: string; note: string | null }[];
+    /** Short fingerprint of the resolved configuration; the plugin logs the same value at init (#484). */
+    fingerprint?: string;
   };
   counts: { env: number; file: number; default: number; changed: number };
   groups: string[];
   fields: SettingField[];
   effective_yaml: string;
   env: EnvEntry[];
+  /** Vendor credentials present without their OTEL_* opt-in (env-var mode only); empty otherwise. */
+  env_notices?: string[];
   process: {
     role: string;
     pid: number;
@@ -166,10 +171,7 @@ export function fmtSettingValue(f: Pick<SettingField, "kind" | "value">): string
   return String(v);
 }
 
-export function filterFields(
-  fields: SettingField[],
-  opts: { query?: string; changedOnly?: boolean }
-): SettingField[] {
+export function filterFields(fields: SettingField[], opts: { query?: string; changedOnly?: boolean }): SettingField[] {
   const q = (opts.query || "").trim().toLowerCase();
   return fields.filter((f) => {
     if (opts.changedOnly && !f.changed && !f.env_invalid && !f.file_invalid) return false;
@@ -181,9 +183,7 @@ export function filterFields(
 
 export function groupFields(fields: SettingField[], groups: string[]): { group: string; fields: SettingField[] }[] {
   const order = groups.length ? groups : Array.from(new Set(fields.map((f) => f.group)));
-  return order
-    .map((g) => ({ group: g, fields: fields.filter((f) => f.group === g) }))
-    .filter((g) => g.fields.length > 0);
+  return order.map((g) => ({ group: g, fields: fields.filter((f) => f.group === g) })).filter((g) => g.fields.length > 0);
 }
 
 export function pathSourceLabel(ps: SettingsReport["config"]["path_source"]): string {
@@ -206,21 +206,22 @@ export const ENV_GROUP_LABELS: Record<string, string> = {
   plugin: "Plugin",
   hermes: "Hermes",
   backend: "Backends: single-backend mode and credential fallbacks",
-  langsmith: "LangSmith",
   otel: "OpenTelemetry SDK",
   other: "Other OTEL_* / HERMES_OTEL_* variables set here",
 };
-const ENV_GROUP_ORDER = ["override", "plugin", "hermes", "backend", "langsmith", "otel", "other"];
+const ENV_GROUP_ORDER = ["override", "plugin", "hermes", "backend", "otel", "other"];
 
-export function groupEnv(env: EnvEntry[], showUnset: boolean): { group: string; label: string; entries: EnvEntry[] }[] {
+export function groupEnv(env: EnvEntry[], showUnset: boolean, query = ""): { group: string; label: string; entries: EnvEntry[] }[] {
   const seen = new Set<string>();
+  const q = query.trim().toLowerCase();
+  const matches = (e: EnvEntry) => !q || [e.name, e.description, e.value || "", e.maps_to || ""].join(" ").toLowerCase().includes(q);
   const groups = [...ENV_GROUP_ORDER, ...env.map((e) => e.group).filter((g) => !ENV_GROUP_ORDER.includes(g))];
   return groups
     .filter((g) => (seen.has(g) ? false : (seen.add(g), true)))
     .map((g) => ({
       group: g,
       label: ENV_GROUP_LABELS[g] || g,
-      entries: env.filter((e) => e.group === g && (showUnset || e.set)),
+      entries: env.filter((e) => e.group === g && (showUnset || e.set) && matches(e)),
     }))
     .filter((g) => g.entries.length > 0);
 }

@@ -1,15 +1,7 @@
 """Unit tests for the SQLite-backed live store (zero-config dashboard)."""
 
-import pytest
-
-from hermes_otel.live_store import LiveStore, get_live_store
-
-
-@pytest.fixture()
-def store(tmp_path):
-    s = LiveStore(db_path=str(tmp_path / "live.db"))
-    yield s
-    s.close()
+from hermes_otel.live_store import LiveStore
+from hermes_otel.live_store_registry import get_live_store
 
 
 class TestLiveStore:
@@ -77,42 +69,50 @@ class TestLiveStore:
             writer.close()
             reader.close()
 
-    def test_live_log_handler_feeds_store(self, store):
+    def test_live_log_processor_feeds_store(self, store):
         import logging
 
-        from hermes_otel.tracer import _LiveLogHandler
+        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+        from opentelemetry.sdk.resources import Resource
 
-        h = _LiveLogHandler(store)
-        rec = logging.LogRecord("my.logger", logging.WARNING, __file__, 1, "boom %s", ("x",), None)
-        h.emit(rec)
-        logs = store.logs()
-        assert len(logs) == 1
-        assert logs[0]["level"] == "WARNING"
-        assert logs[0]["logger"] == "my.logger"
-        assert logs[0]["body"] == "boom x"
+        from hermes_otel.log_handler import LiveLogProcessor
 
-    def test_live_log_noise_filter(self):
-        import logging
+        provider = LoggerProvider(resource=Resource.create({}))
+        provider.add_log_record_processor(LiveLogProcessor(store))
+        handler = LoggingHandler(level=logging.DEBUG, logger_provider=provider)
+        lg = logging.getLogger("my.logger")
+        lg.propagate = False
+        lg.setLevel(logging.DEBUG)
+        lg.addHandler(handler)
+        try:
+            lg.warning("boom %s", "x")
+            lg.debug("below the live floor")
+        finally:
+            lg.removeHandler(handler)
+        (row,) = store.logs()
+        assert row["level"] == "WARN"  # OTel spelling since store v3 (#266)
+        assert row["severity_number"] == 13
+        assert row["logger"] == "my.logger" and row["scope"] == "my.logger"
+        assert row["body"] == "boom x"
+        assert row["span_id"] is None and row["event_name"] is None
+        assert isinstance(row["attributes"], dict) and "code.function.name" in row["attributes"]
 
-        from hermes_otel.tracer import _LiveLogNoiseFilter
-
-        nf = _LiveLogNoiseFilter()
-
-        def rec(name, msg):
-            return logging.LogRecord(name, logging.INFO, __file__, 1, msg, None, None)
+    def test_live_log_noise(self):
+        from hermes_otel.log_handler import _is_live_noise
 
         # dropped: noisy logger + probe substrings
-        assert nf.filter(rec("gateway.config", "anything")) is False
+        assert _is_live_noise("gateway.config", "anything") is True
         assert (
-            nf.filter(rec("gateway.run", "kanban notifier: board default has no subscriptions"))
-            is False
+            _is_live_noise("gateway.run", "kanban notifier: board default has no subscriptions")
+            is True
         )
-        assert nf.filter(rec("x", "Plugin platform 'raft' available but not configured")) is False
-        # kept: real agent activity
-        assert nf.filter(rec("hermes_otel", "exported 3 spans")) is True
+        assert _is_live_noise("x", "Plugin platform 'raft' available but not configured") is True
+        # kept: real agent activity, and a non-string body
+        assert _is_live_noise("hermes_otel", "exported 3 spans") is False
+        assert _is_live_noise("hermes_otel", {"k": "v"}) is False
 
     def test_singleton_create_flag(self, tmp_path):
-        import hermes_otel.live_store as ls
+        import hermes_otel.live_store_registry as ls
 
         ls._LIVE_STORE = None
         assert get_live_store(create=False) is None

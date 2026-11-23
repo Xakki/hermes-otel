@@ -2,7 +2,7 @@
 
 Tests inject backdated start times via the public
 ``plugin.register_turn(session_id, started_at=...)`` seam rather than
-writing to ``plugin._turn_started_at`` directly — so the tests stay
+writing to the tracker's turn registry directly — so the tests stay
 robust to internal-state refactors.
 """
 
@@ -21,11 +21,13 @@ class TestOrphanSweep:
     def test_session_finalized_with_timed_out_status(self, inmemory_otel_setup):
         """A session older than root_span_ttl_ms gets finalized as timed_out."""
         exporter, plugin = inmemory_otel_setup
-        # Shrink TTL to 0 so any positive age expires.
-        plugin.config = HermesOtelConfig(root_span_ttl_ms=0)
+        # The smallest TTL the config accepts (#487: 0 is out of range), so
+        # any age past a millisecond expires.
+        plugin.config = HermesOtelConfig(root_span_ttl_ms=1)
 
         on_session_start(session_id="s_dead", model="gpt-4", platform="cli")
         # Don't call on_session_end — simulate a dropped end hook.
+        time.sleep(0.005)
 
         # Now fire an unrelated pre_* hook on a different session — this is
         # what the PRD expects to trigger the sweep.

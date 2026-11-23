@@ -12,22 +12,30 @@ Two ways to pick backends:
   * **Multi-backend** (preferred): set ``backends:`` in config.yaml. Every entry
     fans out via its own ``BatchSpanProcessor`` so traces land in all
     configured collectors in parallel without blocking the agent thread.
-  * **Single-backend (legacy)**: set one of the ``OTEL_*_ENDPOINT`` env vars
-    or LangSmith/Langfuse credentials. When ``backends:`` is empty, env-var
-    detection is used and at most one backend is selected: LangSmith first,
-    then the order of ``backends._ENV_PRIORITY``.
+  * **Single-backend (legacy)**: set one backend's ``OTEL_*`` variables (an
+    ``OTEL_*_ENDPOINT``, or a vendor's ``OTEL_*`` key such as
+    ``OTEL_LANGSMITH_API_KEY``). When ``backends:`` is empty, env-var detection
+    is used and at most one backend is selected, the first that resolves in
+    ``backend_specs.ENV_PRIORITY`` order (LangSmith first).
 """
 
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import json
 import os
 import re
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple, Union
 
 from .debug_utils import logger
+from .instruments import _INSTRUMENTS, DISABLE_ALL, instrument_name
+from .redaction import is_header_secret_name, is_secret_name, is_secret_value
+
+if TYPE_CHECKING:  # the ``backends:`` list has its own loader (backend_config.py)
+    from .backend_config import BackendConfig
 
 Scalar = Union[str, int, float, bool]
 
@@ -47,253 +55,859 @@ def hermes_home() -> Path:
 # Environment variable holding an explicit config file path.
 CONFIG_PATH_ENV = "HERMES_OTEL_CONFIG"
 
-# Outside the plugin directory, so it survives `hermes plugins install --force`
-# (which replaces the plugin directory wholesale — see issue #55).
-DURABLE_CONFIG_PATH = hermes_home() / "hermes_otel.yaml"
+# The two file locations, derived from the home in force *at call time* so
+# each profile of a multiplexed gateway reads its own (#405). ``None`` means
+# "derive"; a test (or an embedder) may pin either to a path.
+#
+# Durable: outside the plugin directory, so it survives
+# `hermes plugins install --force` (which replaces the plugin directory
+# wholesale, see issue #55).
+DURABLE_CONFIG_PATH: Optional[Path] = None
+# Legacy: inside the plugin directory. Still read, so existing installs keep
+# working, but it is wiped by a reinstall.
+DEFAULT_CONFIG_PATH: Optional[Path] = None
 
-# The historical location: inside the plugin directory. Still read, so existing
-# installs keep working, but it is wiped by a reinstall.
-DEFAULT_CONFIG_PATH = hermes_home() / "plugins" / "hermes_otel" / "config.yaml"
+
+def durable_config_path() -> Path:
+    """``$HERMES_HOME/hermes_otel.yaml`` for the home in force now."""
+    return DURABLE_CONFIG_PATH or hermes_home() / "hermes_otel.yaml"
 
 
-def resolve_config_path() -> Optional[Path]:
-    """Return the config file to read, or ``None`` when there is none.
+def legacy_config_path() -> Path:
+    """``$HERMES_HOME/plugins/hermes_otel/config.yaml`` for the home in force now."""
+    return DEFAULT_CONFIG_PATH or hermes_home() / "plugins" / "hermes_otel" / "config.yaml"
 
-    Order: ``HERMES_OTEL_CONFIG`` (even if missing — an explicit path that does
-    not exist is worth surfacing), then the durable location, then the legacy
-    plugin-directory copy. Module-level path constants are read at call time so
-    tests can redirect them.
+
+# The (durable, legacy) pairs already warned about: the dashboard resolves the
+# path on every poll and must not repeat the warning (#519).
+_WARNED_SHADOWED: set = set()
+
+
+def resolve_config_path_with_reason() -> Tuple[Optional[Path], str]:
+    """The config file to read and the rule that picked it.
+
+    Order: ``HERMES_OTEL_CONFIG`` (``env``; even if missing, since an explicit
+    path that does not exist is worth surfacing), then the durable location
+    (``durable``), then the legacy plugin-directory copy (``legacy``);
+    ``(None, "none")`` when there is no file. Both files present is warned
+    about once per pair.
     """
     override = os.environ.get(CONFIG_PATH_ENV, "").strip()
     if override:
-        return Path(override).expanduser()
+        return Path(override).expanduser(), "env"
 
-    durable, legacy = DURABLE_CONFIG_PATH, DEFAULT_CONFIG_PATH
+    durable, legacy = durable_config_path(), legacy_config_path()
     if durable.exists():
-        if legacy.exists():
+        if legacy.exists() and (str(durable), str(legacy)) not in _WARNED_SHADOWED:
+            _WARNED_SHADOWED.add((str(durable), str(legacy)))
             logger.warning(
                 f"[hermes-otel] using {durable}; ignoring the copy in the plugin "
                 f"directory ({legacy}). Delete the latter to silence this."
             )
-        return durable
+        return durable, "durable"
     if legacy.exists():
-        return legacy
-    return None
+        return legacy, "legacy"
+    return None, "none"
 
 
-_ENV_PREFIX = "HERMES_OTEL_"
+def resolve_config_path() -> Optional[Path]:
+    """Return the config file to read, or ``None`` when there is none
+    (see :func:`resolve_config_path_with_reason`)."""
+    return resolve_config_path_with_reason()[0]
+
+
+ENV_PREFIX = "HERMES_OTEL_"
 _TRUE_STRINGS = {"1", "true", "yes", "on"}
 _FALSE_STRINGS = {"0", "false", "no", "off"}
 
 
-@dataclass(frozen=True)
-class BackendConfig:
-    """One collector destination declared in ``config.yaml``.
+# Logger prefixes the logs pipeline never forwards: the OTel SDK and the HTTP
+# client stack (an export that logs itself would feed the next export), plus
+# the third-party loggers Hermes itself pins at WARNING (hermes_logging._NOISY_LOGGERS).
+DEFAULT_LOG_EXCLUDE_LOGGERS: Tuple[str, ...] = (
+    "opentelemetry",
+    "urllib3",
+    "httpx",
+    "httpcore",
+    "requests",
+    "openai",
+    "asyncio",
+    "hpack",
+    "grpc",
+    "websockets",
+    "charset_normalizer",
+    "markdown_it",
+)
 
-    Secrets (api keys, ingestion keys, langfuse credentials) should normally
-    live in env vars rather than yaml — use the ``*_env`` fields to point at
-    the env var name. Inline fields are accepted for convenience but are
-    discouraged because the file is plaintext.
+LOG_EVENTS_CONTENT_MODES = ("inherit", "full", "preview", "off")
+CONTENT_CAPTURE_MODES = ("off", "preview", "full")
+GPU_VENDORS = ("auto", "amd", "nvidia", "off")
+VALID_TEMPORALITIES = ("cumulative", "delta")
+VALID_HISTOGRAMS = ("explicit", "exponential")
+VALID_METRIC_NAME_COMPAT = ("off", "claude_code", "both")
+
+
+def _lower(text: str) -> str:
+    return text.strip().lower()
+
+
+def _upper(text: str) -> str:
+    return text.strip().upper()
+
+
+def _field(default: Any, doc: str, group: str, **rule: Any) -> Any:
+    """One config knob: its default, its one-line reference text, the
+    Settings-tab group it belongs to, and how a yaml or env value is coerced.
+
+    ``rule`` keys: ``bounds=(lo, hi)`` for numbers (checked in
+    ``__post_init__``; ``hi=None`` is open), and for :func:`_parse_scalar`
+    ``choices`` (the accepted values), ``normalize`` (applied to the parsed
+    value first), ``aliases`` (spellings mapped onto a choice) and
+    ``bool_as=(when_false, when_true)`` (what a YAML 1.1 bare ``off`` / ``on``,
+    read as a bool, stands for). The reference tables, the Settings tab and
+    the loader all read this metadata, so a knob cannot be undocumented.
     """
+    return field(default=default, metadata=dict(doc=doc, group=group, **rule))
 
-    type: str  # phoenix | langfuse | signoz | jaeger | tempo | otlp | parseable | honeycomb | weave
-    name: Optional[str] = None  # display name (defaults to type)
-    endpoint: Optional[str] = None  # OTLP HTTP traces URL
-    # Where this backend's web UI lives, for the dashboard's Settings tab to
-    # link to. Optional: when unset the tab derives it from ``endpoint`` for
-    # the types whose UI shares the OTLP origin (Phoenix, Langfuse, ...).
-    ui_url: Optional[str] = None
-    headers: Optional[Dict[str, str]] = None  # extra/override HTTP headers
-    traces: Optional[bool] = None  # None = on. False = dashboard/query-only, no trace export.
-    metrics: Optional[bool] = None  # None = auto (off for langfuse/jaeger/tempo)
-    metrics_temporality: Optional[str] = None  # cumulative | delta; None = type preset / top-level
-    logs: Optional[bool] = (
-        None  # None = auto (on for signoz/otlp/lgtm/uptrace/openobserve/parseable/honeycomb)
-    )
-    # Langfuse credentials
-    public_key: Optional[str] = None
-    secret_key: Optional[str] = None
-    public_key_env: Optional[str] = None
-    secret_key_env: Optional[str] = None
-    base_url: Optional[str] = None  # langfuse alt to endpoint
-    # SigNoz cloud credential
-    ingestion_key: Optional[str] = None
-    ingestion_key_env: Optional[str] = None
-    # Uptrace DSN (sent as the ``uptrace-dsn`` header on every OTLP export)
-    dsn: Optional[str] = None
-    dsn_env: Optional[str] = None
-    # OpenObserve Basic-auth credentials + optional stream name
-    user: Optional[str] = None
-    user_env: Optional[str] = None
-    password: Optional[str] = None
-    password_env: Optional[str] = None
-    stream_name: Optional[str] = None
-    # Parseable dataset routing (one dataset per OTLP signal)
-    traces_dataset: Optional[str] = None
-    metrics_dataset: Optional[str] = None
-    logs_dataset: Optional[str] = None
-    # Honeycomb: API key (sent as the ``x-honeycomb-team`` header), optional
-    # dataset (``x-honeycomb-dataset``), and ``region`` (``us``|``eu``) used to
-    # default the endpoint when one isn't given explicitly.
-    api_key: Optional[str] = None
-    api_key_env: Optional[str] = None
-    dataset: Optional[str] = None
-    region: Optional[str] = None
-    # W&B Weave routing. Weave authenticates with ``api_key`` and routes spans
-    # by OTel Resource attributes. These fields are copied to ``wandb.entity``
-    # / ``wandb.project``; users can alternatively set them in top-level
-    # ``resource_attributes``.
-    entity: Optional[str] = None
-    entity_env: Optional[str] = None
-    project: Optional[str] = None
-    project_env: Optional[str] = None
+
+# ``common_attributes`` (#480): what every span, log record and metric point
+# is stamped with. The plugin's own vocabularies are off limits so a config
+# can never shadow (or be shadowed by) a ``hermes.*`` / ``gen_ai.*`` attribute
+# or the service identity; the key cap is Prometheus-friendly (a label name
+# is the key with its dots replaced), the value rule is OTel's attribute rule.
+COMMON_ATTRIBUTE_RESERVED_PREFIXES: Tuple[str, ...] = ("hermes.", "gen_ai.", "service.")
+COMMON_ATTRIBUTE_KEY_MAX_LENGTH = 64
+
+
+def validate_common_attributes(mapping: Any) -> Optional[Dict[str, Scalar]]:
+    """The usable ``common_attributes`` entries, each rejected one warned about.
+
+    Keeps a key that is a non-empty string of at most
+    ``COMMON_ATTRIBUTE_KEY_MAX_LENGTH`` characters outside the reserved
+    prefixes, with a scalar value (``str`` / ``int`` / ``float`` / ``bool``;
+    ``None`` is not an attribute). Lists, mappings and reserved keys are
+    dropped with a warning naming the key, so one bad entry never costs the
+    others. ``None`` when nothing is left (the field's unset spelling).
+    """
+    if not isinstance(mapping, dict):
+        if mapping is not None:
+            logger.warning("[hermes-otel] common_attributes must be a mapping; ignoring")
+        return None
+    kept: Dict[str, Scalar] = {}
+    for raw_key, value in mapping.items():
+        key = str(raw_key).strip()
+        if not key or len(key) > COMMON_ATTRIBUTE_KEY_MAX_LENGTH:
+            logger.warning(
+                f"[hermes-otel] common_attributes: key {raw_key!r} must be 1 to "
+                f"{COMMON_ATTRIBUTE_KEY_MAX_LENGTH} characters; dropped"
+            )
+            continue
+        if key.startswith(COMMON_ATTRIBUTE_RESERVED_PREFIXES):
+            logger.warning(
+                f"[hermes-otel] common_attributes: key {key!r} is reserved "
+                f"({', '.join(COMMON_ATTRIBUTE_RESERVED_PREFIXES)} belong to the plugin); dropped"
+            )
+            continue
+        if value is None or not isinstance(value, (str, int, float, bool)):
+            logger.warning(
+                f"[hermes-otel] common_attributes: {key!r} must be a string, number or "
+                f"bool, not {type(value).__name__}; dropped"
+            )
+            continue
+        kept[key] = value
+    return kept or None
+
+
+# ``disable_spans`` (#479): the span families a config may switch off, by the
+# first segment of the span name (``tool.*``, ``api.*``, ...). ``approval``
+# covers the bare ``approval`` span too; ``auxiliary`` is the auxiliary
+# ``api.*`` span (titling, compression, MoA), which its hook names explicitly
+# so ``api`` leaves it alone. The turn roots (``agent`` / ``cron``) cannot be
+# disabled: a backend's ``traces: false`` is the switch for whole traces.
+SPAN_FAMILIES: Tuple[str, ...] = (
+    "tool",
+    "api",
+    "llm",
+    "approval",
+    "skill",
+    "subagent",
+    "kanban",
+    "auxiliary",
+    "human_input",
+)
+
+
+def _names(values: Any) -> Tuple[str, ...]:
+    """The non-empty entries of a list field as given (a yaml list, a tuple or
+    one comma-separated string), stripped."""
+    if isinstance(values, str):
+        values = values.split(",")
+    return tuple(str(v).strip() for v in (values or ()) if v is not None and str(v).strip())
+
+
+def validate_disable_metrics(values: Any) -> Tuple[str, ...]:
+    """The ``disable_metrics`` entries as OTLP names, deduplicated in order;
+    each unknown spelling is dropped with a warning that lists the valid ones.
+
+    A spelling is the hook-side key (``tool_duration``), the key with dots
+    (``tool.duration``), the OTLP name (``hermes.tool.duration``) or that name
+    without ``hermes.``; ``all`` disables every instrument.
+    """
+    kept: Dict[str, None] = {}
+    for raw in _names(values):
+        name = instrument_name(raw)
+        if name is None:
+            valid = ", ".join(sorted(s.name for s in _INSTRUMENTS.values()))
+            logger.warning(
+                f"[hermes-otel] disable_metrics: {raw!r} is not an instrument; ignored. "
+                f"Valid: {DISABLE_ALL}, {valid}"
+            )
+            continue
+        kept[name] = None
+    return tuple(kept)
+
+
+def validate_disable_spans(values: Any) -> Tuple[str, ...]:
+    """The ``disable_spans`` families, lower-cased and deduplicated in order;
+    an unknown family is dropped with a warning that lists the valid ones, and
+    ``all`` is refused (the turn root stays; ``traces: false`` on a backend
+    switches whole traces off)."""
+    kept: Dict[str, None] = {}
+    for raw in _names(values):
+        family = raw.lower()
+        if family == DISABLE_ALL:
+            logger.warning(
+                "[hermes-otel] disable_spans: 'all' is not allowed (the turn root always "
+                "records); set traces: false on the backend instead. Ignored"
+            )
+            continue
+        if family not in SPAN_FAMILIES:
+            logger.warning(
+                f"[hermes-otel] disable_spans: {raw!r} is not a span family; ignored. "
+                f"Valid: {', '.join(SPAN_FAMILIES)}"
+            )
+            continue
+        kept[family] = None
+    return tuple(kept)
+
+
+# ``max_export_batch_size`` may not exceed ``max_queue_size`` (the SDK raises):
+# (batch field, queue field).
+_BATCH_PAIRS: Tuple[Tuple[str, str], ...] = (
+    ("span_batch_max_export_batch_size", "span_batch_max_queue_size"),
+    ("log_batch_max_export_batch_size", "log_batch_max_queue_size"),
+)
+
+
+def _validate_numeric_bounds(cfg: Any) -> None:
+    """Warn about and reset every numeric field outside its ``bounds`` (#487).
+
+    Out-of-range values (a ``0`` queue size, a negative timeout, a sample rate
+    above 1) used to reach the SDK, which raises inside the pipeline init:
+    every backend then logged "traces init failed" and the run exported
+    nothing. Runs from ``__post_init__`` so yaml, env and direct construction
+    all pass through it. Strings that are not numbers never get here: the
+    loader rejected them already. A bool is not a number for this purpose;
+    ``None`` stays ``None`` for the Optional fields.
+    """
+    for f in dataclasses.fields(cfg):
+        bounds = f.metadata.get("bounds")
+        value = getattr(cfg, f.name)
+        if bounds is None or value is None:
+            continue
+        lo, hi = bounds
+        ok = isinstance(value, (int, float)) and not isinstance(value, bool)
+        if ok and (value < lo or (hi is not None and value > hi)):
+            ok = False
+        if ok:
+            continue
+        want = f"at least {lo}" if hi is None else f"between {lo} and {hi}"
+        logger.warning(
+            f"[hermes-otel] {f.name}={value!r} must be {want}; using "
+            + ("null" if f.default is None else repr(f.default))
+        )
+        object.__setattr__(cfg, f.name, f.default)
+    for batch_name, queue_name in _BATCH_PAIRS:
+        batch, queue = getattr(cfg, batch_name), getattr(cfg, queue_name)
+        if batch is not None and batch > queue:
+            logger.warning(
+                f"[hermes-otel] {batch_name}={batch} exceeds {queue_name}={queue}; "
+                f"using {queue}"
+            )
+            object.__setattr__(cfg, batch_name, queue)
 
 
 @dataclass(frozen=True)
 class HermesOtelConfig:
-    """Frozen configuration object passed through the plugin."""
+    """Frozen configuration object passed through the plugin.
 
-    enabled: bool = True
-    sample_rate: Optional[float] = None  # None = AlwaysOn. 0..1 = ratio.
-    root_span_ttl_ms: int = 600_000  # 10 min orphan sweep threshold
-    flush_interval_ms: int = 60_000  # metrics export interval
-    preview_max_chars: int = 1200  # global clip_preview truncation fallback
-    capture_previews: bool = True  # global privacy kill switch
-    # Per-category overrides — when set, each takes precedence over preview_max_chars
-    # for its specific span type. None = fall back to preview_max_chars.
-    tool_input_preview_max_chars: Optional[int] = None
-    tool_output_preview_max_chars: Optional[int] = None
-    llm_input_preview_max_chars: Optional[int] = None
-    llm_output_preview_max_chars: Optional[int] = None
-    headers: Optional[Dict[str, str]] = None  # extra OTLP headers (all backends)
-    global_tags: Optional[Dict[str, Scalar]] = None
-    resource_attributes: Optional[Dict[str, Scalar]] = None
-    project_name: Optional[str] = None  # supersedes OTEL_PROJECT_NAME
-    # ── BatchSpanProcessor tunables (Phase 2: non-blocking export) ──────
-    span_batch_max_queue_size: int = 2048  # spans buffered before drops
-    span_batch_schedule_delay_ms: int = 1000  # worker wake-up cadence
+    Every field is declared with :func:`_field`: default, reference text,
+    Settings-tab group and coercion rule in one place. ``FIELD_DOCS``,
+    ``NUMERIC_BOUNDS``, ``FIELD_GROUPS`` and ``FIELD_RULES`` below are views
+    over that metadata.
+    """
+
+    enabled: bool = _field(
+        True, "Master switch; `false` registers no hooks and exports nothing", "General"
+    )
+    sample_rate: Optional[float] = _field(
+        None,
+        "Parent-based trace-ID ratio 0.0–1.0; `null` = AlwaysOn (no sampling)",
+        "General",
+        bounds=(0.0, 1.0),
+    )
+    root_span_ttl_ms: int = _field(
+        600_000,
+        "Orphan-sweep TTL: a turn root older than this with no end hook is closed",
+        "Export and batching",
+        bounds=(1, None),
+    )
+    # A delegation (``subagent.*``) span outlives its parent's turn: Hermes
+    # runs top-level delegations in the background (#392). Hermes sets no
+    # child timeout by default, hence a day.
+    subagent_span_ttl_ms: int = _field(
+        86_400_000,
+        "Delegation-span TTL: a `subagent.*` span whose `subagent_stop` never arrives is closed after this (it outlives the parent's turn by design)",
+        "Export and batching",
+        bounds=(1, None),
+    )
+    flush_interval_ms: int = _field(
+        60_000,
+        "Metrics export cadence (PeriodicExportingMetricReader)",
+        "Export and batching",
+        bounds=(1, None),
+    )
+    preview_max_chars: int = _field(
+        1200,
+        "Cap on preview strings (tool args/results, user message, assistant response)",
+        "Content capture",
+        bounds=(1, None),
+    )
+    capture_previews: bool = _field(
+        True,
+        "Deprecated spelling of `content_capture: off` (when `false`); kept consistent with `content_capture`",
+        "Content capture",
+    )
+    tool_input_preview_max_chars: Optional[int] = _field(
+        None,
+        "Per-category cap for tool args previews; `null` = `preview_max_chars`",
+        "Content capture",
+        bounds=(1, None),
+    )
+    tool_output_preview_max_chars: Optional[int] = _field(
+        None,
+        "Per-category cap for tool result previews; `null` = `preview_max_chars`",
+        "Content capture",
+        bounds=(1, None),
+    )
+    llm_input_preview_max_chars: Optional[int] = _field(
+        None,
+        "Per-category cap for LLM input previews; `null` = `preview_max_chars`",
+        "Content capture",
+        bounds=(1, None),
+    )
+    llm_output_preview_max_chars: Optional[int] = _field(
+        None,
+        "Per-category cap for LLM output previews; `null` = `preview_max_chars`",
+        "Content capture",
+        bounds=(1, None),
+    )
+    headers: Optional[Dict[str, str]] = _field(
+        None,
+        "Extra HTTP headers on every OTLP request; per-backend `headers:` are merged onto these",
+        "General",
+    )
+    global_tags: Optional[Dict[str, Scalar]] = _field(
+        None,
+        "Deprecated: merged into `resource_attributes` at load (which wins on a key conflict)",
+        "General",
+    )
+    resource_attributes: Optional[Dict[str, Scalar]] = _field(
+        None,
+        "Merged into the Resource on top of the defaults `service.name=hermes-agent`, `service.instance.id` (per-process UUID), `service.version`, `process.pid`, `hermes.profile`",
+        "General",
+    )
+    common_attributes: Optional[Dict[str, Scalar]] = _field(
+        None,
+        "Stamped on every span, log record and metric point (not the Resource), for backends that do not index resource attributes per signal; scalar values, keys of at most 64 chars outside `hermes.` / `gen_ai.` / `service.`. A plugin attribute of the same name wins; changing a value starts new metric series",
+        "General",
+    )
+    project_name: Optional[str] = _field(
+        None,
+        "`openinference.project.name` on the Resource (Phoenix project); overrides `OTEL_PROJECT_NAME`",
+        "General",
+    )
+    service_name_from_profile: bool = _field(
+        False,
+        "A named profile exports as `service.name=<profile>` with `service.namespace=hermes-agent`; the default profile stays `hermes-agent`. `resource_attributes.service.name` still wins",
+        "General",
+    )
+    # ── BatchSpanProcessor tunables (non-blocking export) ───────────────
+    span_batch_max_queue_size: int = _field(
+        2048, "Max buffered spans per backend before drops", "Export and batching", bounds=(1, None)
+    )
+    span_batch_schedule_delay_ms: int = _field(
+        1000, "BatchSpanProcessor worker wake-up cadence", "Export and batching", bounds=(1, None)
+    )
     # None = auto: 512, or 64 when content_capture is "full" (large spans
     # would otherwise make a single OTLP POST bigger than most receivers
     # accept). See effective_export_batch_size().
-    span_batch_max_export_batch_size: Optional[int] = None
-    span_batch_export_timeout_ms: int = 30_000  # per-export HTTP timeout
-    force_flush_on_session_end: bool = True  # flush so UI sees traces promptly
-    # How long the hook thread waits for that background flush to finish
-    # before the turn returns to Hermes, in ms. Bounded and coalesced: a
-    # healthy backend receives the turn in well under it, a stuck one costs at
-    # most this much per turn. 0 = do not wait. A one-shot ``hermes -z`` exits
-    # right after the turn, so the wait is what gets its spans out.
-    # 1500 since #233: the flush now includes the metric and log providers,
-    # and a one-shot `hermes -z` exits the moment this wait returns.
-    force_flush_wait_ms: int = 1500
-    # ── LLM span input fidelity ─────────────────────────────────────────
-    # Opt-in: serialise the redacted conversation_history onto the llm span's
-    # input.value so the UI shows every message instead of just the last
-    # user turn. The api.* spans don't carry message-level detail, so
-    # flipping this on is the easiest way to see what the model actually saw.
-    capture_conversation_history: bool = False
-    conversation_history_max_chars: int = 20_000
+    span_batch_max_export_batch_size: Optional[int] = _field(
+        None,
+        "Max spans per OTLP POST; `null` = 512, or 64 when `content_capture` is `full`",
+        "Export and batching",
+        bounds=(1, None),
+    )
+    span_batch_export_timeout_ms: int = _field(
+        30_000, "Per-export HTTP timeout", "Export and batching", bounds=(1, None)
+    )
+    force_flush_on_session_end: bool = _field(
+        True,
+        "Flush every backend's span queue at the end of each turn, from a background thread (500 ms per backend, coalesced)",
+        "Export and batching",
+    )
+    # Bounded and coalesced: a healthy backend receives the turn in well
+    # under it, a stuck one costs at most this much per turn. 1500 since
+    # #233: the flush includes the metric and log providers.
+    force_flush_wait_ms: int = _field(
+        1500,
+        "How long the turn waits for that background flush (spans, then metrics and logs on a second thread) before returning to Hermes; a one-shot run exits right after, so this bounds what it exports; `0` = do not wait",
+        "Export and batching",
+        bounds=(0, None),
+    )
+    capture_conversation_history: bool = _field(
+        False, "Attach the full message JSON to `llm.*` spans", "Content capture"
+    )
+    conversation_history_max_chars: int = _field(
+        20_000, "JSON cap when conversation capture is on", "Content capture", bounds=(1, None)
+    )
     # ── Content capture ─────────────────────────────────────────────────
-    # Optional unified request/log policy. When set, this overrides the legacy
-    # content_capture/capture_logs/log_level knobs with one explicit mode.
-    # Unset preserves the pre-existing configuration behavior.
-    level: Optional[str] = None  # debug | info | notice
-    # What of the conversation content is recorded on spans:
-    #   "full"     the complete prompt (system prompt + every message) and
-    #              the complete response on every api.* span, unclipped;
-    #              previews elsewhere. The default: this is a debugging tool
-    #              and the data goes only to backends you configure.
-    #   "preview"  clipped previews only (``preview_max_chars``).
-    #   "off"      no prompt, tool or response content at all; metadata only.
     # ``capture_previews`` / ``capture_full_prompts`` / ``capture_full_responses``
     # are the pre-1.11 spellings; load_config keeps them consistent with
-    # ``content_capture`` (see _reconcile_content_capture) and hook code reads
-    # the booleans. ``capture_previews: false`` still means "off".
-    content_capture: str = "full"
-    capture_full_prompts: bool = True
-    capture_full_responses: bool = True
-    # Opt-in: platform user identifier from Hermes gateway sessions. Hermes
-    # currently exposes this as ``sender_id`` only on pre_llm_call.
-    capture_sender_id: bool = False
+    # ``content_capture`` (see _reconcile_content_capture) and hook code asks
+    # ``content_mode()`` / ``captures_full_prompts()`` etc. below.
+    level: Optional[str] = _field(
+        None,
+        "Maximum request-log content: `debug` permits full, `info` permits previews, `notice` permits no bodies; existing privacy and log rules can only narrow it",
+        "Content capture",
+        choices=("debug", "info", "notice"),
+        normalize=_lower,
+    )
+    content_capture: str = _field(
+        "full",
+        "`full` (default): complete prompt and response on every `api.*` span · `preview`: clipped previews only · `off`: no content, metadata only; see [Conversation capture](/configuration/conversation-capture)",
+        "Content capture",
+        choices=CONTENT_CAPTURE_MODES,
+        normalize=_lower,
+        bool_as=("off", "full"),
+    )
+    capture_full_prompts: bool = _field(
+        True,
+        "Deprecated: derived from `content_capture`; `false` keeps prompts as previews in `full` mode",
+        "Content capture",
+    )
+    capture_full_responses: bool = _field(
+        True,
+        "Deprecated: derived from `content_capture`; `false` keeps responses as previews in `full` mode",
+        "Content capture",
+    )
+    capture_sender_id: bool = _field(
+        False,
+        "Gateway sessions add `hermes.sender.id` and `user.id` (`platform:sender`)",
+        "Content capture",
+    )
+    # ── Tool and error text (#669) ──────────────────────────────────────
+    # Independent of ``content_capture``: these are recorded in every mode
+    # unless switched off here. See ``omitted_attributes`` below.
+    capture_tool_command: bool = _field(
+        True,
+        "`false` leaves the shell command out: `hermes.tool.command` on tool spans and events, `hermes.turn.tool_commands` on the turn root; see [Privacy mode](/configuration/privacy#tool-commands-targets-and-error-text)",
+        "Content capture",
+    )
+    capture_tool_target: bool = _field(
+        True,
+        "`false` leaves the file path or URL out: `hermes.tool.target` on tool spans and events, `hermes.turn.tool_targets` on the turn root",
+        "Content capture",
+    )
+    capture_error_message: bool = _field(
+        True,
+        "`false` leaves error text out: `error.message`, `exception.message` / `exception.stacktrace`, the span status description and the text in the `hermes.api.error` event body; `error.type` and the status code stay",
+        "Content capture",
+    )
     # ── OTel logs signal ────────────────────────────────────────────────
-    # Opt-in: when enabled, attach an OTel ``LoggingHandler`` to Python's
-    # logging so stdlib ``logger.info(...)`` calls ship to any log-capable
-    # backend (SigNoz, OTLP → Loki, LGTM). Correlates each log record
-    # with the active span's ``trace_id`` / ``span_id`` automatically.
-    # Off by default because attaching to the root logger is invasive —
+    # Off by default because attaching to the root logger is invasive:
     # third-party libraries' logs are also exported.
-    capture_logs: bool = False
-    log_level: str = "INFO"  # handler level: DEBUG, INFO, WARNING, ERROR
-    # None = attach to the root logger (captures all hermes-agent + plugin
-    # logs). Set to e.g. "hermes_otel" to scope capture to plugin logs only.
-    log_attach_logger: Optional[str] = None
+    capture_logs: bool = _field(
+        False,
+        "Attach an OTel LoggingHandler to Python logging; see [OTel logs](/configuration/logs)",
+        "Logs",
+    )
+    log_level: str = _field(
+        "INFO",
+        "Handler level: `DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL`",
+        "Logs",
+        normalize=_upper,
+    )
+    log_attach_logger: Optional[str] = _field(
+        None, "Logger to attach to; `null` = root, `hermes_otel` = the plugin only", "Logs"
+    )
+    log_exclude_loggers: Tuple[str, ...] = _field(
+        DEFAULT_LOG_EXCLUDE_LOGGERS,
+        "Logger-name prefixes never forwarded (loop guard + Hermes' noisy third-party loggers); `logs.exclude_loggers`",
+        "Logs",
+    )
+    log_logger_levels: Optional[Dict[str, str]] = _field(
+        None,
+        "Per-logger minimum level, e.g. `{gateway.config: WARNING}`; `logs.logger_levels`",
+        "Logs",
+    )
+    log_only_in_turn: bool = _field(
+        False, "Drop records the plugin cannot attribute to a session; `logs.only_in_turn`", "Logs"
+    )
+    log_max_attribute_length: int = _field(
+        4096,
+        "Longest exported string attribute on a log record (characters); `logs.max_attribute_length`",
+        "Logs",
+        bounds=(1, None),
+    )
+    log_batch_schedule_delay_ms: int = _field(
+        1000,
+        "Log batch processor: export every N ms; `logs.batch.schedule_delay_ms`",
+        "Logs",
+        bounds=(1, None),
+    )
+    log_batch_max_queue_size: int = _field(
+        2048,
+        "Log batch processor: queued records before drops; `logs.batch.max_queue_size`",
+        "Logs",
+        bounds=(1, None),
+    )
+    log_batch_max_export_batch_size: int = _field(
+        512,
+        "Log batch processor: records per export request; `logs.batch.max_export_batch_size`",
+        "Logs",
+        bounds=(1, None),
+    )
+    log_batch_export_timeout_ms: int = _field(
+        30_000,
+        "Log batch processor: per-export timeout; `logs.batch.export_timeout_ms`",
+        "Logs",
+        bounds=(1, None),
+    )
+    log_live_min_level: str = _field(
+        "INFO",
+        "Floor for the dashboard's live Logs tab (`INFO` default; the OTLP path keeps `log_level`); `logs.live_min_level`",
+        "Logs",
+        normalize=_upper,
+    )
+    log_events: bool = _field(
+        False,
+        "Emit structured `hermes.*` / GenAI events (log records with an event name) from the hooks; `logs.events.enabled`",
+        "Logs",
+    )
+    log_events_content: str = _field(
+        "inherit",
+        "Content on events: `inherit` (follow `content_capture`) / `full` / `preview` / `off`; `logs.events.content`",
+        "Logs",
+        choices=LOG_EVENTS_CONTENT_MODES,
+        normalize=_lower,
+        bool_as=("off", "full"),
+    )
     # ── OTel GenAI semantic-convention metrics ──────────────────────────
-    metrics_enabled: bool = False  # top-level YAML spelling: metrics.enabled
-    # Emit spec-named instruments (gen_ai.client.*, gen_ai.agent.*) in
-    # addition to the custom hermes.* metrics, so generic OTel-GenAI
-    # dashboards/alerts work out of the box. Set false for hermes.* only.
-    emit_genai_metrics: bool = True
-    # Metric aggregation temporality sent to OTLP backends (#233). ``None`` =
-    # auto: the OTel SDK default (``OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE``
-    # when set, else cumulative). ``delta`` for Datadog-style backends. A
-    # backend entry's own ``metrics_temporality`` wins over this default, and
-    # backend types with a known preference (SigNoz, Uptrace) default to it.
-    metrics_temporality: Optional[str] = None
-    # Histogram aggregation: ``explicit`` (spec bucket boundaries per instrument)
-    # or ``exponential`` (base-2 exponential histograms; needs a backend that
-    # accepts them, e.g. Prometheus native histograms, Datadog, New Relic).
-    metrics_histogram: str = "explicit"
-    # Distinct values a label such as ``model`` or ``tool_name`` may take per
-    # process before further values are folded into ``other`` (the Python SDK
-    # has no cardinality limit of its own). ``0`` disables the cap.
-    metrics_label_limit: int = 100
-    # ── Skill execution-window spans ────────────────────────────────────
-    # Emit a skill:<name> span when the agent loads a skill (via skill_view
-    # or a /skills/ path), spanning from load to the turn boundary. Skills
-    # overlap freely. Set false to keep only the hermes.skill.* attribute and
-    # the skill_inferred counter.
-    skill_spans: bool = True
-    # ── Telemetry discovery prompt (opt-in) ─────────────────────────────
-    # Register a short system-prompt section (via Hermes'
-    # register_system_prompt_section) telling the model that telemetry is
-    # available and to load the bundled hermes_otel:observability skill for
-    # questions about past behaviour. It changes what the model sees on every
-    # turn (~80 tokens), so it is off unless you opt in.
-    discovery_prompt: bool = False
+    emit_genai_metrics: bool = _field(
+        True,
+        "Also emit the OTel GenAI spec metrics (`gen_ai.client.*`, `gen_ai.agent.*`)",
+        "Spans and metrics",
+    )
+    # None = the OTel SDK default (OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+    # when set, else cumulative); backend types with a known preference
+    # (SigNoz, Uptrace) default to it (#233).
+    metrics_temporality: Optional[str] = _field(
+        None,
+        "Metric temporality for OTLP export: `cumulative` (Prometheus family) or `delta` (Datadog, New Relic, Logfire); unset = SDK default; a backend entry's own value wins",
+        "Spans and metrics",
+        choices=VALID_TEMPORALITIES,
+        normalize=_lower,
+    )
+    metrics_enabled: bool = _field(
+        True,
+        "Global metrics gate (`metrics.enabled` in YAML); `false` stops both local metrics and backend export without disabling spans or logs",
+        "Spans and metrics",
+    )
+    metrics_histogram: str = _field(
+        "explicit",
+        "Histogram aggregation: `explicit` (spec bucket boundaries) or `exponential` (base-2, for backends that accept it)",
+        "Spans and metrics",
+        choices=VALID_HISTOGRAMS,
+        normalize=_lower,
+    )
+    metrics_label_limit: int = _field(
+        100,
+        "Distinct values a metric label such as `model` may take per process before the rest fold into `other` (0 = no cap)",
+        "Spans and metrics",
+        bounds=(0, None),
+        normalize=lambda n: max(0, n),
+    )
+    metric_name_compat: str = _field(
+        "off",
+        "`off` · `claude_code` · `both` — export session count, token usage, cost and active time under Claude Code's metric names, units and labels (`claude_code.*`) instead of (`claude_code`) or beside (`both`) the `hermes.*` twins, so dashboards built for Claude Code read Hermes; see [Claude Code dashboards](/guides/claude-code-dashboards)",
+        "Spans and metrics",
+        choices=VALID_METRIC_NAME_COMPAT,
+        normalize=_lower,
+        aliases={"false": "off", "none": "off", "no": "off", "": "off"},
+    )
+    metric_name_compat_session_id: bool = _field(
+        False,
+        "Also put `session.id` on the `claude_code.*` instruments, as Claude Code does by default (per-session panels need it; one series per session)",
+        "Spans and metrics",
+    )
+    disable_metrics: Tuple[str, ...] = _field(
+        (),
+        "Instruments never created, recorded or exported: hook keys (`tool_duration`), dotted (`tool.duration`) or OTLP names (`hermes.tool.duration`), or `all`; an unknown name warns at load. See [Disabling metrics and span families](/configuration/yaml#disable)",
+        "Spans and metrics",
+    )
+    disable_spans: Tuple[str, ...] = _field(
+        (),
+        "Span families never recorded (`tool`, `api`, `llm`, `approval`, `skill`, `subagent`, `kanban`, `auxiliary`, `human_input`); a child of a disabled span parents to the nearest recording ancestor. `all` is refused (use a backend's `traces: false`)",
+        "Spans and metrics",
+    )
+    skill_spans: bool = _field(
+        True,
+        "Open a `skill.<name>` span on each successful skill load, closed at turn end",
+        "Spans and metrics",
+    )
+    remote_parent: bool = _field(
+        True,
+        "Parent the turn root under the span named by `HERMES_OTEL_TRACEPARENT` (+ `HERMES_OTEL_TRACESTATE`) when an outer process exported them; `false` ignores the variables. The kanban worker hand-off (`TRACEPARENT`) is separate",
+        "Spans and metrics",
+    )
+    probe_backends: bool = _field(
+        True,
+        "At init, open one TCP connection to each backend endpoint on a background thread and log reachable / unreachable per backend; once, never periodic, no bytes sent, exports never wait for it",
+        "Spans and metrics",
+    )
+    discovery_prompt: bool = _field(
+        False,
+        "Register a system-prompt section advertising `hermes_otel:observability` (changes what the model sees every turn; opt-in)",
+        "Spans and metrics",
+    )
     # ── Live dashboard (local store) ────────────────────────────────────
-    # Keep a bounded window of recent spans + metrics + logs in a small SQLite
-    # file ($HERMES_HOME/hermes_otel_live.db, or HERMES_OTEL_LIVE_DB) so the
-    # built-in dashboard's "Live" mode works with NO external backend and the
-    # gateway and dashboard processes see the same data. Each kind keeps its
-    # last dashboard_live_max_spans rows. Set false to disable it entirely.
-    dashboard_live: bool = True
-    dashboard_live_max_spans: int = 1000
-    # Rows older than this are dropped from the live store as well (0 = keep
-    # until the row cap evicts them). The store is a recent-activity buffer for
-    # the dashboard, not a record: configure a backend for history (#184).
-    dashboard_live_retention_hours: float = 168.0
+    # $HERMES_HOME/hermes_otel_live.db (or HERMES_OTEL_LIVE_DB): the gateway
+    # and dashboard processes see the same data, with NO external backend.
+    dashboard_live: bool = _field(
+        True,
+        "Keep recent spans/metrics/logs in `$HERMES_HOME/hermes_otel_live.db` for the dashboard's Live mode",
+        "Dashboard",
+    )
+    dashboard_live_max_spans: int = _field(
+        1000,
+        "Rows kept per kind (spans, metrics, logs) in the live store",
+        "Dashboard",
+        bounds=(1, None),
+    )
+    dashboard_live_retention_hours: float = _field(
+        168.0,
+        "Rows older than this are dropped from the live store (`0` = only the row cap applies)",
+        "Dashboard",
+        bounds=(0.0, None),
+    )
     # ── Host metrics (CPU / GPU) ────────────────────────────────────────
-    # Sample the Hermes process tree, the whole host, and any AMD/NVIDIA GPU
-    # on a fixed interval and export the readings as OTel metrics
-    # (process.cpu.utilization, system.cpu.utilization, hw.gpu.*, hw.power) on
-    # every backend that receives metrics, plus per-tool CPU/GPU utilization
-    # attributes on tool spans. Off by default. Needs psutil (ships with
-    # hermes-agent); GPU readings additionally need pynvml or amdsmi.
-    host_metrics: bool = False
-    host_metrics_gpu: str = "auto"  # auto | amd | nvidia | off
-    host_metrics_interval_ms: int = 1000
+    # Needs psutil (ships with hermes-agent); GPU readings additionally need
+    # pynvml or amdsmi.
+    host_metrics: bool = _field(
+        False,
+        "Sample CPU/GPU and emit `process.*` / `system.*` / `hw.*` metrics; see [Host & GPU metrics](/configuration/host-metrics)",
+        "Host metrics",
+    )
+    host_metrics_gpu: str = _field(
+        "auto",
+        "`auto` · `amd` · `nvidia` · `off` — which GPU SDK to probe",
+        "Host metrics",
+        choices=GPU_VENDORS,
+        normalize=_lower,
+        bool_as=("off", "auto"),
+    )
+    host_metrics_interval_ms: int = _field(
+        1000, "Host sampling cadence (floor 50 ms)", "Host metrics", bounds=(1, None)
+    )
     # ── MCP keepalive noise ─────────────────────────────────────────────
     # MCP Python SDK 2.x (Hermes v0.21.0+) emits a CLIENT span for every
-    # JSON-RPC request, including the periodic keepalive ``ping`` Hermes sends
-    # per MCP connection. Each surfaces as a standalone one-span
-    # "MCP send ping" trace. True (default) drops the successful ones before
-    # they reach any exporter or the live store; failed pings are always kept.
-    suppress_mcp_ping_spans: bool = True
+    # JSON-RPC request, the periodic keepalive ``ping`` included; failed
+    # pings are always kept.
+    suppress_mcp_ping_spans: bool = _field(
+        True, "Drop successful MCP keepalive `ping` spans before export", "Spans and metrics"
+    )
     # ── Multi-backend fan-out ───────────────────────────────────────────
-    backends: Optional[Tuple[BackendConfig, ...]] = None
+    backends: Optional[Tuple[BackendConfig, ...]] = _field(
+        None, "Multi-backend fan-out list; see the `backends[]` section", "Backends"
+    )
+
+    def __post_init__(self) -> None:
+        # ``global_tags`` is the pre-``resource_attributes`` spelling: fold it
+        # in once, here, so the resource builder reads one mapping.
+        # ``resource_attributes`` wins on a key conflict, as it always has.
+        if self.global_tags:
+            merged = {**self.global_tags, **(self.resource_attributes or {})}
+            object.__setattr__(self, "resource_attributes", merged)
+            object.__setattr__(self, "global_tags", None)
+        if self.common_attributes is not None:
+            object.__setattr__(
+                self, "common_attributes", validate_common_attributes(self.common_attributes)
+            )
+        object.__setattr__(self, "disable_metrics", validate_disable_metrics(self.disable_metrics))
+        object.__setattr__(self, "disable_spans", validate_disable_spans(self.disable_spans))
+        _validate_numeric_bounds(self)
+
+    # ── What content the hooks record (``content_capture``) ──────────────
+    # The hooks ask these instead of reading the three pre-1.11 booleans.
+    # The booleans stay as input spellings: in ``full`` mode they can still
+    # keep one side as previews (``capture_full_responses: false``).
+
+    def content_mode(self) -> str:
+        """``off`` / ``preview`` / ``full``: the mode the hooks apply."""
+        if not self.capture_previews:
+            return "off"
+        if self.capture_full_prompts or self.capture_full_responses:
+            return "full"
+        return "preview"
+
+    def captures_content(self) -> bool:
+        """Whether any prompt, tool or response content is recorded (mode is not ``off``)."""
+        return self.content_mode() != "off"
+
+    def omitted_attributes(self) -> frozenset:
+        """Attribute names the pipeline removes from every span and event (#669).
+
+        Empty by default. ``capture_tool_command`` / ``capture_tool_target`` /
+        ``capture_error_message`` set to false each add their group, in any
+        ``content_capture`` mode.
+        """
+        from .semconv import ERROR_TEXT_KEYS, TOOL_COMMAND_KEYS, TOOL_TARGET_KEYS
+
+        omitted: set = set()
+        if not self.capture_tool_command:
+            omitted.update(TOOL_COMMAND_KEYS)
+        if not self.capture_tool_target:
+            omitted.update(TOOL_TARGET_KEYS)
+        if not self.capture_error_message:
+            omitted.update(ERROR_TEXT_KEYS)
+        return frozenset(omitted)
+
+    def captures_full_prompts(self) -> bool:
+        """Whether api spans carry the complete prompt instead of a preview."""
+        return self.captures_content() and self.capture_full_prompts
+
+    def captures_full_responses(self) -> bool:
+        """Whether api spans carry the complete response instead of a preview."""
+        return self.captures_content() and self.capture_full_responses
+
+    def fingerprint(self, **extra: Any) -> str:
+        """sha256 (hex) of the normalised, secret-hashed configuration (#484).
+
+        The same resolved configuration always gives the same fingerprint,
+        whatever the order of a mapping's keys or whether a list field was
+        given as a tuple or a list; any effective change (a knob, a backend
+        header, endpoint or project, a backend added or removed) gives a
+        different one. Secret values (credential fields, auth headers, bearer
+        strings) enter as a stable hash of their own, so a rotated key changes
+        the fingerprint without the key itself ever being part of the hashed
+        text; ``*_env`` variable names are not secrets and enter as written.
+        ``extra`` adds init-time inputs that are not fields (the explicit
+        ``endpoint`` of ``HermesOTelPlugin.init``); ``None`` values are
+        dropped, so ``fingerprint(endpoint=None) == fingerprint()``. The
+        plugin keeps the fingerprint of the configuration its live pipeline
+        was built from, and the Settings tab shows the first
+        ``SHORT_FINGERPRINT_CHARS`` characters so a user can match the two.
+        """
+        return hashlib.sha256(fingerprint_source(self, **extra).encode("utf-8")).hexdigest()
 
 
-# ── Env-var parsers ────────────────────────────────────────────────────────
+# ── Fingerprint (#484) ────────────────────────────────────────────────────
+# What ``HermesOTelPlugin.init`` compares to decide whether a re-init may keep
+# the live pipeline, and what the Settings tab shows (shortened) so a user can
+# tell which configuration is live.
+SHORT_FINGERPRINT_CHARS = 12
+
+
+def _hashed_secret(value: str) -> str:
+    """A stable stand-in for a secret value: changes with the value, never reveals it."""
+    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+
+
+def _fingerprint_value(value: Any, key: str = "", *, header: bool = False) -> Any:
+    """``value`` normalised for the fingerprint: a dataclass becomes a mapping
+    of its fields, a tuple a list, a ``BackendConfig.extra`` pair tuple a
+    mapping (so query-key order does not count), and a string that is a
+    secret by its key (``header`` widens the test to header names) or by its
+    shape (bearer / basic) becomes :func:`_hashed_secret`."""
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        out: Dict[str, Any] = {}
+        for f in fields(value):
+            v = getattr(value, f.name)
+            if f.name == "extra" and isinstance(v, tuple):
+                v = dict(v)
+            out[f.name] = _fingerprint_value(v, f.name)
+        return out
+    if isinstance(value, dict):
+        return {
+            str(k): _fingerprint_value(v, str(k), header=(key == "headers"))
+            for k, v in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_fingerprint_value(v, key) for v in value]
+    if isinstance(value, str) and value:
+        secret_key = (
+            is_header_secret_name(key) if header else is_secret_name(key)
+        ) and not key.lower().endswith("_env")
+        if secret_key or is_secret_value(value):
+            return _hashed_secret(value)
+    return value
+
+
+def fingerprint_source(cfg: HermesOtelConfig, **extra: Any) -> str:
+    """The canonical text :meth:`HermesOtelConfig.fingerprint` hashes: the
+    normalised configuration as compact JSON with sorted keys, plus the
+    non-``None`` ``extra`` inputs under ``init``. Exposed so a test can check
+    what the fingerprint does and does not contain."""
+    doc = _fingerprint_value(cfg)
+    inputs = {k: _fingerprint_value(v, k) for k, v in extra.items() if v is not None}
+    if inputs:
+        doc["init"] = inputs
+    return json.dumps(doc, sort_keys=True, separators=(",", ":"), default=str)
+
+
+# ── Views over the field metadata ───────────────────────────────────────
+# What the docs generator (scripts/gen_config_docs.py), the Settings tab
+# (settings_report.py) and the loader read. Groups are listed in display
+# order; within a group the fields keep their dataclass order.
+FIELD_DOCS: Dict[str, str] = {f.name: f.metadata["doc"] for f in fields(HermesOtelConfig)}
+NUMERIC_BOUNDS: Dict[str, Tuple[float, Optional[float]]] = {
+    f.name: f.metadata["bounds"] for f in fields(HermesOtelConfig) if "bounds" in f.metadata
+}
+GROUP_ORDER: Tuple[str, ...] = (
+    "General",
+    "Content capture",
+    "Export and batching",
+    "Spans and metrics",
+    "Logs",
+    "Dashboard",
+    "Host metrics",
+    "Backends",
+)
+FIELD_GROUPS: Tuple[Tuple[str, Tuple[str, ...]], ...] = tuple(
+    (group, tuple(f.name for f in fields(HermesOtelConfig) if f.metadata["group"] == group))
+    for group in GROUP_ORDER
+)
+_ungrouped = {f.metadata["group"] for f in fields(HermesOtelConfig)} - set(GROUP_ORDER)
+if _ungrouped:  # a misspelt group would silently drop its fields from the Settings tab
+    raise ValueError(f"HermesOtelConfig groups missing from GROUP_ORDER: {sorted(_ungrouped)}")
+
+_RULE_KEYS = ("choices", "normalize", "aliases", "bool_as")
+# Per field, the keyword rule :func:`_parse_scalar` applies to its yaml or env value.
+FIELD_RULES: Dict[str, Dict[str, Any]] = {
+    f.name: {k: f.metadata[k] for k in _RULE_KEYS if k in f.metadata}
+    for f in fields(HermesOtelConfig)
+}
 
 
 # ── Field kinds, derived from the dataclass ─────────────────────────────
@@ -302,7 +916,7 @@ class HermesOtelConfig:
 # (scripts/gen_config_docs.py) renders the reference tables from it. A new
 # field is therefore yaml-loadable, env-overridable and documented (or the
 # tests fail) without touching three hand-maintained lists (#93).
-_SCALAR_KINDS = ("bool", "int", "float", "str")
+SCALAR_KINDS = ("bool", "int", "float", "str", "list")  # env-overridable kinds
 
 
 def _field_kind(field: "dataclasses.Field") -> str:
@@ -316,6 +930,8 @@ def _field_kind(field: "dataclasses.Field") -> str:
         return "backends"
     if ann.startswith("Optional[Dict") or ann.startswith("Dict"):
         return "map"
+    if ann.startswith("Optional[Tuple[str") or ann.startswith("Tuple[str"):
+        return "list"
     for kind in ("bool", "int", "float", "str"):
         if ann == kind or ann == f"Optional[{kind}]":
             return kind
@@ -326,41 +942,61 @@ def field_kinds() -> Dict[str, str]:
     return {f.name: _field_kind(f) for f in dataclasses.fields(HermesOtelConfig)}
 
 
-# Fields whose string value gets extra normalisation.
-_STR_NORMALISERS = {
-    "log_level": lambda v: str(v).upper(),
-}
+def _parse_scalar(
+    kind: Optional[str],
+    value: Any,
+    *,
+    choices: Optional[Tuple[str, ...]] = None,
+    normalize: Optional[Callable[[Any], Any]] = None,
+    aliases: Optional[Dict[str, str]] = None,
+    bool_as: Optional[Tuple[str, str]] = None,
+) -> Any:
+    """Parse one scalar (a yaml value or an env string) to ``kind``; ``None`` = invalid.
 
-CONTENT_CAPTURE_MODES = ("off", "preview", "full")
-
-
-def _parse_bool(value: str) -> Optional[bool]:
-    v = value.strip().lower()
-    if v in _TRUE_STRINGS:
-        return True
-    if v in _FALSE_STRINGS:
-        return False
+    The keyword rule is the field's (``FIELD_RULES``): ``normalize`` runs on
+    the parsed value, ``aliases`` then map a spelling onto a choice, and a
+    value outside ``choices`` is invalid. A bool where a string is expected is
+    YAML 1.1 reading a bare ``off`` / ``on``: ``bool_as`` says what it stands
+    for; without it the text is ``False`` / ``True``.
+    """
+    if kind == "bool":
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        return True if text in _TRUE_STRINGS else False if text in _FALSE_STRINGS else None
+    if kind in ("int", "float"):
+        if isinstance(value, bool):
+            return None  # bools are ints in python; reject explicitly
+        try:
+            number = value if isinstance(value, (int, float)) else float(str(value).strip())
+            number = int(number) if kind == "int" else float(number)
+        except (ValueError, OverflowError):
+            return None
+        return normalize(number) if normalize else number
+    if kind == "str":
+        if isinstance(value, bool) and bool_as:
+            text = bool_as[1] if value else bool_as[0]
+        else:
+            text = str(value)
+        if normalize:
+            text = normalize(text)
+        if aliases:
+            text = aliases.get(text, text)
+        return text if choices is None or text in choices else None
+    if kind == "list":
+        # yaml list, or a comma-separated string (the env-var spelling).
+        if isinstance(value, (list, tuple)):
+            return tuple(str(v).strip() for v in value if v is not None and str(v).strip())
+        if isinstance(value, str):
+            return tuple(part.strip() for part in value.split(",") if part.strip())
+        return None
     return None
-
-
-def _parse_float(value: str) -> Optional[float]:
-    try:
-        return float(value.strip())
-    except (ValueError, AttributeError):
-        return None
-
-
-def _parse_int(value: str) -> Optional[int]:
-    try:
-        return int(float(value.strip()))
-    except (ValueError, AttributeError):
-        return None
 
 
 # ── YAML loader ────────────────────────────────────────────────────────────
 
 
-def _load_yaml(path: Path) -> Dict[str, Any]:
+def load_yaml(path: Path) -> Dict[str, Any]:
     """Load config.yaml if present and pyyaml is available.
 
     Missing file → empty dict (silent). Missing pyyaml → warn + empty dict.
@@ -398,8 +1034,8 @@ def _load_yaml(path: Path) -> Dict[str, Any]:
 # ── Loader ─────────────────────────────────────────────────────────────────
 
 
-_ALLOWED_KEYS = {f.name for f in fields(HermesOtelConfig)}
-_BACKEND_ALLOWED_KEYS = {f.name for f in fields(BackendConfig)}
+ALLOWED_KEYS = {f.name for f in fields(HermesOtelConfig)}
+TOP_LEVEL_BLOCKS = ("logs",)  # yaml keys that are blocks, not fields
 
 
 # ``${VAR_NAME}`` references inside config.yaml string values (headers, api
@@ -432,63 +1068,103 @@ def expand_env_refs(value: Any, *, where: str = "config") -> Any:
     return _ENV_REF.sub(_sub, value)
 
 
-def _coerce_backends(value: Any) -> Optional[Tuple[BackendConfig, ...]]:
-    """Coerce a yaml ``backends:`` list into a tuple of BackendConfig."""
-    if value is None:
-        return None
-    if not isinstance(value, list):
-        logger.warning(
-            f"[hermes-otel] config.yaml 'backends' must be a list, got {type(value).__name__}; ignoring"
-        )
-        return None
+# ── The ``logs:`` block (#266) ──────────────────────────────────────────────
+# The flat ``capture_logs`` / ``log_*`` fields are the dataclass's source of
+# truth (one field, one env var, one schema row). The block is the preferred
+# yaml spelling and is flattened onto them at load time; the flat spellings
+# keep working as aliases.
+LOGS_BLOCK_KEY = "logs"
+_LOGS_BLOCK: Dict[str, Any] = {
+    "capture": "capture_logs",
+    "level": "log_level",
+    "attach_logger": "log_attach_logger",
+    "exclude_loggers": "log_exclude_loggers",
+    "logger_levels": "log_logger_levels",
+    "only_in_turn": "log_only_in_turn",
+    "max_attribute_length": "log_max_attribute_length",
+    "live_min_level": "log_live_min_level",
+    "batch": {
+        "schedule_delay_ms": "log_batch_schedule_delay_ms",
+        "max_queue_size": "log_batch_max_queue_size",
+        "max_export_batch_size": "log_batch_max_export_batch_size",
+        "export_timeout_ms": "log_batch_export_timeout_ms",
+    },
+    "events": {"enabled": "log_events", "content": "log_events_content"},
+}
+# flat field -> ("block", "path") for rendering the effective yaml as a block
+LOGS_FLAT_TO_BLOCK: Dict[str, Tuple[str, ...]] = {}
+for _k, _v in _LOGS_BLOCK.items():
+    if isinstance(_v, dict):
+        for _kk, _vv in _v.items():
+            LOGS_FLAT_TO_BLOCK[_vv] = (_k, _kk)
+    else:
+        LOGS_FLAT_TO_BLOCK[_v] = (_k,)
+LOG_FIELDS: Tuple[str, ...] = tuple(LOGS_FLAT_TO_BLOCK)
 
-    out: List[BackendConfig] = []
-    for idx, raw in enumerate(value):
-        if not isinstance(raw, dict):
-            logger.warning(f"[hermes-otel] config.yaml backends[{idx}] must be a mapping; skipping")
-            continue
-        if "type" not in raw or not isinstance(raw["type"], str) or not raw["type"].strip():
-            logger.warning(f"[hermes-otel] config.yaml backends[{idx}] missing 'type'; skipping")
-            continue
-        kwargs: Dict[str, Any] = {}
-        for k, v in raw.items():
-            if k == "trace":
-                # Friendly alias for users who naturally mirror the singular
-                # signal name in prose. ``traces`` wins when both are present.
-                if "traces" in raw:
-                    continue
-                k = "traces"
-            if k not in _BACKEND_ALLOWED_KEYS:
+
+def _flatten_logs_block(block: Any, flat: Dict[str, Any]) -> Dict[str, Any]:
+    """Turn ``logs: {...}`` into flat keys; the block wins over a flat alias and says so."""
+    out: Dict[str, Any] = {}
+    if not isinstance(block, dict):
+        logger.warning("[hermes-otel] config.yaml 'logs' must be a mapping; ignoring")
+        return out
+
+    def _walk(mapping: Dict[str, Any], spec: Dict[str, Any], prefix: str) -> None:
+        for k, v in mapping.items():
+            target = spec.get(k)
+            if target is None:
+                logger.warning(f"[hermes-otel] config.yaml {prefix}{k}: unknown key; ignoring")
                 continue
-            if k == "headers":
+            if isinstance(target, dict):
                 if isinstance(v, dict):
-                    kwargs[k] = {
-                        str(kk): expand_env_refs(str(vv), where=f"backends[{idx}].headers")
-                        for kk, vv in v.items()
-                    }
+                    _walk(v, target, f"{prefix}{k}.")
+                else:
+                    logger.warning(
+                        f"[hermes-otel] config.yaml {prefix}{k} must be a mapping; ignoring"
+                    )
                 continue
-            if k in ("traces", "metrics", "logs"):
-                if isinstance(v, bool):
-                    kwargs[k] = v
-                elif isinstance(v, str):
-                    parsed = _parse_bool(v)
-                    if parsed is not None:
-                        kwargs[k] = parsed
-                continue
-            if v is None:
-                continue
-            kwargs[k] = expand_env_refs(
-                str(v) if not isinstance(v, str) else v, where=f"backends[{idx}].{k}"
-            )
-        try:
-            out.append(BackendConfig(**kwargs))
-        except TypeError as e:
-            logger.warning(f"[hermes-otel] config.yaml backends[{idx}] invalid: {e}; skipping")
+            if target in flat and flat[target] != v:
+                logger.warning(
+                    f"[hermes-otel] config.yaml {target}={flat[target]!r} conflicts with "
+                    f"{prefix}{k}={v!r}; the logs: block wins"
+                )
+            out[target] = v
 
-    return tuple(out) if out else None
+    _walk(block, _LOGS_BLOCK, f"{LOGS_BLOCK_KEY}.")
+    return out
 
 
-def _coerce_from_yaml(key: str, value: Any) -> Any:
+def normalize_yaml_data(yaml_data: Dict[str, Any], *, notice: bool = True) -> Dict[str, Any]:
+    """Flatten the ``logs:`` and ``metrics:`` blocks onto their fields.
+
+    Shared by :func:`load_config` and the settings report so both see the
+    same flat view of the file.
+    """
+    data = dict(yaml_data or {})
+    flat_log_keys = sorted(k for k in data if k in LOG_FIELDS)
+    if LOGS_BLOCK_KEY in data:
+        data.update(_flatten_logs_block(data.pop(LOGS_BLOCK_KEY), data))
+    if "metrics" in data:
+        block = data.pop("metrics")
+        if isinstance(block, dict):
+            if "enabled" in block:
+                data["metrics_enabled"] = block["enabled"]
+            if notice:
+                for key in block.keys() - {"enabled"}:
+                    logger.warning("[hermes-otel] config.yaml metrics.%s: unknown key; ignoring", key)
+        elif notice:
+            logger.warning("[hermes-otel] config.yaml 'metrics' must be a mapping; ignoring")
+    if flat_log_keys and notice:
+        logger.info(
+            "[hermes-otel] %s %s the flat spelling; the logs: block is preferred "
+            "(see /configuration/logs#configuration)",
+            ", ".join(flat_log_keys),
+            "uses" if len(flat_log_keys) == 1 else "use",
+        )
+    return data
+
+
+def coerce_from_yaml(key: str, value: Any, *, warn: bool = True) -> Any:
     """Coerce one config.yaml value to its field type (None = ignore).
 
     yaml.safe_load already returns native python types; this only normalises
@@ -499,14 +1175,17 @@ def _coerce_from_yaml(key: str, value: Any) -> Any:
         return None
     kind = field_kinds().get(key)
     if kind == "backends":
-        return _coerce_backends(value)
+        from .backend_config import coerce_backends  # its loader builds on this module
+
+        return coerce_backends(value)
     if kind == "map":
         if isinstance(value, dict):
             return {str(k): expand_env_refs(v, where=key) for k, v in value.items()}
-        logger.warning(f"[hermes-otel] config.yaml {key!r} must be a mapping; ignoring")
+        if warn:
+            logger.warning(f"[hermes-otel] config.yaml {key!r} must be a mapping; ignoring")
         return None
-    parsed = _parse_scalar(kind, key, value)
-    if parsed is None:
+    parsed = _parse_scalar(kind, value, **FIELD_RULES.get(key, {}))
+    if parsed is None and warn:
         logger.warning(
             f"[hermes-otel] config.yaml {key!r}: cannot use {value!r} as {kind}; "
             "keeping the default"
@@ -514,67 +1193,106 @@ def _coerce_from_yaml(key: str, value: Any) -> Any:
     return parsed
 
 
-def _parse_scalar(kind: Optional[str], key: str, value: Any) -> Any:
-    """Parse a scalar (from yaml or an env string) to ``kind``; None if invalid."""
-    if kind == "bool":
-        if isinstance(value, bool):
-            return value
-        return _parse_bool(str(value))
-    if kind == "int":
-        if isinstance(value, bool):
-            return None  # bools are ints in python; reject explicitly
-        if isinstance(value, int):
-            return value
-        return _parse_int(str(value))
-    if kind == "float":
-        if isinstance(value, bool):
-            return None
-        if isinstance(value, (int, float)):
-            return float(value)
-        return _parse_float(str(value))
-    if kind == "str":
-        if key == "content_capture" and isinstance(value, bool):
-            # YAML 1.1 reads a bare ``off`` as false and ``on`` as true.
-            return "off" if not value else "full"
-        text = str(value)
-        if key == "host_metrics_gpu":
-            return _parse_gpu_vendor(text)
-        if key == "content_capture":
-            mode = text.strip().lower()
-            return mode if mode in CONTENT_CAPTURE_MODES else None
-        if key == "level":
-            mode = text.strip().lower()
-            return mode if mode in ("debug", "info", "notice") else None
-        norm = _STR_NORMALISERS.get(key)
-        return norm(text) if norm else text
-    return None
+@dataclass(frozen=True)
+class FieldSource:
+    """Where one config field's value came from, as the loader decided it.
+
+    ``source`` is ``default``, ``file`` or ``env``. ``file_value`` is the
+    coerced file value (``None`` when absent or ``file_invalid``) and
+    ``file_raw`` the value as written; ``env_var`` is the override variable
+    for scalar fields, ``env_raw`` its text when set. A value that was given
+    but not usable is flagged ``*_invalid`` and the field keeps its default.
+    ``derived_from`` names the keys a derived field follows (``content_capture``
+    and its legacy flags).
+    """
+
+    source: str = "default"
+    file_raw: Any = None
+    file_value: Any = None
+    file_invalid: bool = False
+    env_var: Optional[str] = None
+    env_raw: Optional[str] = None
+    env_invalid: bool = False
+    derived_from: Optional[Tuple[str, ...]] = None
 
 
-_GPU_VENDORS = ("auto", "amd", "nvidia", "off")
+def resolve_fields(
+    yaml_data: Dict[str, Any], *, warn: bool = True
+) -> Tuple[HermesOtelConfig, Dict[str, FieldSource]]:
+    """Normalised yaml + the environment → the config and, per field, where its
+    value came from. The one implementation of the precedence rules: a file
+    value that fails coercion is ignored, an env value that fails parsing is
+    ignored, and a valid env value wins over the file. ``warn=False`` keeps a
+    report (the Settings tab) from logging the loader's warnings again.
+    """
+    kinds = field_kinds()
+    defaults = HermesOtelConfig()
+    values: Dict[str, Any] = {}
+    sources: Dict[str, Dict[str, Any]] = {}
+    for f in fields(HermesOtelConfig):
+        key, kind = f.name, kinds[f.name]
+        src: Dict[str, Any] = {
+            "env_var": ENV_PREFIX + key.upper() if kind in SCALAR_KINDS else None
+        }
+        sources[key] = src
+        raw = yaml_data.get(key)
+        if raw is not None:
+            src["file_raw"] = raw
+            coerced = coerce_from_yaml(key, raw, warn=warn)
+            if coerced is None:
+                src["file_invalid"] = True
+            else:
+                values[key] = coerced
+                src["file_value"] = coerced
+                src["source"] = "file"
+        if src["env_var"]:
+            raw_env = os.getenv(src["env_var"], "").strip()
+            if raw_env:
+                src["env_raw"] = raw_env
+                parsed = _parse_scalar(kind, raw_env, **FIELD_RULES[key])
+                if parsed is None:
+                    src["env_invalid"] = True
+                    if warn:
+                        logger.warning(
+                            f"[hermes-otel] {src['env_var']}={raw_env!r} is not a valid {kind}; ignoring it"
+                        )
+                else:
+                    values[key] = parsed
+                    src["source"] = "env"
+
+    if warn and values.get("global_tags"):
+        logger.warning(
+            "[hermes-otel] global_tags is deprecated; it is merged into resource_attributes "
+            "(which wins on a key conflict). Move the keys there."
+        )
+
+    # content_capture and the legacy booleans are kept consistent; record
+    # which key decided the others.
+    explicit = set(values)
+    _reconcile_content_capture(values, warn=warn)
+    if "content_capture" in explicit:
+        driver: Tuple[str, ...] = ("content_capture",)
+        derived = LEGACY_CONTENT_KEYS
+    else:
+        driver = tuple(k for k in LEGACY_CONTENT_KEYS if k in explicit)
+        derived = tuple(k for k in ("content_capture",) + LEGACY_CONTENT_KEYS if k not in explicit)
+    if driver:
+        for key in derived:
+            if key in values:
+                sources[key]["source"] = sources[driver[0]].get("source", "default")
+                sources[key]["derived_from"] = driver
+
+    cfg = replace(defaults, **values)
+    return cfg, {k: FieldSource(**v) for k, v in sources.items()}
 
 
-def _parse_gpu_vendor(value: str) -> Optional[str]:
-    v = (value or "").strip().lower()
-    return v if v in _GPU_VENDORS else None
-
-
-def _load_env_overrides() -> Dict[str, Any]:
-    """``HERMES_OTEL_<FIELD>`` for every scalar field (maps and ``backends``
-    are yaml-only). Invalid values warn and are ignored."""
-    out: Dict[str, Any] = {}
-    for key, kind in field_kinds().items():
-        if kind not in _SCALAR_KINDS:
-            continue
-        var = _ENV_PREFIX + key.upper()
-        raw = os.getenv(var, "").strip()
-        if not raw:
-            continue
-        parsed = _parse_scalar(kind, key, raw)
-        if parsed is None:
-            logger.warning(f"[hermes-otel] {var}={raw!r} is not a valid {kind}; ignoring it")
-            continue
-        out[key] = parsed
-    return out
+def load_config_with_sources(
+    path: Optional[Path] = None, *, warn: bool = True
+) -> Tuple[HermesOtelConfig, Dict[str, FieldSource]]:
+    """:func:`load_config` plus where each field's value came from."""
+    yaml_path = path if path is not None else resolve_config_path()
+    yaml_data = load_yaml(yaml_path) if yaml_path is not None else {}
+    return resolve_fields(normalize_yaml_data(yaml_data, notice=warn), warn=warn)
 
 
 def load_config(path: Optional[Path] = None) -> HermesOtelConfig:
@@ -584,100 +1302,32 @@ def load_config(path: Optional[Path] = None) -> HermesOtelConfig:
         path: Explicit config.yaml location. When omitted the file is resolved
               by :func:`resolve_config_path`.
     """
-    yaml_path = path if path is not None else resolve_config_path()
-    yaml_data = _load_yaml(yaml_path) if yaml_path is not None else {}
-    yaml_data = dict(yaml_data)
-    metrics_config = yaml_data.pop("metrics", None)
-    if metrics_config is not None:
-        if isinstance(metrics_config, dict) and "enabled" in metrics_config:
-            yaml_data.setdefault("metrics_enabled", metrics_config["enabled"])
-        else:
-            logger.warning("[hermes-otel] config.yaml 'metrics' must contain an 'enabled' boolean")
-
-    values: Dict[str, Any] = {}
-    for key, raw in yaml_data.items():
-        if key not in _ALLOWED_KEYS:
-            continue
-        coerced = _coerce_from_yaml(key, raw)
-        if coerced is not None:
-            values[key] = coerced
-
-    values.update(_load_env_overrides())
-    _reconcile_level(values)
-    _reconcile_content_capture(values)
-    _reconcile_metrics_settings(values)
-
-    # Build config with whatever we have; unset fields fall back to dataclass defaults.
-    return replace(HermesOtelConfig(), **values)
+    return load_config_with_sources(path)[0]
 
 
-def _reconcile_level(values: Dict[str, Any]) -> None:
-    """Apply the unified request/log policy when a caller explicitly sets it."""
-    mode = values.get("level")
-    if mode is None:
-        return
-    policy = {
-        "debug": ("full", True, True, True, "DEBUG"),
-        "info": ("preview", True, False, False, "INFO"),
-        "notice": ("off", False, False, False, "WARNING"),
-    }.get(mode)
-    if policy is None:
-        return
-    content_mode, previews, full_prompts, full_responses, log_level = policy
-    expected = {
-        "content_capture": content_mode,
-        "capture_previews": previews,
-        "capture_full_prompts": full_prompts,
-        "capture_full_responses": full_responses,
-        "capture_logs": True,
-        "log_level": log_level,
-    }
-    for key, value in expected.items():
-        if key in values and values[key] != value:
-            logger.warning("[hermes-otel] %s is overridden by level: %s", key, mode)
-        values[key] = value
+LEGACY_CONTENT_KEYS = ("capture_previews", "capture_full_prompts", "capture_full_responses")
 
 
-_LEGACY_CONTENT_KEYS = ("capture_previews", "capture_full_prompts", "capture_full_responses")
+def normalize_temporality(
+    value: Any, where: str = "metrics_temporality", *, warn: bool = True
+) -> Optional[str]:
+    """``cumulative`` / ``delta`` (case-insensitive) or ``None``; anything else warns and is dropped.
 
-
-VALID_TEMPORALITIES = ("cumulative", "delta")
-VALID_HISTOGRAMS = ("explicit", "exponential")
-
-
-def normalize_temporality(value: Any, where: str = "metrics_temporality") -> Optional[str]:
-    """``cumulative`` / ``delta`` (case-insensitive) or ``None``; anything else warns and is dropped."""
-    if value is None:
+    The top-level field goes through :func:`_parse_scalar` with this same
+    rule; this is for a backend entry's own ``metrics_temporality``, whose
+    warning names the entry.
+    """
+    if value is None or not str(value).strip():
         return None
-    text = str(value).strip().lower()
-    if not text:
-        return None
-    if text in VALID_TEMPORALITIES:
-        return text
-    logger.warning(
-        f"[hermes-otel] {where}={value!r} is not one of {'/'.join(VALID_TEMPORALITIES)}; ignoring"
-    )
-    return None
-
-
-def _reconcile_metrics_settings(values: Dict[str, Any]) -> None:
-    if "metrics_temporality" in values:
-        values["metrics_temporality"] = normalize_temporality(values["metrics_temporality"])
-    hist = str(values.get("metrics_histogram", "explicit") or "explicit").strip().lower()
-    if hist not in VALID_HISTOGRAMS:
+    parsed = _parse_scalar("str", value, **FIELD_RULES["metrics_temporality"])
+    if parsed is None and warn:
         logger.warning(
-            f"[hermes-otel] metrics_histogram={values.get('metrics_histogram')!r} is not one of "
-            f"{'/'.join(VALID_HISTOGRAMS)}; using explicit"
+            f"[hermes-otel] {where}={value!r} is not one of {'/'.join(VALID_TEMPORALITIES)}; ignoring"
         )
-        hist = "explicit"
-    values["metrics_histogram"] = hist
-    try:
-        values["metrics_label_limit"] = max(0, int(values.get("metrics_label_limit", 100)))
-    except (TypeError, ValueError):
-        values["metrics_label_limit"] = 100
+    return parsed
 
 
-def _reconcile_content_capture(values: Dict[str, Any]) -> None:
+def _reconcile_content_capture(values: Dict[str, Any], *, warn: bool = True) -> None:
     """Keep ``content_capture`` and the three legacy booleans consistent.
 
     ``content_capture`` (yaml or env) wins; the legacy keys are then derived
@@ -687,7 +1337,7 @@ def _reconcile_content_capture(values: Dict[str, Any]) -> None:
     ``true`` is ``full``, a full flag explicitly ``false`` (previews on) is
     ``preview``. Nothing set means the default, ``full``.
     """
-    legacy = {k: values[k] for k in _LEGACY_CONTENT_KEYS if k in values}
+    legacy = {k: values[k] for k in LEGACY_CONTENT_KEYS if k in values}
     mode = values.get("content_capture")
     if mode is None and legacy:
         if legacy.get("capture_previews") is False:
@@ -696,6 +1346,7 @@ def _reconcile_content_capture(values: Dict[str, Any]) -> None:
             mode = "full"
         else:
             mode = "preview"
+    if mode is not None and legacy and "content_capture" not in values and warn:
         logger.warning(
             "[hermes-otel] %s %s deprecated; use content_capture: %s "
             "(off | preview | full) instead",
@@ -711,8 +1362,8 @@ def _reconcile_content_capture(values: Dict[str, Any]) -> None:
         "full": (True, True, True),
     }[mode]
     if "content_capture" in values:
-        for key, want in zip(_LEGACY_CONTENT_KEYS, derived):
-            if key in legacy and legacy[key] != want:
+        for key, want in zip(LEGACY_CONTENT_KEYS, derived):
+            if key in legacy and legacy[key] != want and warn:
                 logger.warning(
                     "[hermes-otel] %s=%r conflicts with content_capture: %s; "
                     "content_capture wins",
@@ -738,12 +1389,8 @@ def _reconcile_content_capture(values: Dict[str, Any]) -> None:
 
 
 def content_mode(cfg: HermesOtelConfig) -> str:
-    """The mode the hooks actually apply, from the booleans they read."""
-    if not cfg.capture_previews:
-        return "off"
-    if cfg.capture_full_prompts or cfg.capture_full_responses:
-        return "full"
-    return "preview"
+    """The mode the hooks actually apply (see :meth:`HermesOtelConfig.content_mode`)."""
+    return cfg.content_mode()
 
 
 DEFAULT_EXPORT_BATCH_SIZE = 512
@@ -762,114 +1409,3 @@ def effective_export_batch_size(cfg: HermesOtelConfig) -> int:
     return (
         FULL_CAPTURE_EXPORT_BATCH_SIZE if content_mode(cfg) == "full" else DEFAULT_EXPORT_BATCH_SIZE
     )
-
-
-# ── Field documentation and grouping ───────────────────────────────────
-# One line per field, in the package so both the docs generator
-# (scripts/gen_config_docs.py) and the dashboard's Settings tab read the same
-# text. A field without an entry fails tests/unit/test_config_surface.py —
-# that is the point: adding a knob means documenting it. Backticks mark code;
-# a markdown link points into the docs site.
-FIELD_DOCS = {
-    "enabled": "Master kill switch; `false` unloads every hook",
-    "sample_rate": "Parent-based trace-ID ratio 0.0–1.0; `null` = AlwaysOn (no sampling)",
-    "root_span_ttl_ms": "Orphan-sweep TTL: a turn root older than this with no end hook is closed",
-    "flush_interval_ms": "Metrics export cadence (PeriodicExportingMetricReader)",
-    "preview_max_chars": "Cap on preview strings (tool args/results, user message, assistant response)",
-    "capture_previews": "Deprecated spelling of `content_capture: off` (when `false`); kept consistent with `content_capture`",
-    "tool_input_preview_max_chars": "Per-category cap for tool args previews; `null` = `preview_max_chars`",
-    "tool_output_preview_max_chars": "Per-category cap for tool result previews; `null` = `preview_max_chars`",
-    "llm_input_preview_max_chars": "Per-category cap for LLM input previews; `null` = `preview_max_chars`",
-    "llm_output_preview_max_chars": "Per-category cap for LLM output previews; `null` = `preview_max_chars`",
-    "headers": "Extra HTTP headers on every OTLP request; per-backend `headers:` are merged onto these",
-    "global_tags": "Merged into the OTel Resource; overridden by `resource_attributes` on key conflict",
-    "resource_attributes": "Merged into the Resource on top of the defaults `service.name=hermes-agent`, `service.instance.id` (per-process UUID), `service.version`, `process.pid`",
-    "project_name": "`openinference.project.name` on the Resource (Phoenix project); overrides `OTEL_PROJECT_NAME`",
-    "span_batch_max_queue_size": "Max buffered spans per backend before drops",
-    "span_batch_schedule_delay_ms": "BatchSpanProcessor worker wake-up cadence",
-    "span_batch_max_export_batch_size": "Max spans per OTLP POST; `null` = 512, or 64 when `content_capture` is `full`",
-    "span_batch_export_timeout_ms": "Per-export HTTP timeout",
-    "force_flush_on_session_end": "Flush every backend's span queue at the end of each turn, from a background thread (500 ms per backend, coalesced)",
-    "force_flush_wait_ms": "How long the turn waits for that background flush (spans, then metrics and logs on a second thread) before returning to Hermes; a one-shot run exits right after, so this bounds what it exports; `0` = do not wait",
-    "capture_conversation_history": "Attach the full message JSON to `llm.*` spans",
-    "conversation_history_max_chars": "JSON cap when conversation capture is on",
-    "content_capture": "`full` (default): complete prompt and response on every `api.*` span · `preview`: clipped previews only · `off`: no content, metadata only; see [Conversation capture](/configuration/conversation-capture)",
-    "level": "Unified request/log policy: `debug` full content + DEBUG logs; `info` clipped content + INFO logs; `notice` no request/response content + WARNING logs. Overrides legacy capture/log-level settings when set.",
-    "capture_full_prompts": "Deprecated: derived from `content_capture`; `false` keeps prompts as previews in `full` mode",
-    "capture_full_responses": "Deprecated: derived from `content_capture`; `false` keeps responses as previews in `full` mode",
-    "capture_sender_id": "Gateway sessions add `hermes.sender.id` and `user.id` (`platform:sender`)",
-    "capture_logs": "Attach an OTel LoggingHandler to Python logging; see [OTel logs](/configuration/logs)",
-    "log_level": "Handler level: `DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL`",
-    "log_attach_logger": "Logger to attach to; `null` = root, `hermes_otel` = the plugin only",
-    "emit_genai_metrics": "Also emit the OTel GenAI spec metrics (`gen_ai.client.*`, `gen_ai.agent.*`)",
-    "metrics_enabled": "Export metrics only when top-level YAML `metrics.enabled` is `true`; defaults off",
-    "metrics_temporality": "Metric temporality for OTLP export: `cumulative` (Prometheus family) or `delta` (Datadog, New Relic, Logfire); unset = SDK default; a backend entry's own value wins",
-    "metrics_histogram": "Histogram aggregation: `explicit` (spec bucket boundaries) or `exponential` (base-2, for backends that accept it)",
-    "metrics_label_limit": "Distinct values a metric label such as `model` may take per process before the rest fold into `other` (0 = no cap)",
-    "skill_spans": "Open a `skill.<name>` span on each successful skill load, closed at turn end",
-    "discovery_prompt": "Register a system-prompt section advertising `hermes_otel:observability` (changes what the model sees every turn; opt-in)",
-    "dashboard_live": "Keep recent spans/metrics/logs in `$HERMES_HOME/hermes_otel_live.db` for the dashboard's Live mode",
-    "dashboard_live_max_spans": "Rows kept per kind (spans, metrics, logs) in the live store",
-    "dashboard_live_retention_hours": "Rows older than this are dropped from the live store (`0` = only the row cap applies)",
-    "host_metrics": "Sample CPU/GPU and emit `process.*` / `system.*` / `hw.*` metrics; see [Host & GPU metrics](/configuration/host-metrics)",
-    "host_metrics_gpu": "`auto` · `amd` · `nvidia` · `off` — which GPU SDK to probe",
-    "host_metrics_interval_ms": "Host sampling cadence (floor 50 ms)",
-    "suppress_mcp_ping_spans": "Drop successful MCP keepalive `ping` spans before export",
-    "backends": "Multi-backend fan-out list; see the `backends[]` section",
-}
-
-# How the Settings tab groups the fields. Every field appears exactly once
-# (tests/unit/test_settings_report.py); order is display order.
-FIELD_GROUPS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
-    (
-        "General",
-        ("enabled", "sample_rate", "project_name", "global_tags", "resource_attributes", "headers"),
-    ),
-    (
-        "Content capture",
-        (
-            "content_capture",
-            "capture_previews",
-            "preview_max_chars",
-            "tool_input_preview_max_chars",
-            "tool_output_preview_max_chars",
-            "llm_input_preview_max_chars",
-            "llm_output_preview_max_chars",
-            "capture_conversation_history",
-            "conversation_history_max_chars",
-            "capture_full_prompts",
-            "capture_full_responses",
-            "capture_sender_id",
-        ),
-    ),
-    (
-        "Export and batching",
-        (
-            "force_flush_on_session_end",
-            "force_flush_wait_ms",
-            "flush_interval_ms",
-            "root_span_ttl_ms",
-            "span_batch_max_queue_size",
-            "span_batch_schedule_delay_ms",
-            "span_batch_max_export_batch_size",
-            "span_batch_export_timeout_ms",
-        ),
-    ),
-    (
-        "Spans and metrics",
-        (
-            "metrics_enabled",
-            "emit_genai_metrics",
-            "metrics_temporality",
-            "metrics_histogram",
-            "metrics_label_limit",
-            "skill_spans",
-            "suppress_mcp_ping_spans",
-            "discovery_prompt",
-        ),
-    ),
-    ("Logs", ("level", "capture_logs", "log_level", "log_attach_logger")),
-    ("Dashboard", ("dashboard_live", "dashboard_live_max_spans", "dashboard_live_retention_hours")),
-    ("Host metrics", ("host_metrics", "host_metrics_gpu", "host_metrics_interval_ms")),
-    ("Backends", ("backends",)),
-)

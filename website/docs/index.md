@@ -2,7 +2,7 @@
 slug: /
 sidebar_position: 0
 title: "hermes-otel"
-description: "OpenTelemetry plugin for Hermes Agent — automatically export LLM traces, tool calls, and token metrics to Phoenix, Langfuse, LangSmith, SigNoz, Jaeger, and Grafana Tempo."
+description: "OpenTelemetry plugin for Hermes Agent — automatically export LLM traces, tool calls, token metrics and logs to Phoenix, Langfuse, LangSmith, SigNoz, Jaeger, Zipkin, GreptimeDB, ClickStack, the VictoriaMetrics family, the Aspire Dashboard, Gigapipe, Agenta, Grafana Tempo and LGTM, Uptrace, OpenObserve, Parseable, Honeycomb, W&B Weave, Elastic, OpenLIT, MLflow, Comet Opik, Laminar, LangWatch, Latitude, or any OTLP collector."
 hide_table_of_contents: true
 displayed_sidebar: docs
 ---
@@ -13,14 +13,14 @@ import Link from '@docusaurus/Link';
   <div className="container">
     <h1 className="hero__title--otel">OpenTelemetry for Hermes Agent</h1>
     <p className="hero__subtitle--otel">
-      Fan LLM traces, tool calls, API requests, and token metrics out to any OTLP-compatible observability backend — <strong>Phoenix</strong>, <strong>Langfuse</strong>, <strong>LangSmith</strong>, <strong>SigNoz</strong>, <strong>Jaeger</strong>, <strong>Grafana Tempo</strong>, or your own collector. One plugin, parallel fan-out, zero hot-path blocking.
+      Fan LLM traces, tool calls, API requests, and token metrics out to any OTLP-compatible observability backend — <strong>Phoenix</strong>, <strong>Langfuse</strong>, <strong>LangSmith</strong>, <strong>SigNoz</strong>, <strong>Jaeger</strong>, <strong>Zipkin</strong>, <strong>GreptimeDB</strong>, <strong>ClickStack</strong>, <strong>VictoriaTraces / Logs / Metrics</strong>, <strong>Aspire Dashboard</strong>, <strong>Gigapipe</strong>, <strong>Agenta</strong>, <strong>Grafana Tempo</strong> and <strong>LGTM</strong>, <strong>Uptrace</strong>, <strong>OpenObserve</strong>, <strong>Parseable</strong>, <strong>Honeycomb</strong>, <strong>W&amp;B Weave</strong>, <strong>Elastic</strong>, <strong>OpenLIT</strong>, <strong>MLflow</strong>, <strong>Comet Opik</strong>, <strong>Laminar</strong>, <strong>LangWatch</strong>, <strong>Latitude</strong>, or your own collector. One plugin, parallel fan-out, zero hot-path blocking.
     </p>
     <div className="hero__ctas">
       <Link className="hero__cta hero__cta--primary" to="/getting-started/quickstart">Quickstart →</Link>
       <Link className="hero__cta hero__cta--secondary" to="/backends/overview">Browse backends</Link>
     </div>
     <div className="hero__code-block">
-      <span className="prompt">$ </span><span className="cmd">hermes plugins install briancaffey/hermes-otel/hermes_otel</span>
+      <span className="prompt">$ </span><span className="cmd">hermes plugins install hermes_otel</span>
     </div>
   </div>
 </div>
@@ -50,11 +50,11 @@ hermes-otel turns every Hermes lifecycle hook into a properly-nested **OpenTelem
   </div>
   <div className="feature-card">
     <h3>Privacy mode</h3>
-    <p>Flip <code>capture_previews: false</code> to strip every input/output preview at the source. Metadata (tool names, durations, tokens) still flows.</p>
+    <p>Set <code>content_capture: off</code> to record no prompts, responses or tool content at the source, or <code>preview</code> to keep short clipped previews. Metadata (tool names, durations, tokens) still flows.</p>
   </div>
   <div className="feature-card">
     <h3>Orphan-span sweep</h3>
-    <p>Long-abandoned sessions don't leak state: a TTL sweeper finalizes stale root spans with <code>final_status=timed_out</code> so your UI stays clean.</p>
+    <p>Long-abandoned sessions don't leak state: a TTL sweeper closes stale root spans with <code>hermes.turn.final_status=timed_out</code> so your UI stays clean.</p>
   </div>
 </div>
 
@@ -81,13 +81,93 @@ hermes-otel turns every Hermes lifecycle hook into a properly-nested **OpenTelem
     <div className="backend-card__name">Jaeger</div>
     <div className="backend-card__desc">The classic distributed-trace UI. Single-container local. Traces only.</div>
   </Link>
+  <Link className="backend-card" to="/backends/zipkin">
+    <div className="backend-card__name">Zipkin</div>
+    <div className="backend-card__desc">The original tracing UI, OTLP through the zipkin-otel image. One container, Apache-2.0. Traces only.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/greptime">
+    <div className="backend-card__name">GreptimeDB</div>
+    <div className="backend-card__desc">One open-source database: OTLP in, SQL / PromQL / Jaeger API out. One container, Apache-2.0. Traces + metrics + logs.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/clickstack">
+    <div className="backend-card__name">ClickStack</div>
+    <div className="backend-card__desc">HyperDX on ClickHouse, the standard OTel tables in one container. MIT. Traces + metrics + logs.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/victoria">
+    <div className="backend-card__name">VictoriaMetrics family</div>
+    <div className="backend-card__desc">VictoriaTraces, VictoriaMetrics and VictoriaLogs: three single binaries, one entry. Apache-2.0. Traces + metrics + logs.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/aspire">
+    <div className="backend-card__name">Aspire Dashboard</div>
+    <div className="backend-card__desc">One container, no account, a GenAI visualizer and a read API. MIT. Traces + metrics + logs.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/gigapipe">
+    <div className="backend-card__name">Gigapipe (qryn)</div>
+    <div className="backend-card__desc">OTLP in, the Tempo, Prometheus and Loki APIs out of one port on ClickHouse. AGPL-3.0. Traces + metrics + logs.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/agenta">
+    <div className="backend-card__name">Agenta</div>
+    <div className="backend-card__desc">Open-source LLMOps platform: span types, token roll-ups and sessions computed server-side. Self-hosted or cloud. Traces only.</div>
+  </Link>
   <Link className="backend-card" to="/backends/tempo">
     <div className="backend-card__name">Grafana Tempo</div>
     <div className="backend-card__desc">Tempo + Grafana stack, OSS or Grafana Cloud. Traces only.</div>
   </Link>
+  <Link className="backend-card" to="/backends/lgtm">
+    <div className="backend-card__name">Grafana LGTM</div>
+    <div className="backend-card__desc">Tempo + Mimir + Loki + Grafana in one image. Local docker. Traces + metrics + logs.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/uptrace">
+    <div className="backend-card__name">Uptrace</div>
+    <div className="backend-card__desc">OSS APM on ClickHouse, DSN-style setup. Local docker or cloud. Traces + metrics + logs.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/openobserve">
+    <div className="backend-card__name">OpenObserve</div>
+    <div className="backend-card__desc">Single-container observability store with SQL. Local docker or cloud. Traces + metrics + logs.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/parseable">
+    <div className="backend-card__name">Parseable</div>
+    <div className="backend-card__desc">SQL over Parquet with a Traces view. Self-hosted or cloud. Traces + metrics + logs.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/honeycomb">
+    <div className="backend-card__name">Honeycomb</div>
+    <div className="backend-card__desc">Cloud (US / EU) with a generous free tier. Traces + metrics + logs.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/weave">
+    <div className="backend-card__name">W&amp;B Weave</div>
+    <div className="backend-card__desc">Weights &amp; Biases' LLM tracing. Cloud, Dedicated Cloud or self-managed. Traces only.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/elastic">
+    <div className="backend-card__name">Elastic</div>
+    <div className="backend-card__desc">Elastic Cloud managed OTLP or a self-hosted EDOT Collector into Elasticsearch + Kibana. Traces + metrics + logs.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/openlit">
+    <div className="backend-card__name">OpenLIT</div>
+    <div className="backend-card__desc">OTel-native LLM observability, two containers, Apache-2.0. Traces + metrics + logs.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/mlflow">
+    <div className="backend-card__name">MLflow</div>
+    <div className="backend-card__desc">MLflow 3.6+ tracking server with its GenAI Traces UI, token and cost roll-ups. Self-hosted. Traces only.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/opik">
+    <div className="backend-card__name">Comet Opik</div>
+    <div className="backend-card__desc">LLM evaluation and tracing platform; threads, span types, usage and cost per span. Self-hosted or Comet cloud. Traces only.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/laminar">
+    <div className="backend-card__name">Laminar</div>
+    <div className="backend-card__desc">Agent-focused tracing with span types, tokens and cost. Self-hosted or Laminar cloud. Traces + logs.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/langwatch">
+    <div className="backend-card__name">LangWatch</div>
+    <div className="backend-card__desc">LLM observability and evaluation platform. Self-hosted or cloud. Traces + metrics + logs.</div>
+  </Link>
+  <Link className="backend-card" to="/backends/latitude">
+    <div className="backend-card__name">Latitude</div>
+    <div className="backend-card__desc">Prompt engineering and agent observability on the GenAI semconv. Self-hosted or Latitude cloud. Traces only.</div>
+  </Link>
   <Link className="backend-card" to="/backends/otlp">
     <div className="backend-card__name">Generic OTLP</div>
-    <div className="backend-card__desc">Any OTLP/HTTP collector. Drop in an endpoint and go.</div>
+    <div className="backend-card__desc">Any OTLP collector, over HTTP or gRPC (with TLS / mTLS). Drop in an endpoint and go.</div>
   </Link>
   <Link className="backend-card" to="/backends/multi-backend">
     <div className="backend-card__name">Multi-backend</div>
@@ -102,7 +182,7 @@ Hermes core ships content-free [gateway monitoring](https://hermes-agent.nousres
 | | Hermes gateway monitoring (core) | Bundled Langfuse plugin | hermes-otel |
 |---|---|---|---|
 | Scope | Gateway/cron health, content-free | Per-run traces | Per-run traces + metrics + logs |
-| Backends | Any OTLP receiver | Langfuse only | 12+ OTLP backends, fan-out |
+| Backends | Any OTLP receiver | Langfuse only | 26 backend types plus generic OTLP, fan-out |
 | Coexists with hermes-otel | Yes | Yes | |
 
 ## The span hierarchy
@@ -115,14 +195,14 @@ agent / cron                              [root, AGENT]
     └── api.{model}                       [LLM — second round-trip, final response]
 ```
 
-Each span carries the attributes both Langfuse (`gen_ai.usage.input_tokens`, `gen_ai.content.prompt`) and Phoenix (`llm.token_count.prompt`, `input.value`) expect — see [Attribute conventions](/architecture/attributes).
+Each span carries the attributes both Langfuse (`gen_ai.usage.input_tokens`, `gen_ai.input.messages`) and Phoenix (`llm.token_count.prompt`, `input.value`) expect — see [Attribute conventions](/architecture/attributes).
 
 ## Where to go next
 
 | | |
 |---|---|
 | 🚀 **[Quickstart](/getting-started/quickstart)** | Install + Phoenix in a local Docker container, first trace in under 5 minutes |
-| 📦 **[Installation](/getting-started/installation)** | Install into Hermes Agent's venv, optional `langsmith` extra |
+| 📦 **[Installation](/getting-started/installation)** | Install into Hermes Agent's venv, optional extras |
 | 🧩 **[Concepts](/getting-started/concepts)** | Hooks, spans, fan-out, how the plugin wires into Hermes |
 | 🎯 **[Pick a backend](/backends/overview)** | Comparison table, quick picks, decision flowchart |
 | ⚙️ **[Configuration](/configuration/overview)** | `config.yaml`, env vars, sampling, privacy, batch tuning |

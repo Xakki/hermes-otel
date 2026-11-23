@@ -1,14 +1,14 @@
 ---
 sidebar_position: 5
 title: "Privacy mode"
-description: "Suppress all input/output previews (user messages, tool args, tool results) while keeping structural metadata — for shared deployments where content can't leave the process."
+description: "content_capture: off records no prompts, responses, tool arguments or tool results while keeping structural metadata — for shared deployments where content can't leave the process."
 ---
 
 # Privacy mode
 
-Some of the plugin's most valuable telemetry is also the most sensitive: the user's message, the tool arguments, the tool result, the model's response. In shared deployments (company production, multi-tenant hosting, anywhere the agent operates on data that can't leave the process), you often need to suppress all of that at the source.
+Some of the plugin's most useful telemetry is also the most sensitive: the user's message, the tool arguments, the tool result, the model's response. By default (`content_capture: full`) all of it is recorded, including the complete prompt and response on every `api.*` span. In shared deployments (company production, multi-tenant hosting, anywhere the agent handles data that must not leave the process), you need to stop that at the source.
 
-Privacy mode is a single knob that does exactly that.
+Privacy mode is one setting that does it.
 
 ## The switch
 
@@ -29,12 +29,13 @@ export HERMES_OTEL_CONTENT_CAPTURE=off
 
 When `content_capture: off`:
 
+- The complete request and response on `api.*` spans (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, `input.value`, `output.value`)
 - `input.value` on `llm.*` spans (user message)
 - `output.value` on `llm.*` spans (assistant response)
-- `gen_ai.content.prompt` / `gen_ai.content.completion` on `llm.*` spans
 - `input.value` on `tool.*` spans (tool args)
 - `output.value` on `tool.*` spans (tool result)
 - `hermes.approval.command` / `hermes.approval.description` on `approval.*` spans (the command awaiting human approval)
+- The goal and summary previews on `subagent.*` spans
 - The conversation-history JSON when [conversation capture](/configuration/conversation-capture) is also enabled
 
 These attributes are **never set** on the span — not "set and then redacted". A reader can't pull them back out.
@@ -45,7 +46,8 @@ Everything that isn't user-originated content:
 
 - Span tree (parent/child relationships)
 - Span timings (start / end / duration)
-- Tool names, commands, targets, outcomes (`tool.name`, `hermes.tool.command`, `hermes.tool.target`, `hermes.tool.outcome`)
+- Tool names and outcomes (`tool.name`, `hermes.tool.outcome`)
+- Tool commands, tool targets and error text, unless you [switch them off](#tool-commands-targets-and-error-text)
 - Token counts (`gen_ai.usage.*`, `llm.token_count.*`)
 - Model name, provider, finish reason
 - Per-turn summary (tool count, skill count, API call count, final status)
@@ -64,18 +66,66 @@ When privacy mode is active, the plugin prints a one-line banner so it's not a s
 
 If you ever see tool args or user messages in the backend UI that you didn't expect, double-check the banner is present.
 
-## Tool commands and targets
+## Tool commands, targets and error text {#tool-commands-targets-and-error-text}
 
-Note that `hermes.tool.command` (the shell command passed to `bash`-family tools) and `hermes.tool.target` (the file path passed to `read_file`, `edit_file`, etc.) are **not** suppressed by privacy mode. They're structured metadata, not free-form user content.
+`hermes.tool.command` (the shell command passed to `bash`-family tools), `hermes.tool.target` (the file path or URL passed to `read_file`, `web_extract`, etc.) and the text of an error are **not** suppressed by `content_capture: off`. They are what makes a trace debuggable, they are clipped to 500 characters, and they pass through secret redaction like the content attributes (see below), so `curl -H 'Authorization: Bearer …'` or `export GITHUB_TOKEN=…` leaves the machine masked.
 
-If even command and target are too sensitive for your deployment, file an issue — we can add a stricter mode.
+A command line, a path, a URL or an error message can still name a customer or quote their data. Three settings leave that text out, each on its own and in any `content_capture` mode:
+
+```yaml
+content_capture: "off"
+capture_tool_command: false    # HERMES_OTEL_CAPTURE_TOOL_COMMAND
+capture_tool_target: false     # HERMES_OTEL_CAPTURE_TOOL_TARGET
+capture_error_message: false   # HERMES_OTEL_CAPTURE_ERROR_MESSAGE
+```
+
+| Setting (default `true`) | `false` leaves out |
+|---|---|
+| `capture_tool_command` | `hermes.tool.command` on tool spans, `hermes.turn.tool_commands` on the turn root |
+| `capture_tool_target` | `hermes.tool.target` on tool spans, `hermes.turn.tool_targets` on the turn root |
+| `capture_error_message` | `error.message`, `exception.message` and `exception.stacktrace` (span attributes and the `exception` span event), the span status description, and the error text in the `hermes.api.error` event body |
+
+What stays: tool names, `hermes.tool.outcome`, `error.type`, `exception.type`, the HTTP status code, the `ERROR` span status itself, tokens, cost, timings, model and session identity.
+
+The text is removed in the plugin's export pipeline, in the one pass every finished span goes through before the dashboard's live store and before each backend's exporter, and from [events](/configuration/logs) before they are emitted. Nothing downstream sees it: not a backend, not the live store file, not the `observability` skill. If that pass fails for a span while something is switched off, the span is dropped instead of exported with the text.
+
+With all three `false` and `content_capture: "off"`, no command line, path, URL, prompt, response, tool argument, tool result or error text is on any span or event. The startup log says so:
+
+```text
+[hermes-otel] ⚠ content_capture=off — prompts, tool I/O and responses are not recorded
+[hermes-otel] ⚠ not recorded: tool commands, tool targets, error messages
+```
+
+`disable_spans: [tool]` is not a substitute: it drops the tool spans but the turn root keeps the roll-ups.
+
+## Secrets in span content
+
+Whatever `content_capture` lets through is redacted before it leaves the process: on every span, for every backend, and in the dashboard's live store. The redactor is Hermes' own `agent.redact` (the one behind `agent.log`) when the plugin runs inside Hermes, and the plugin's built-in set otherwise (provider key prefixes such as `sk-…`, `ghp_…`, `AKIA…`; `Bearer` / `Basic` credentials; `Authorization`, `x-api-key`, `password=` style assignments; the password in `scheme://user:password@host`). `security.redact_secrets: false` or `HERMES_REDACT_SECRETS=false` turns it off, the same switch Hermes uses for its own logs.
+
+**What is redacted.** The free-text attributes listed in `SENSITIVE_ATTRIBUTES` in `hermes_otel/semconv.py`: `input.value` / `output.value`, `gen_ai.input.messages` / `gen_ai.output.messages` / `gen_ai.system_instructions`, `gen_ai.tool.call.arguments` / `.result`, `hermes.tool.command` / `.target`, `hermes.turn.tool_commands` / `.tool_targets`, the approval, human-input, subagent and kanban text, `error.message`, the `exception.message` / `exception.stacktrace` of span events, and the span status description. Ids, model names, counts and enums are never touched.
+
+**JSON stays JSON.** A JSON value (a message list, tool arguments, a tool result) is parsed and redacted string by string, then serialised again only if something was masked, so a backend that renders JSON still can. A value under a credential-shaped key (`{"api_key": "…"}`, `{"password": "…"}`) is redacted with its key in view, so an opaque value without a known prefix is still caught.
+
+**What is not.** Redaction is pattern-based: personal data, internal hostnames and secrets with no recognisable shape still flow. `content_capture: off` is the only guarantee that prompt and tool text never leaves the machine, and the [three settings above](#tool-commands-targets-and-error-text) the only guarantee for commands, targets and error text.
+
+**Cost.** The pass runs once per finished span, shared by the live store and every backend: on the thread that ends the span when the live store is on (the default), otherwise on the export thread. Measured with Hermes' redactor on an `api.*` span carrying both conventions: about 6 ms at 30 KB of content, 23 ms at 120 KB and 180 ms at 0.9 MB (a long `capture_conversation_history`). A span with no content attributes costs nothing.
 
 ## Interaction with `preview_max_chars`
 
-`preview_max_chars` (default: 1200) is a separate truncation cap. It clips long previews with a `...`. In `off` mode `preview_max_chars` becomes a no-op — there's nothing to clip. In `preview` mode a clipped value carries `hermes.preview.<input|output>.truncated = true` and `.original_chars`, so a short-looking value can be told from a clipped one.
+`preview_max_chars` (default: 1200) is a separate cap. It clips long previews and ends them with `...`. In `off` mode it does nothing, since there is nothing to clip. In `preview` and `full` mode a clipped preview carries `hermes.preview.<input|output>.truncated = true` and `.original_chars`, so a short-looking value can be told from a clipped one.
+
+## Logs and events
+
+The logs signal is off by default on both of its switches. When on:
+
+- **Forwarded log records** (`logs.capture`) are not filtered by privacy mode: a body is whatever Hermes or a library logged. Secrets are redacted before export with Hermes' own `agent.redact` (the redactor behind `agent.log`) or the plugin's built-in set, and Hermes' host-internal record attributes (`hermes_home`, `session_tag`) never leave. Other sensitive text flows unless the logging application redacts it; narrow with `logs.exclude_loggers`, `logs.logger_levels` or `logs.only_in_turn`.
+- **Events** (`logs.events.enabled`) follow privacy mode: `logs.events.content: inherit` means `content_capture: off` puts no prompt, response or tool content on any event, `preview` clips it, `full` sends what the span has. A backend entry's `logs: {events: {content: off}}` removes content for that backend alone, so a SaaS log sink can stay content-free while a local one keeps everything.
+- The dashboard's live store holds the same records as the backends, redacted the same way, in a file created owner-only. Spans in the live store are redacted too (see [Secrets in span content](#secrets-in-span-content)).
+
+See [Logs and events](/configuration/logs#what-never-leaves-the-machine) for the measured redaction cost and the attribution rules.
 
 ## Verifying
 
-A quick way to verify privacy mode is working: run a Hermes turn that uses a tool, then inspect the trace. Every `input.value` / `output.value` / `gen_ai.content.*` attribute should be **absent** (not empty — absent). Token counts and tool names should still be present.
+To check privacy mode: run a Hermes turn that uses a tool, then inspect the trace. Every `input.value`, `output.value`, `gen_ai.input.messages` and `gen_ai.output.messages` attribute should be **absent** (not empty: absent). Token counts and tool names should still be there. The dashboard's **Settings** tab also shows the mode in force.
 
 In Langfuse, you'll see observations with empty input/output panels. In Phoenix, the Input/Output panels won't render at all for those spans.

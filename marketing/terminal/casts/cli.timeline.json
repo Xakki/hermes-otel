@@ -1,0 +1,50 @@
+[
+ {
+  "t": 0.0,
+  "event": "start",
+  "start_at": "start"
+ },
+ {
+  "t": 2.0596372911240906,
+  "event": "type_start",
+  "text": "otel traces --name agent --since 10m"
+ },
+ {
+  "t": 5.564442333066836,
+  "event": "type_end"
+ },
+ {
+  "t": 5.930178957991302,
+  "event": "submit"
+ },
+ {
+  "t": 7.637673540972173,
+  "event": "turn_end"
+ },
+ {
+  "t": 10.155337416101247,
+  "event": "key",
+  "key": "C-l"
+ },
+ {
+  "t": 10.755481750005856,
+  "event": "type_start",
+  "text": "otel trace last"
+ },
+ {
+  "t": 12.210668750107288,
+  "event": "type_end"
+ },
+ {
+  "t": 12.572560291038826,
+  "event": "submit"
+ },
+ {
+  "t": 14.070441791089252,
+  "event": "turn_end"
+ },
+ {
+  "t": 17.57238816609606,
+  "event": "end"
+ }
+]

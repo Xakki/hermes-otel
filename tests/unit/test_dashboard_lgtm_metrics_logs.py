@@ -12,7 +12,8 @@ import pytest
 
 from hermes_otel.dashboard.backends import _loki, _prometheus
 from hermes_otel.dashboard.backends import tempo as tp
-from hermes_otel.dashboard.backends.base import LogFilter
+from hermes_otel.dashboard.backends.base import BackendError, LogFilter
+from hermes_otel.severity import otel_severity
 
 NAMES = {
     "status": "success",
@@ -23,19 +24,53 @@ NAMES = {
         "up",
     ],
 }
+# Raw cumulative samples, as a range-vector query on the bare counter answers them:
+# one series per process (service_instance_id). The first process existed
+# before the window (a sample in the look-behind) and grows by 5 inside it;
+# the second starts inside the window with its whole value; the third is a
+# one-shot run whose two samples carry the same value (#296).
 RANGE = {
     "status": "success",
     "data": {
         "resultType": "matrix",
         "result": [
             {
-                "metric": {"model": "nvidia/nemotron-3-nano-omni"},
-                "values": [[1790294400, "17078.75"], [1790298000, "0"]],
+                "metric": {
+                    "__name__": "hermes_token_usage_total",
+                    "model": "nvidia/nemotron-3-nano-omni",
+                    "service_instance_id": "gw",
+                },
+                "values": [
+                    [1790294400 - 3600 - 60, "100"],
+                    [1790294400, "100"],
+                    [1790298000, "105"],
+                ],
             },
             {
-                "metric": {"model": "nvidia/nemotron-3-super-120b-a12b"},
-                "values": [[1790294400, "29417.33"]],
+                "metric": {
+                    "__name__": "hermes_token_usage_total",
+                    "model": "nvidia/nemotron-3-nano-omni",
+                    "service_instance_id": "one-shot-a",
+                },
+                "values": [[1790298000, "17078"], [1790301600, "17078"]],
             },
+            {
+                "metric": {
+                    "__name__": "hermes_token_usage_total",
+                    "model": "nvidia/nemotron-3-super-120b-a12b",
+                    "service_instance_id": "one-shot-b",
+                },
+                "values": [[1790294400, "29417"]],
+            },
+        ],
+    },
+}
+GAUGE_RANGE = {
+    "status": "success",
+    "data": {
+        "resultType": "matrix",
+        "result": [
+            {"metric": {"model": "m"}, "values": [[1790294400, "0.5"], [1790298000, "0.25"]]}
         ],
     },
 }
@@ -100,6 +135,10 @@ def fake_http(monkeypatch):
         if path.endswith("/label/__name__/values"):
             return NAMES
         if path.endswith("/api/v1/query_range"):
+            return GAUGE_RANGE
+        if path.endswith("/api/v1/query"):
+            q = dict(_urlparse.parse_qsl(_urlparse.urlparse(url).query))
+            assert q.get("query", "").startswith("hermes_token_usage_total["), url
             return RANGE
         raise AssertionError(url)
 
@@ -125,7 +164,7 @@ class TestWiring:
     def test_plain_tempo_has_no_metrics_or_logs_unless_pointed_at_them(self):
         a = tp.TempoAdapter({"type": "tempo", "endpoint": "http://tempo:4318/v1/traces"})
         assert (a.supports_metrics, a.supports_logs) == (False, False)
-        with pytest.raises(tp.HTTPException):
+        with pytest.raises(BackendError):
             a.metric_names(0, 1)
         b = tp.TempoAdapter(
             {
@@ -168,16 +207,35 @@ class TestPrometheus:
         q = _query_of(fake_http[-1])
         assert (q["start"], q["end"], q["match[]"]) == ("100", "200", '{__name__=~"hermes_.*"}')
 
-    def test_counter_query_uses_increase_and_lands_on_the_grid(self, fake_http):
+    def test_counter_query_reads_raw_samples_and_counts_a_new_series_first_value(self, fake_http):
         a = tp.TempoAdapter({"type": "lgtm", "endpoint": "http://h:4318/v1/traces"})
         start, end = 1790294400 - 3600, 1790298000 + 3600
         out = a.metrics_query("hermes_token_usage_total", start, end, 3600, group_by="model")
         q = _query_of(fake_http[-1])
-        assert q["query"] == "sum by (model) (increase(hermes_token_usage_total[3600s]))"
-        assert (q["start"], q["end"], q["step"]) == (str(start), str(end), "3600")
+        # the bare counter's raw samples (a range vector covering the window
+        # plus the look-behind, evaluated at the window end), not increase():
+        # a one-shot run's single sample would otherwise read as 0, and a
+        # query_range grid can skip or shift a sample (#296)
+        assert q["query"] == f"hermes_token_usage_total[{end - start + 3600}s]"
+        assert q["time"] == str(end) and "step" not in q
         assert out["cumulative"] is True and out["bucketS"] == 3600 and len(out["buckets"]) == 4
-        assert out["series"]["nvidia/nemotron-3-nano-omni"] == [None, 17078.75, 0.0, None]
-        assert out["series"]["nvidia/nemotron-3-super-120b-a12b"] == [None, 29417.33, None, None]
+        # gateway series: baseline before the window, +0 then +5 inside it;
+        # one-shot-a: first value counts (17078), the repeat adds 0
+        assert out["series"]["nvidia/nemotron-3-nano-omni"] == [None, 0.0, 17078.0 + 5.0, 0.0]
+        # one-shot-b: a series that starts inside the window counts in full
+        assert out["series"]["nvidia/nemotron-3-super-120b-a12b"] == [None, 29417.0, None, None]
+        assert "first value" in out["series_start_rule"]
+
+    def test_gauge_query_keeps_the_promql_aggregate(self, fake_http):
+        a = tp.TempoAdapter({"type": "lgtm", "endpoint": "http://h:4318/v1/traces"})
+        start, end = 1790294400 - 3600, 1790298000 + 3600
+        out = a.metrics_query(
+            "process_cpu_utilization", start, end, 3600, group_by="model", agg="avg"
+        )
+        q = _query_of(fake_http[-1])
+        assert q["query"] == "avg by (model) (last_over_time(process_cpu_utilization[3600s]))"
+        assert out["cumulative"] is False
+        assert out["series"]["m"] == [None, 0.5, 0.25, None]
 
     def test_gauge_and_aggregate_verbs(self):
         assert (
@@ -205,7 +263,7 @@ class TestLoki:
             == '{service_name=~".+"} | trace_id="abc" | hermes_session_id="s1" | scope_name="hermes_otel" | severity_number >= 13 |= "say \\"hi\\""'
         )
         assert _loki.logql_for(LogFilter(), '{job="x"}') == '{job="x"}'
-        assert [_loki.otel_severity_for(l) for l in (10, 20, 25, 40, 50, 0)] == [5, 9, 9, 17, 21, 1]
+        assert [otel_severity(l) for l in (10, 20, 25, 40, 50, 0)] == [5, 9, 9, 17, 21, 1]
 
     def test_search_flattens_streams_newest_first_and_honours_limit(self, fake_http):
         a = tp.TempoAdapter({"type": "lgtm", "endpoint": "http://h:4318/v1/traces"})

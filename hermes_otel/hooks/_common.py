@@ -1,4 +1,5 @@
-"""Shared plumbing for the hook callbacks: tracer lookup, fail-open, previews.
+"""Shared plumbing for the hook callbacks: tracer lookup, fail-open, previews,
+span-attribute setting.
 
 Nothing here holds state; the tracer singleton owns all of it. Every
 submodule imports :func:`get_tracer` from here so a test can swap the
@@ -7,12 +8,29 @@ tracer in one place (``hermes_otel.tracer.get_tracer``).
 
 from __future__ import annotations
 
+import contextlib
 import functools
 from typing import Any, Dict, Optional, Tuple
 
 from .. import tracer as _tracer_mod
 from ..debug_utils import debug_log, logger
-from ..helpers import clip_preview, session_id_from_turn_id
+from ..helpers import clip_preview
+
+
+def session_id_from_turn_id(turn_id: Any) -> str:
+    """Recover the plugin ``session_id`` from a hook ``turn_id``.
+
+    Hermes builds ``turn_id`` as ``"<session_id>:<task_id>:<hex>"``
+    (``agent/turn_context.py``). Hooks that only carry ``turn_id`` (e.g. the
+    approval hooks) can therefore recover the session the plugin keys its spans
+    on by taking the first segment. Returns ``""`` when unavailable.
+    """
+    if not isinstance(turn_id, str) or ":" not in turn_id:
+        return ""
+    head = turn_id.split(":", 1)[0].strip()
+    # ``agent/turn_context.py`` uses the literal "session" placeholder when the
+    # agent has no session_id yet — that's not a real id to correlate on.
+    return "" if head == "session" else head
 
 
 def get_tracer():
@@ -53,7 +71,37 @@ def _fail_open(fn):
     return wrapper
 
 
-def _as_dict(value: Any) -> Dict[str, Any]:
+def set_span_attributes(span: Any, attributes: Dict[str, Any]) -> None:
+    """Set the non-None *attributes* on a live span; never raises.
+
+    A no-op for ``None`` and for span objects without the OTel API
+    (``INVALID_SPAN`` stand-ins, LangSmith runs); a value the SDK rejects is
+    skipped on its own, the rest still land.
+    """
+    if span is None or not hasattr(span, "set_attribute"):
+        return
+    for key, value in attributes.items():
+        if value is None:
+            continue
+        with contextlib.suppress(Exception):  # never let telemetry raise
+            span.set_attribute(key, value)
+
+
+def span_context_of(span: Any) -> Any:
+    """The ``SpanContext`` of a live span, else ``None``: for ``None``, for span
+    objects without the OTel API (``INVALID_SPAN`` stand-ins, LangSmith runs)
+    and when the call raises.
+    """
+    get_ctx = getattr(span, "get_span_context", None)
+    if get_ctx is None:
+        return None
+    try:
+        return get_ctx()
+    except Exception:
+        return None
+
+
+def as_dict(value: Any) -> Dict[str, Any]:
     """Coerce a hook payload field to a dict, never raising.
 
     Hermes documents ``usage`` / ``error`` as dicts, but SDK objects
@@ -69,12 +117,10 @@ def _as_dict(value: Any) -> Dict[str, Any]:
     for attr in ("model_dump", "_asdict"):
         method = getattr(value, attr, None)
         if callable(method):
-            try:
+            with contextlib.suppress(Exception):
                 out = method()
                 if isinstance(out, dict):
                     return out
-            except Exception:
-                pass
     if isinstance(value, str):
         return {"message": value} if value.strip() else {}
     d = getattr(value, "__dict__", None)
@@ -93,22 +139,53 @@ _PREVIEW_LIMITS = {
 }
 
 
-def _preview(value: Any, max_chars: int) -> Optional[str]:
-    """Apply the configured preview policy: capture toggle + clip_preview."""
-    tracer = get_tracer()
-    if not tracer.config.capture_previews:
-        return None
-    return clip_preview(value, max_chars)
+def _emit_event(
+    tracer,
+    name: str,
+    body: str,
+    attributes: Dict[str, Any],
+    *,
+    severity: str = "INFO",
+    session_id: Optional[str] = None,
+    span: Any = None,
+    content: bool = True,
+) -> None:
+    """Emit a structured event (#267) with the content attributes gated by
+    ``logs.events.content`` (``inherit`` follows ``content_capture``) and
+    without the attributes the config omits (``capture_tool_command`` /
+    ``capture_tool_target`` / ``capture_error_message``, #669).
+
+    *content=False* drops the content attributes outright (turn-level
+    events never repeat prompts). Cheap no-op when events are off.
+    """
+    if not getattr(tracer.config, "log_events", False):
+        return
+    try:
+        from ..log_events import apply_content_mode, resolve_content_mode
+        from ..plugin_config import content_mode
+
+        mode = (
+            "off"
+            if not content
+            else resolve_content_mode(tracer.config.log_events_content, content_mode(tracer.config))
+        )
+        attrs = apply_content_mode(attributes, mode, tracer.config.preview_max_chars)
+        omit = tracer.config.omitted_attributes()
+        if omit:
+            attrs = {k: v for k, v in attrs.items() if k not in omit}
+        tracer.emit_event(name, body, attrs, severity=severity, session_id=session_id, span=span)
+    except Exception as exc:  # never into the agent loop
+        debug_log(f"event {name} skipped: {type(exc).__name__}: {exc}")
 
 
 def _preview_for(tracer, kind: Optional[str], value: Any) -> Optional[str]:
     """Clip ``value`` with the limit configured for ``kind`` (see ``_PREVIEW_LIMITS``).
 
     ``kind=None`` uses the global ``preview_max_chars``. Honors
-    ``capture_previews`` (None when off) so callers omit the attribute.
+    ``content_capture`` (None when off) so callers omit the attribute.
     """
     cfg = tracer.config
-    if not cfg.capture_previews:
+    if not cfg.captures_content():
         return None
     limit = None
     if kind is not None:

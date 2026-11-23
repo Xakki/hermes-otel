@@ -18,7 +18,7 @@ using the root admin credentials (or any user you create in the UI).
 
 ```bash
 # From the plugin root:
-docker compose -p openobserve -f docker-compose/openobserve.yaml up -d
+docker compose -f docker-compose/openobserve/docker-compose.yaml up -d
 
 # Open http://localhost:5080 and log in with the seeded admin:
 #   root@example.com / Complexpass#123
@@ -34,7 +34,8 @@ backends:
     password_env: OPENOBSERVE_PASSWORD
     # stream_name: default          # optional; defaults to "default"
 
-capture_logs: true
+logs:
+  capture: true   # send Python log lines as OTel logs too
 ```
 
 Then:
@@ -55,7 +56,7 @@ should appear in startup logs.
   indexes automatically.
 - **Metrics** — "Metrics" tab. Query `hermes_*` metrics the plugin
   emits (sessions, tokens, tool durations).
-- **Logs** — "Logs" tab. When `capture_logs` is on, every Python
+- **Logs** — "Logs" tab. When `logs: {capture: true}` is on, every Python
   `logger.info(...)` record lands here with the active span's
   `trace_id` / `span_id` attached; click to jump to the related trace.
 
@@ -86,8 +87,8 @@ No collisions with any other hermes-otel stack.
 ## Tearing down
 
 ```bash
-docker compose -p openobserve -f docker-compose/openobserve.yaml down
-docker compose -p openobserve -f docker-compose/openobserve.yaml down -v   # also drops the volume
+docker compose -f docker-compose/openobserve/docker-compose.yaml down
+docker compose -f docker-compose/openobserve/docker-compose.yaml down -v   # also drops the volume
 ```
 
 ## Signals supported
@@ -96,7 +97,7 @@ docker compose -p openobserve -f docker-compose/openobserve.yaml down -v   # als
 - **Metrics:** yes — both gauges and counters, plus histograms.
 - **Logs:** yes — with automatic trace/span correlation.
 
-Set `metrics: false` or `logs: false` per-backend in `config.yaml` if
+Set `metrics: false` or `logs: false` per-backend in `hermes_otel.yaml` if
 you want a narrower fan-out.
 
 ## Disk vs production mode
@@ -105,3 +106,19 @@ This compose runs OpenObserve in "standalone disk" mode — everything
 stored in the `oo_data` named volume. Fine for local/CI; for production
 switch to the HA mode with S3 storage + etcd + Postgres. See the
 upstream docs at https://openobserve.ai/docs/ha_and_production/.
+
+## Quirks
+- The org is in the URL path and the stream in a `stream-name` header, with
+  HTTP Basic auth; a wrong path 404s silently and a bad stream name is a 400.
+  `type: openobserve` builds all of it from `user` / `password` / `stream_name`.
+- Attribute names are flattened with underscores on storage
+  (`llm.model_name` → `llm_model_name`), irreversibly; the dashboard adapter
+  carries a table to map them back (#158).
+- A query naming a column the stream has never seen is a 400, so an events
+  query before the first event is answered empty by the adapter (#268, #299),
+  and the parent-span column has had three names across builds.
+- Each OTLP metric is its own stream; `_total` is dropped and histograms are
+  split into `_sum` / `_count` / `_bucket` streams.
+- One container, no port collisions: the safe default.
+
+The cross-backend comparison is in [`../QUIRKS.md`](../QUIRKS.md).

@@ -5,15 +5,20 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CODE = sorted((REPO_ROOT / "hermes_otel" / "hooks").glob("*.py")) + [
-    REPO_ROOT / "hermes_otel" / "tracer.py"
+    REPO_ROOT / "hermes_otel" / "tracer.py",
+    REPO_ROOT / "hermes_otel" / "pipeline.py",
+    # The resource attributes a backend routes by (``required_resource_attributes``).
+    REPO_ROOT / "hermes_otel" / "backend_specs.py",
+    # Per-session roll-ups the root span carries (cost, auxiliary calls).
+    REPO_ROOT / "hermes_otel" / "session_state.py",
+    # The sweep marker on children ended on the operation's behalf (#477).
+    REPO_ROOT / "hermes_otel" / "span_tracker.py",
 ]
 DOC = REPO_ROOT / "website" / "docs" / "reference" / "span-attributes.md"
 
-_NAME = r"(?:gen_ai|llm|hermes|openinference|session|user|error|input|output|tool|correlation|http|service|process|wandb|weave|exception|host)\.[a-z_][a-z0-9_.]*"
+_NAME = r"(?:gen_ai|llm|hermes|openinference|traceloop|session|user|error|input|output|tool|correlation|http|service|process|wandb|weave|exception|host|os)\.[a-z_][a-z0-9_.]*"
 _QUOTED = re.compile(r'"(' + _NAME + r')"')
 _TICKED = re.compile(r"`(" + _NAME + r")`")
-# Documented in prose (wildcards), not as literals.
-_PROSE_ONLY = {"telemetry.sdk.*", "resource_attributes.*", "global_tags.*"}
 
 
 # Metric-only literals: instrument names created in tracer.py (documented in
@@ -26,15 +31,10 @@ _DUAL_USE = {"hermes.retry.count", "hermes.cost.usage"}
 def _metric_names() -> set:
     """Instrument names are metrics, not span attributes: the instrument table
     plus the host-metrics observables created in ``_create_host_metric_instruments``."""
-    from hermes_otel.tracer import _INSTRUMENTS
+    from hermes_otel.instruments import _INSTRUMENTS, HOST_METRIC_NAMES
 
-    src = (REPO_ROOT / "hermes_otel" / "tracer.py").read_text(encoding="utf-8")
-    body = src[src.index("def _create_host_metric_instruments") :]
-    body = body[: body.index("\n    def ", 10)]
     instruments = {spec.name for spec in _INSTRUMENTS.values()}
-    instruments.update(
-        re.findall(r'create_(?:counter|histogram|observable_[a-z_]+)\(\s*"([a-z_.]+)"', body)
-    )
+    instruments.update(HOST_METRIC_NAMES)
     return (instruments - _DUAL_USE) | {
         "gen_ai.token.type",
         "process.cpu.utilization",
@@ -60,5 +60,5 @@ def test_every_emitted_attribute_is_documented():
 
 
 def test_every_documented_attribute_is_emitted():
-    phantom = sorted(_doc_attributes() - _code_attributes() - _PROSE_ONLY)
+    phantom = sorted(_doc_attributes() - _code_attributes())
     assert phantom == [], f"span-attributes.md lists attributes the code never sets: {phantom}"

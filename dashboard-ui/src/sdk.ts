@@ -4,8 +4,19 @@
 // here, so esbuild's classic JSX (jsxFactory: React.createElement) resolves to
 // the host's single React instance. Using the host's SDK.components keeps the
 // dashboard visually native (same shadcn primitives + theme as core Hermes).
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
+//
+// Host facts the tab relies on (hermes-agent web/src/plugins/sdk.d.ts and the
+// compiled registry, checked against v0.21.5):
+//   - fetchJSON handles auth and throws Error("<status>: <body>") on a non-2xx.
+//     From v0.22.0 it throws an ApiError instead: `message` is the body's
+//     `detail` (or a sentence for the status), `status` holds the code and
+//     `body` the raw body (web/src/lib/api-error.ts).
+//   - It appends ?profile= only for the host's own route families, never for
+//     /api/plugins/*, so the tab adds the page's profile itself (#287).
+//   - Select reads only `value` and a STRING `children` from each SelectOption;
+//     `disabled` and `title` are ignored, so an unusable entry must not be an
+//     option at all (sourceselect.tsx).
+//   - Checkbox is a role=switch button with checked / onCheckedChange.
 import type * as ReactTypes from "react";
 
 const SDK: any = (window as any).__HERMES_PLUGIN_SDK__ || {};
@@ -21,46 +32,71 @@ export const useEffect = hooks.useEffect as typeof ReactTypes.useEffect;
 export const useCallback = hooks.useCallback as typeof ReactTypes.useCallback;
 export const useMemo = hooks.useMemo as typeof ReactTypes.useMemo;
 export const useRef = hooks.useRef as typeof ReactTypes.useRef;
+export const useContext = (hooks.useContext || (SDK.React && SDK.React.useContext)) as typeof ReactTypes.useContext;
+export const createContext = (hooks.createContext || (SDK.React && SDK.React.createContext)) as typeof ReactTypes.createContext;
+/** The host's theme hook ({themeName, availableThemes, setTheme}); absent on older hosts. */
+export const useTheme: (() => { themeName?: string } | undefined) | undefined = SDK.useTheme;
 
 // Native UI components (shadcn primitives provided by the host).
 export const C: any = SDK.components || {};
-export const {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-  Badge,
-  Button,
-  Input,
-  Label,
-  Select,
-  SelectOption,
-  Separator,
-  Tabs,
-  TabsList,
-  TabsTrigger,
-  Checkbox,
-} = C;
+export const { Card, CardHeader, CardContent, Badge, Button, Input, Label, SelectOption, Checkbox } = C;
+const HostSelect = C.Select;
+/** The host's Select drops `aria-label` on its trigger button (axe: button-name, #289).
+ *  Wrapping it in a `display: contents` label with screen-reader-only text gives the
+ *  trigger an accessible name without touching layout. */
+export function Select({ "aria-label": ariaLabel, ...props }: any) {
+  const el = React.createElement(HostSelect, props);
+  if (!ariaLabel) return el;
+  return React.createElement("label", { className: "otel-select-label" }, React.createElement("span", { className: "otel-sr-only" }, ariaLabel), el);
+}
 
-export const fetchJSON: (url: string, opts?: any) => Promise<any> =
-  SDK.fetchJSON || ((u: string) => fetch(u).then((r) => r.json()));
+export const API = "/api/plugins/hermes_otel";
 
-export const buildWsUrl: ((path: string, params?: any) => Promise<string> | string) | undefined =
-  SDK.buildWsUrl;
+/** The profile the page is looking at (`?profile=<name>` in the host URL), or "". */
+export function pageProfile(): string {
+  try {
+    return new URLSearchParams(window.location.search).get("profile") || "";
+  } catch {
+    return "";
+  }
+}
 
-export const timeAgo: (ts: number) => string = (SDK.utils && SDK.utils.timeAgo) || String;
-export const cn: (...a: any[]) => string =
-  (SDK.utils && SDK.utils.cn) ||
-  ((...a: any[]) => a.filter(Boolean).join(" "));
+/** Append the page's profile to a plugin API URL so the host scopes the request (#287). */
+export function withProfile(url: string): string {
+  const p = pageProfile();
+  if (!p || /[?&]profile=/.test(url)) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}profile=${encodeURIComponent(p)}`;
+}
+
+const hostFetch: ((url: string, opts?: any) => Promise<any>) | undefined = SDK.fetchJSON;
+
+/** JSON fetch through the host (auth, 401 redirect) with the profile attached. */
+export const fetchJSON: (url: string, opts?: any) => Promise<any> = hostFetch
+  ? (url, opts) => hostFetch(withProfile(url), opts)
+  : async () => {
+      throw new Error("0: dashboard SDK unavailable");
+    };
+
+/** `fetchJSON` for a plugin route: `api("/live/status", {limit: 5})`. */
+export function api(path: string, params?: URLSearchParams | Record<string, string | number | boolean | null | undefined>): Promise<any> {
+  let q = "";
+  if (params instanceof URLSearchParams) q = params.toString();
+  else if (params) {
+    const sp = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v != null && v !== "") sp.set(k, String(v));
+    q = sp.toString();
+  }
+  return fetchJSON(`${API}${path}${q ? `?${q}` : ""}`);
+}
+
+export const cn: (...a: any[]) => string = (SDK.utils && SDK.utils.cn) || ((...a: any[]) => a.filter(Boolean).join(" "));
 
 export function register(name: string, component: any): void {
   if (PLUGINS && typeof PLUGINS.register === "function") {
     PLUGINS.register(name, component);
   } else {
-    // eslint-disable-next-line no-console
     console.error("[hermes_otel] dashboard plugin registry unavailable");
   }
 }
 
-export const API = "/api/plugins/hermes_otel";
 export const sdkOk = Boolean(SDK && SDK.React && PLUGINS && PLUGINS.register);

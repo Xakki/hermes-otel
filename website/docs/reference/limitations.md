@@ -16,21 +16,17 @@ Hermes itself caps the sanitised copy of the request it hands to plugins (8,000 
 
 ## Langfuse auth requires both keys
 
-Langfuse's Basic Auth is constructed from the public + secret keys. If only one is set, Langfuse mode won't activate (the plugin logs a warning and falls back to the next backend in priority order).
+The plugin builds Langfuse's Basic Auth header from the public and the secret key, so it needs both. A `backends:` entry with only one is skipped with a warning. In env-var mode (no `backends:` list) Langfuse is passed over without a warning and the next backend in priority order is tried.
 
-This is a deliberate check rather than a bug — Langfuse will `401` regardless, and clearer logs beat opaque ones.
+This is deliberate: Langfuse would answer `401` anyway, and a skipped entry is easier to spot than failed exports.
 
-## No gRPC
+## gRPC only for generic `otlp` entries
 
-Only OTLP over HTTP/JSON is used. `opentelemetry-exporter-otlp-proto-grpc` is not a dependency.
-
-Why: HTTP is simpler to debug (curl works), has fewer moving parts (no protobuf compilation needed), and every collector accepts it. The performance difference vs. gRPC doesn't matter at the span volumes a single Hermes process produces.
-
-If you have a backend that requires gRPC specifically, open an issue — we can add the option with a per-backend switch.
+OTLP over HTTP with protobuf bodies is the default for every backend. `protocol: grpc` (since 1.32.0, #469) is accepted only on a generic `type: otlp` entry; any other type with `protocol: grpc` is skipped with a warning. `headers_helper` works only over HTTP. See [gRPC and TLS](/backends/otlp#grpc-and-tls).
 
 ## A session is a group of traces, not one trace
 
-Each user turn is its own trace, rooted at an `agent` / `cron` span; a conversation of ten turns is ten traces sharing `session.id` / `gen_ai.conversation.id` (and `hermes.turn.number` on the root). This is deliberate: the OTel SDK exports a span only when it ends, and a gateway session can stay open for hours, so a session-long root would appear late or never and would break tail sampling and trace timeouts. Phoenix, Langfuse, LangSmith and Weave all group by that attribute. `on_session_finalize` records the session's size (`hermes.session.turns`, `hermes.session.duration`) and `on_session_reset` links a replacing session to the old one; the dashboard's Sessions view groups turns the same way. The turn counter is process-local: a gateway restarted mid-session numbers the next turn 1 again.
+Each user turn is its own trace, rooted at an `agent` / `cron` span; a conversation of ten turns is ten traces sharing `session.id` / `gen_ai.conversation.id` (and `hermes.turn.number` on the root). This is deliberate: the OTel SDK exports a span only when it ends, and a gateway session can stay open for hours, so a session-long root would appear late or never and would break tail sampling and trace timeouts. Phoenix, Langfuse, LangSmith and Weave all group by that attribute. `on_session_finalize` records the session's size (`hermes.session.turns`, `hermes.session.duration`) and `on_session_reset` links a replacing session to the old one; the dashboard's Sessions view groups turns the same way. The turn counter is process-local: a gateway restarted mid-session numbers the next turn 1 again. A resumed session (`hermes -r`) continues `hermes.turn.number` from the user prompts in the conversation Hermes passes, so after a context compaction has folded earlier prompts into a summary, a resumed process can number its turn lower than the true count (a turn in the same process never goes backwards).
 
 ## Single session tracked in memory
 
@@ -49,14 +45,32 @@ Delegated child agents (`delegate_task`) are modeled as `subagent.*` spans, and 
 
 If a future Hermes version runs delegated children **in a separate process**, that registry won't hold the live span. The plugin then degrades gracefully: the child root attaches an OTel **span link** to the delegation span's `SpanContext` (when available) and is tagged with `hermes.subagent.parent_session_id` for correlation — but the child becomes its own trace rather than nesting in the parent. True cross-process trace-context *propagation* (injecting the parent context into the child process) is out of scope for now; open an issue if you need it.
 
+## Delegation spans outlive their turn; timeout details are not reported
+
+Hermes runs a top-level `delegate_task` in the background and fires `subagent_stop` after the parent's turn has ended, so a `subagent.*` span ends after the turn root it nests under. Trace views draw it past the root's end; that is the delegation's real duration, not a clock problem. A delegation whose stop never arrives is closed after `subagent_span_ttl_ms` (24 hours by default) with `hermes.subagent.swept=true`.
+
+When a child times out, Hermes records `timeout_phase` (before or after the first LLM call) and `last_event_age` on the delegate tool's result, but the `subagent_stop` hook does not carry them, so the span has `hermes.subagent.status=timeout` without them.
+
+## A kanban run's trace has two caveats
+
+One run of a card is one trace (the worker joins the dispatcher's `kanban.claim` through `TRACEPARENT`), with two edges:
+
+- **The environment window.** The plugin sets `TRACEPARENT` in the dispatcher's process environment between `kanban_task_claimed` and `on_kanban_worker_spawned` (inside Hermes's dispatch lock, a few milliseconds). A dispatcher inside a gateway shares that environment with its chats, so a terminal command that a concurrent turn spawns in that window inherits the variable; an OpenTelemetry-instrumented program it runs would join the kanban run's trace.
+- **Late arrivals.** A worker run can outlast a backend's trace-assembly window (Tempo, Jaeger), and a one-shot `hermes kanban dispatch` pass forgets the claim when it exits, so `kanban.worker_exit` from a later pass is a trace of its own (correlated by `hermes.kanban.task_id` / `run_id`). A worker killed with `kill -9` never exports its root, so its spans sit in the run's trace under a parent that never arrives.
+
 ## API error capture depends on the `api_request_error` hook
 
 Failed provider API requests (rate limits, timeouts, 5xx, network errors) are
-now captured: the `api.{model}` span ends `ERROR` with a recorded exception and
-retry metadata, via the `api_request_error` hook. On older Hermes builds that
+captured through the `api_request_error` hook: the `api.{model}` span ends
+`ERROR` with a recorded exception and retry metadata. On older Hermes builds that
 don't fire that hook, a failed request's span is instead finalized by the
 [orphan sweep](/architecture/orphan-sweep) on the next turn and ends `OK` — so
 on those builds failures remain invisible until you upgrade Hermes.
+
+When every attempt of a turn fails, Hermes skips `on_session_end`, so the
+root is closed later (finalize, the sweep, or the session's next turn) as
+`failed`; in a gateway that can be up to `root_span_ttl_ms` after the failure
+if the session gets no next message ([#467](https://github.com/briancaffey/hermes-otel/issues/467)).
 
 A hard crash *before* the error hook fires (or before the next sweep) can still
 lose the in-flight span, the same buffered-span trade-off described above.
@@ -71,14 +85,6 @@ Note the deliberate asymmetry: only API-level failures map to `ERROR`. Tool
 Why: tail-based sampling requires buffering spans until the trace is complete, which roughly doubles memory use and adds a full trace of latency to every export.
 
 The standard answer is to run an [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) in the middle with a `tail_sampling` processor. The Collector can fan-out to all your backends and apply tail-based policy centrally.
-
-## LangSmith not in fan-out
-
-Setting `LANGSMITH_TRACING=true` short-circuits the `backends:` list entirely. You can have LangSmith **or** a multi-backend fan-out, not both.
-
-Why: LangSmith uses its own HTTP Run API rather than OTLP; its transport doesn't fit into the OTel `BatchSpanProcessor` shape.
-
-Workaround if you need both: run the OTel Collector and have it route traces to LangSmith's OTLP-compatible beta ingest, if/when LangSmith ships one.
 
 ## Weave is trace-ingest only
 
@@ -96,32 +102,27 @@ Because `wandb.entity` and `wandb.project` are Resource attributes on the
 shared `TracerProvider`, one Hermes process can route to one Weave project at a
 time. Multiple configured Weave entries must agree on those values.
 
-## Logs correlate by the single active session
+## Logs are attributed exactly or not at all
 
-Log records are stamped with a trace id from the plugin's span tracker, not from the OpenTelemetry context (Hermes' loggers run on threads where the plugin's spans are never current). With one session in flight every record maps to that turn's innermost open span; with several sessions active at once the records stay unattributed. Lines logged between turns never carry a trace id. See [OTel logs](/configuration/logs#where-the-ids-come-from).
+A log line gets a turn's trace and span ids from one of three exact sources: a span current on the logging thread, Hermes' own per-thread session tag on the record, or the single session with a turn in flight. Hermes sets its session tag on the agent's turn thread only (about a quarter of `agent.*` lines in a measured gateway log, almost none of `tools.*`, `gateway.*` or platform-adapter lines), so on a gateway serving several users at once, lines from tool execution and housekeeping threads stay unattributed rather than being pinned to the wrong user. `hermes.log.attribution` on each record says which source applied. Lines logged between turns never carry a trace id. See [OTel logs](/configuration/logs#where-the-ids-come-from).
 
-## One-shot runs (`hermes -z`) export no logs
+## Log redaction covers secrets, not personal data
 
-Hermes disables Python logging for a one-shot run before the plugin's handler can see a record, so `-z` exports spans and metrics only. Use `hermes chat -Q --yolo -q "..."`, the interactive CLI or the gateway when you need the logs signal.
+Exported log records and live-store rows are redacted with Hermes' `agent.redact` (credential shapes, auth headers, URL userinfo, vault values) or the plugin's smaller built-in set outside Hermes. Neither recognises names, e-mail addresses or free-text personal data; use a Collector processor or `content_capture` for those. Masked values keep a head and tail by design, so a leaked key can still be identified.
 
 ## Debug log has no rotation
 
-Enabling `HERMES_OTEL_DEBUG=true` appends to `~/.hermes/plugins/hermes_otel/debug.log` forever. No rotation, no size cap.
+With `HERMES_OTEL_DEBUG=true` the plugin appends to `$HERMES_HOME/plugins/hermes_otel/debug.log` (`~/.hermes` by default) with no rotation and no size cap.
 
-Deliberate: the debug log is meant for troubleshooting, not routine operation. If you want persistent debug logs, pipe through `logrotate` or rm the file weekly.
+Deliberate: the debug log is meant for troubleshooting, not routine operation. If you keep it on, rotate the file with `logrotate` or delete it now and then.
 
 ## Metrics labels are curated
 
-The plugin deliberately omits per-request IDs, session IDs, user IDs, tool
-arguments, and prompt content from metric labels. Alongside model/provider and
-other curated dimensions, API request metrics carry the selected credential
-pool entry's stable `credential_id` and verbatim `account_name`. That adds one
-series dimension per pool entry, not per call; large credential pools still
-increase Prometheus cardinality, so budget and retain accordingly. The label
-may contain an email address or other user-supplied name.
+The plugin deliberately does not put user IDs, session IDs, tool arg values, or similar high-cardinality values on metrics. Labels are restricted to low-cardinality values (model, provider, platform, profile, tool name, outcome, choice, error class) so a Prometheus-style time-series database does not fill up with series. Open-ended labels fold into `other` after `metrics_label_limit` distinct values (see [Metrics](/reference/metrics)).
 
-Use logs and traces for request-level correlation (`api_request_id`), not
-metric labels.
+If you need high-cardinality breakdowns, use traces (where every attribute is fine), not metrics.
+
+Per-attempt API instruments can carry the selected pool entry's `credential_id` and `account_name` when Hermes supplies them. Those labels are bounded by `metrics_label_limit` but can still add series, and an account label may contain an email or other user-supplied name. Use `api_request_id` on logs and traces for individual request correlation; it is not retained as a metric label.
 
 ## Host metrics are a sampler, not an accountant
 
@@ -139,8 +140,6 @@ Consequences:
 - **External inference servers are excluded.** Only children of the Hermes
   process count toward `process.cpu.utilization`; a model server in its own
   container is host load (`system.cpu.utilization`, `hw.gpu.*`), by design.
-- **Turn numbers are per process.** `hermes.turn.number` restarts at 1 when a
-  session is resumed in a new process.
 - **No GPU on macOS / without an SDK.** The GPU series are simply absent; the
   CPU series still work.
 
@@ -150,7 +149,7 @@ The plugin keeps no price table. Each `api.*` span's cost comes from Hermes's ow
 
 - **Mostly estimates.** `hermes.cost.status` says `estimated` for a price-table or models-API figure (OpenRouter's is the models API price times the tokens, not the invoice) and `actual` only when a provider profile reports the charge.
 - **No price, no number.** An unknown model (`unknown`) or a subscription-included route (`included`) gets the status but no `hermes.cost.usage` and no metric point, never `$0`. A turn mixing priced and unpriced calls is `partial` on the root with no total.
-- **Main-loop calls only.** Auxiliary calls Hermes makes outside `post_api_request` (for example title generation) are not priced here.
+- **Auxiliary calls are priced on their own spans.** Calls Hermes makes on the agent's behalf (title generation, compression, MoA, vision, …) arrive through `post_auxiliary_call` on Hermes builds that fire it. They are priced the same way and counted as `hermes.turn.auxiliary.*` on the root, beside the turn total rather than inside it. On older builds they are not seen at all.
 - **Older Hermes builds** without `agent.usage_pricing` get no cost attributes at all.
 
 Phoenix and Langfuse can also price spans server-side from the token counts; SigNoz can with a derived metric.

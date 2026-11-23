@@ -24,14 +24,12 @@ from opentelemetry.sdk.metrics.export import (
 )
 from opentelemetry.sdk.metrics.view import ExponentialBucketHistogramAggregation
 
+from hermes_otel import pipeline as pipeline_mod
+from hermes_otel import plugin_config as pc
 from hermes_otel import tracer as tracer_mod
+from hermes_otel.backend_config import BackendConfig
 from hermes_otel.backends import resolve
-from hermes_otel.plugin_config import (
-    BackendConfig,
-    _reconcile_metrics_settings,
-    normalize_temporality,
-)
-from hermes_otel.tracer import (
+from hermes_otel.instruments import (
     _B_OP_SECONDS,
     _B_TOKENS,
     _B_TOOL_MS,
@@ -40,6 +38,7 @@ from hermes_otel.tracer import (
     metric_temporality_map,
     metric_views,
 )
+from hermes_otel.plugin_config import normalize_temporality
 
 
 def _points(reader, name):
@@ -223,21 +222,23 @@ class TestTemporality:
         assert normalize_temporality(None) is None
         assert normalize_temporality("bogus") is None
 
-    def test_config_reconcile(self):
-        values = {
-            "metrics_temporality": "DELTA",
-            "metrics_histogram": "nope",
-            "metrics_label_limit": "many",
-        }
-        _reconcile_metrics_settings(values)
-        assert values == {
-            "metrics_temporality": "delta",
-            "metrics_histogram": "explicit",
-            "metrics_label_limit": 100,
-        }
-        values = {"metrics_histogram": "Exponential", "metrics_label_limit": -5}
-        _reconcile_metrics_settings(values)
-        assert values["metrics_histogram"] == "exponential" and values["metrics_label_limit"] == 0
+    def test_loader_normalises_the_metrics_fields(self):
+        """Case-folded enums, an unknown value keeps the default, a negative label limit is 0."""
+        cfg, sources = pc.resolve_fields(
+            {
+                "metrics_temporality": "DELTA",
+                "metrics_histogram": "nope",
+                "metrics_label_limit": "many",
+            },
+            warn=False,
+        )
+        assert cfg.metrics_temporality == "delta"
+        assert cfg.metrics_histogram == "explicit" and sources["metrics_histogram"].file_invalid
+        assert cfg.metrics_label_limit == 100 and sources["metrics_label_limit"].file_invalid
+        cfg, _ = pc.resolve_fields(
+            {"metrics_histogram": "Exponential", "metrics_label_limit": -5}, warn=False
+        )
+        assert cfg.metrics_histogram == "exponential" and cfg.metrics_label_limit == 0
 
     @pytest.mark.parametrize(
         "backend_type, expected",
@@ -333,10 +334,10 @@ class TestTemporality:
             def shutdown(self, *a, **k):
                 return None
 
-        monkeypatch.setattr(tracer_mod, "OTLPMetricExporter", FakeMetricExporter)
-        monkeypatch.setattr(tracer_mod, "OTLPSpanExporter", FakeSpanExporter)
+        monkeypatch.setattr(pipeline_mod, "OTLPMetricExporter", FakeMetricExporter)
+        monkeypatch.setattr(pipeline_mod, "OTLPSpanExporter", FakeSpanExporter)
         monkeypatch.setattr(
-            tracer_mod,
+            pipeline_mod,
             "PeriodicExportingMetricReader",
             lambda exporter, **kw: InMemoryMetricReader(
                 preferred_temporality=exporter._preferred_temporality,
@@ -375,7 +376,7 @@ class TestTemporality:
 class TestExemplarsAndExport:
     def test_histogram_recorded_inside_a_span_carries_an_exemplar(self, inmemory_otel_with_metrics):
         _, reader, plugin = inmemory_otel_with_metrics
-        with plugin.tracer.start_as_current_span("api.test") as span:
+        with plugin.pipeline.tracer.start_as_current_span("api.test") as span:
             plugin.record_metric(
                 "gen_ai.client.operation.duration", 1.5, {"gen_ai.operation.name": "chat"}
             )
@@ -425,17 +426,18 @@ class TestTurnEndFlush:
         """The turn-end flush is the only export a one-shot run gets (#233)."""
         from unittest.mock import MagicMock
 
-        plugin = tracer_mod.HermesOTelPlugin()
-        plugin._span_processors = [MagicMock()]
-        plugin._meter_provider = MagicMock()
-        plugin._logger_provider = MagicMock()
+        from hermes_otel.flush import Flusher
+        from hermes_otel.pipeline import Pipeline
+
+        pipeline = Pipeline(
+            span_processors=[MagicMock()], meter_provider=MagicMock(), logger_provider=MagicMock()
+        )
+        flusher = Flusher()
         try:
-            assert plugin.flush_async(timeout_millis=200) is True
-            plugin.flush_wait(timeout_s=5)
-            plugin._span_processors[0].force_flush.assert_called_once()
-            plugin._meter_provider.force_flush.assert_called_once_with(timeout_millis=200)
-            plugin._logger_provider.force_flush.assert_called_once_with(timeout_millis=200)
+            assert flusher.flush_async(pipeline, timeout_millis=200) is True
+            flusher.wait(timeout_s=5)
+            pipeline.span_processors[0].force_flush.assert_called_once()
+            pipeline.meter_provider.force_flush.assert_called_once_with(timeout_millis=200)
+            pipeline.logger_provider.force_flush.assert_called_once_with(timeout_millis=200)
         finally:
-            executor, plugin._flush_executor = plugin._flush_executor, None
-            if executor is not None:
-                executor.shutdown(wait=True)
+            flusher.shutdown()

@@ -50,12 +50,15 @@ class TestManifestV2:
         # plugin sends where, installs and stores); catalog review adds one
         # when it is missing. Measured across the 22 catalog entries carrying
         # one on 2026-09-20: summary 61-365 chars, whole description 199-597.
+        # Ours is the wording the maintainer wrote into the merged entry
+        # (hermes-agent e759ba25, 2026-10-04): 687 chars. The renderer copies
+        # it verbatim so a sha-bump PR never rewrites the reviewed text.
         desc = " ".join(_manifest()["description"].split())
         assert desc.startswith("OpenTelemetry for Hermes Agent")
         assert desc.count("Disclosure — ") == 1, desc
         summary = desc.split("Disclosure — ")[0]
         assert len(summary) <= 200, len(summary)
-        assert len(desc) <= 600, len(desc)
+        assert len(desc) <= 700, len(desc)
         assert desc.endswith("."), desc
 
     def test_disclosure_states_what_leaves_the_machine(self):
@@ -67,7 +70,8 @@ class TestManifestV2:
             "backends you configure",
             "SQLite",
             "$HERMES_HOME",
-            "opentelemetry-exporter-otlp-proto-http",
+            "exporter-otlp-proto-http",
+            "owner-only SQLite",
         ):
             assert fact in disclosure, fact
 
@@ -89,9 +93,13 @@ class TestManifestV2:
 class _Ctx:
     def __init__(self):
         self.hooks = []
+        self.unload_callbacks = []
 
     def register_hook(self, name, callback):
         self.hooks.append(name)
+
+    def on_unload(self, callback):
+        self.unload_callbacks.append(callback)
 
     def register_skill(self, name, path, description=""):
         pass
@@ -109,7 +117,12 @@ def enabled_tracer(monkeypatch):
         def init(self):
             return True
 
-    monkeypatch.setattr("hermes_otel.tracer.get_tracer", lambda: _T())
+        def shutdown(self):
+            pass
+
+    tracer = _T()
+    monkeypatch.setattr("hermes_otel.tracer.get_tracer", lambda: tracer)
+    return tracer
 
 
 def _fake_hermes_cli(monkeypatch, valid_hooks):
@@ -125,6 +138,11 @@ def _fake_hermes_cli(monkeypatch, valid_hooks):
 
 
 class TestRegisteredHooksMatchManifest:
+    def test_registers_tracer_shutdown_for_plugin_unload(self, enabled_tracer):
+        ctx = _Ctx()
+        hermes_otel.register(ctx)
+        assert ctx.unload_callbacks == [enabled_tracer.shutdown]
+
     def test_registry_not_importable_registers_exactly_the_declared_hooks(
         self, monkeypatch, enabled_tracer
     ):
@@ -151,6 +169,23 @@ class TestRegisteredHooksMatchManifest:
         ctx = _Ctx()
         hermes_otel.register(ctx)
         assert sorted(ctx.hooks) == sorted(declared + ["mcp_request_headers"])
+
+    def test_a_host_lacking_any_declared_hook_registers_the_rest(self, monkeypatch, enabled_tracer):
+        # Every row of hooks.HOOKS is guarded the same way (#511): a host that
+        # rejects one name, core or not, keeps the other 33.
+        monkeypatch.setitem(sys.modules, "hermes_cli", None)
+        monkeypatch.setitem(sys.modules, "hermes_cli.plugins", None)
+
+        class _Older(_Ctx):
+            def register_hook(self, name, callback):
+                if name in ("pre_tool_call", "on_kanban_task_updated"):
+                    raise ValueError("unknown hook")
+                super().register_hook(name, callback)
+
+        ctx = _Older()
+        hermes_otel.register(ctx)
+        declared = set(_manifest()["provides_hooks"])
+        assert set(ctx.hooks) == declared - {"pre_tool_call", "on_kanban_task_updated"}
 
     def test_registering_the_hook_can_fail_without_aborting(self, monkeypatch, enabled_tracer):
         _fake_hermes_cli(monkeypatch, frozenset({"mcp_request_headers", "pre_tool_call"}))
@@ -207,7 +242,7 @@ class TestCatalogEntry:
         mod = _render_module()
         entry = yaml.safe_load(mod.render(mod.build_entry(_manifest(), sha=SHA)))
         m = _manifest()
-        assert entry["name"] == "hermes-otel" and entry["subdir"] == "hermes_otel"
+        assert entry["name"] == "hermes_otel" and entry["subdir"] == "hermes_otel"
         assert entry["sha"] == SHA and entry["version"] == str(m["version"])
         assert entry["requires_hermes"] == m["requires_hermes"]
         assert entry["description"] == " ".join(m["description"].split())
@@ -241,6 +276,6 @@ class TestCatalogEntry:
 
     def test_cli_writes_the_file(self, tmp_path):
         mod = _render_module()
-        out = tmp_path / "plugin-catalog" / "hermes-otel.yaml"
+        out = tmp_path / "plugin-catalog" / "hermes_otel.yaml"
         assert mod.main(["--sha", SHA, "-o", str(out)]) == 0
-        assert yaml.safe_load(out.read_text())["name"] == "hermes-otel"
+        assert yaml.safe_load(out.read_text())["name"] == "hermes_otel"

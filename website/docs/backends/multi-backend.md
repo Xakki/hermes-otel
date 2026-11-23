@@ -38,7 +38,7 @@ backends:
     endpoint: http://localhost:4318/v1/traces
 
   - type: tempo
-    endpoint: http://localhost:3200/v1/traces
+    endpoint: http://localhost:4358/v1/traces
 
   - type: otlp
     name: honeycomb
@@ -47,17 +47,18 @@ backends:
       x-honeycomb-team: ${HONEYCOMB_API_KEY}
 ```
 
-Startup banner prints one line per backend:
+The startup log prints one line per backend: its `name` (else the type's display name), the traces URL, and which signals it gets when metrics are off:
 
 ```text
-[hermes-otel] ✓ phoenix connected · endpoint=http://localhost:6006/v1/traces
-[hermes-otel] ✓ langfuse connected · endpoint=https://cloud.langfuse.com/api/public/otel
-[hermes-otel] ✓ signoz connected · endpoint=http://localhost:4328/v1/traces
-[hermes-otel] ✓ jaeger connected · endpoint=http://localhost:4318/v1/traces
-[hermes-otel] ✓ tempo connected · endpoint=http://localhost:3200/v1/traces
-[hermes-otel] ✓ honeycomb connected · endpoint=https://api.honeycomb.io/v1/traces
-[hermes-otel] Registered 8 hooks
+[hermes-otel] ✓ Phoenix at http://localhost:6006/v1/traces (traces only)
+[hermes-otel] ✓ Langfuse at https://cloud.langfuse.com/api/public/otel/v1/traces (traces only)
+[hermes-otel] ✓ SigNoz at http://localhost:4328/v1/traces
+[hermes-otel] ✓ Jaeger at http://localhost:4318/v1/traces (traces only)
+[hermes-otel] ✓ Tempo at http://localhost:4358/v1/traces (traces only)
+[hermes-otel] ✓ honeycomb at https://api.honeycomb.io/v1/traces
 ```
+
+An entry that cannot be resolved (a missing key, an unknown type) is logged and skipped; the others still start.
 
 ## Isolation guarantees
 
@@ -65,21 +66,22 @@ Each backend runs in **its own worker thread with its own bounded queue**:
 
 - A single slow collector backs up **only its own queue** — the others keep draining.
 - If one backend is completely unreachable, the plugin logs the failed POST attempts and drops the oldest spans in that queue when the buffer fills. The others continue.
+- At init the plugin opens one TCP connection to each backend endpoint on a background thread and logs `✓ <name> reachable at host:port (3 ms)` or `⚠ <name> unreachable at host:port (Connection refused)`, so a dead backend is said so at startup rather than 30 s later inside the export worker (#481). It runs once, sends no bytes and never gates an export; a proxy that accepts the connection passes even when the service behind it is down. `hermes otel status` probes on demand and prints the same verdict per backend. `probe_backends: false` turns the startup probe off.
 - No backend's latency is on Hermes' hot path. `span.end()` is still a queue push.
 
 ## Per-backend signal overrides
 
-By default, every backend receives trace exports. Backends that don't accept
-OTLP metrics (`phoenix`, `langfuse`, `jaeger`, `tempo`) get metrics-export
-auto-disabled, and logs export is enabled only for log-capable backends.
-The global `metrics.enabled: true` opt-in is also required; a backend's
-`metrics: true` flag alone does not start metric readers.
+Metrics are enabled globally by default. `metrics.enabled: false` disables all metric recording and export, even for entries with `metrics: true`; those entries can still accept traces and logs.
+
+By default, every backend receives trace exports. Metrics and logs follow
+the type: a type whose backend takes no OTLP metrics (Phoenix, Langfuse,
+Jaeger, Zipkin, Tempo and the other traces-only types) gets no metrics
+exporter, and logs go only to types that store them. The
+[signal table](/backends/overview#signal-support) lists every type's defaults.
 Use `traces: true|false`, `metrics: true|false`, or `logs: true|false` to
 override a signal per backend:
 
 ```yaml
-metrics:
-  enabled: true
 backends:
   - type: otlp
     name: collector
@@ -107,7 +109,7 @@ the UI is not on the OTLP endpoint's origin (Grafana for `lgtm` / `tempo`, a
 Jaeger or SigNoz container on its own port); see
 [the dashboard docs](/dashboard#tabs).
 
-Legacy metrics-only example:
+Forcing a signal on or off:
 
 ```yaml
 backends:
@@ -140,13 +142,11 @@ Prefer env-var references over inline values. Two forms:
        x-honeycomb-team: ${HONEYCOMB_API_KEY}
    ```
 
-`config.yaml` is gitignored in the plugin repo; secrets still shouldn't sit there in plaintext because any editor plugin, pair-programming session, or backup system will see them. Env vars are the right place.
+The config file is plain text: even when it is not in git (the plugin repo ignores `config.yaml`), any editor plugin, pair-programming session or backup system can read it. Keep secrets in env vars. For a credential that expires while Hermes runs, use a [`headers_helper`](/configuration/short-lived-credentials) instead.
 
 ## LangSmith and fan-out
 
-LangSmith is the one exception — it uses its own HTTP Run API rather than OTLP, so it's **not** a valid `backends:` entry. Setting `LANGSMITH_TRACING=true` short-circuits the `backends:` list entirely, so you can have either fan-out **or** LangSmith, not both.
-
-If you need LangSmith alongside another backend, open an issue — we might add a second-class fan-out path for it if there's demand.
+LangSmith is an ordinary `type: langsmith` entry (its OTLP ingest at `/otel/v1/traces`), so it fans out beside every other backend. Before 1.26 it was a separate run-tree client that `LANGSMITH_TRACING=true` selected instead of the list; see [LangSmith](/backends/langsmith#migrating-from-langsmith_tracing) for the migration.
 
 ## Debugging fan-out
 

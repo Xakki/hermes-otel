@@ -9,6 +9,9 @@ import dataclasses
 import pytest
 
 from hermes_otel import plugin_config as pc
+from hermes_otel import settings_report
+from hermes_otel.backend_config import BackendConfig
+from hermes_otel.backend_specs import SPECS
 from hermes_otel.plugin_config import FIELD_DOCS, FIELD_GROUPS, HermesOtelConfig
 from hermes_otel.settings_report import (
     MASK,
@@ -52,7 +55,7 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     monkeypatch.delenv(pc.CONFIG_PATH_ENV, raising=False)
     for key in pc.field_kinds():
-        monkeypatch.delenv(pc._ENV_PREFIX + key.upper(), raising=False)
+        monkeypatch.delenv(pc.ENV_PREFIX + key.upper(), raising=False)
     monkeypatch.setattr(pc, "DURABLE_CONFIG_PATH", tmp_path / "hermes_otel.yaml")
     monkeypatch.setattr(
         pc, "DEFAULT_CONFIG_PATH", tmp_path / "plugins" / "hermes_otel" / "config.yaml"
@@ -61,17 +64,6 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("LF_SECRET", "sk-expanded")
     monkeypatch.setenv("OO_PASSWORD", "pw")
     return tmp_path
-
-
-class TestGroupsAndDocs:
-    def test_every_field_is_grouped_exactly_once(self):
-        names = {f.name for f in dataclasses.fields(HermesOtelConfig)}
-        grouped = [k for _, keys in FIELD_GROUPS for k in keys]
-        assert sorted(grouped) == sorted(names)
-        assert len(grouped) == len(set(grouped))
-
-    def test_every_field_has_a_description(self):
-        assert set(FIELD_DOCS) == {f.name for f in dataclasses.fields(HermesOtelConfig)}
 
 
 class TestFieldReports:
@@ -119,7 +111,7 @@ class TestFieldReports:
         groups = {g for g, _ in FIELD_GROUPS}
         for f in build_settings_report()["fields"]:
             assert f["group"] in groups, f["key"]
-            assert f["kind"] in ("bool", "int", "float", "str", "map", "backends")
+            assert f["kind"] in ("bool", "int", "float", "str", "list", "map", "backends")
             assert f["description"]
 
     def test_unknown_file_keys_are_listed_with_known_notes(self, home):
@@ -216,6 +208,12 @@ class TestEnvInventory:
             == "ls-secret"
         )
 
+    def test_otel_service_name_row_says_it_is_overridden(self):
+        row = {e["name"]: e for e in env_inventory()}["OTEL_SERVICE_NAME"]
+        assert row["description"].startswith("Overridden")
+        assert "resource_attributes" in row["description"]
+        assert "service_name_from_profile" in row["description"]
+
     def test_maps_and_backends_have_no_override_var(self):
         names = {e["maps_to"] for e in env_inventory() if e["group"] == "override"}
         assert "backends" not in names and "headers" not in names
@@ -238,7 +236,7 @@ class TestRenderings:
         reports, _ = field_reports({})
         text = effective_yaml(reports, None)
         assert "with no config file" in text
-        assert "backends" not in text.split("\n\n", 1)[1]  # unset list is omitted
+        assert "\nbackends:" not in text.split("\n\n", 1)[1]  # unset list is omitted
 
     def test_config_block_reports_path_and_source(self, home):
         cfg = build_settings_report()["config"]
@@ -246,6 +244,14 @@ class TestRenderings:
         assert cfg["path_source"] == "durable"
         assert cfg["exists"] is True and cfg["parse_ok"] is True
         assert cfg["mtime"] is not None
+
+    def test_config_block_carries_the_short_fingerprint(self, home):
+        # The same value the plugin logs when it builds its pipeline (#484):
+        # what the loader resolves from this file and environment.
+        cfg = build_settings_report()["config"]
+        assert cfg["fingerprint"] == pc.load_config().fingerprint()[: pc.SHORT_FINGERPRINT_CHARS]
+        assert len(cfg["fingerprint"]) == pc.SHORT_FINGERPRINT_CHARS
+        assert build_settings_report(reveal=True)["config"]["fingerprint"] == cfg["fingerprint"]
 
     def test_missing_file_is_reported_not_an_error(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
@@ -352,11 +358,11 @@ class TestBackendCards:
         from hermes_otel import backends as b
 
         for name, bc in {
-            "phoenix": pc.BackendConfig(type="phoenix", endpoint="http://x/v1/traces"),
-            "jaeger-proxied": pc.BackendConfig(
+            "phoenix": BackendConfig(type="phoenix", endpoint="http://x/v1/traces"),
+            "jaeger-proxied": BackendConfig(
                 type="jaeger", endpoint="http://x/v1/traces", metrics=True
             ),
-            "lgtm": pc.BackendConfig(type="lgtm", endpoint="http://x/v1/traces", logs=False),
+            "lgtm": BackendConfig(type="lgtm", endpoint="http://x/v1/traces", logs=False),
         }.items():
             rb = b.resolve(bc)
             sig = cards[name]["signals"]
@@ -396,6 +402,20 @@ class TestBackendCards:
         assert cards["honeycomb"]["ui"]["url"] == "https://ui.eu1.honeycomb.io"
         assert cards["weave"]["ui"]["url"] == "https://wandb.ai/acme/agents/weave"
 
+    @pytest.mark.parametrize(
+        "alias, canonical",
+        [(a, s.type) for s in SPECS for a in s.aliases],
+    )
+    @pytest.mark.parametrize(
+        "endpoint", ["http://localhost:4318/v1/traces", "https://otel.example.com/v1/traces"]
+    )
+    def test_alias_entry_gets_its_canonical_types_ui_link(self, alias, canonical, endpoint):
+        """An alias is another spelling of the same backend (#557)."""
+        got = settings_report._ui_link(BackendConfig(type=alias, endpoint=endpoint), {})
+        want = settings_report._ui_link(BackendConfig(type=canonical, endpoint=endpoint), {})
+        assert got == want
+        assert "generic OTLP collector" not in got["note"]
+
     def test_temporality_names_the_rule_that_set_it(self, cards):
         assert cards["signoz"]["metrics_temporality"] == {"value": "delta", "source": "type preset"}
         assert cards["openobserve"]["metrics_temporality"] == {
@@ -414,6 +434,82 @@ class TestBackendCards:
         (card,) = build_settings_report()["fields"][-1]["value"]
         assert card["metrics_temporality"] == {"value": "cumulative", "source": "SDK default"}
 
+    @pytest.mark.parametrize(
+        "entry, want_fields, want_credentials",
+        [
+            (
+                BackendConfig(
+                    type="victoria",
+                    endpoint="http://localhost:10428",
+                    metrics_endpoint="http://localhost:8428",
+                    logs_endpoint="http://localhost:9428",
+                ),
+                {
+                    "endpoint": "http://localhost:10428",
+                    "metrics_endpoint": "http://localhost:8428",
+                    "logs_endpoint": "http://localhost:9428",
+                },
+                {},
+            ),
+            (
+                BackendConfig(
+                    type="mlflow",
+                    endpoint="http://localhost:5000",
+                    experiment_id="7",
+                    workspace="ws",
+                ),
+                {"endpoint": "http://localhost:5000"},
+                {"experiment_id": "7", "workspace": "ws"},
+            ),
+            (
+                BackendConfig(type="opik", workspace="acme", project="agents"),
+                {},
+                {"workspace": "acme", "project": "agents"},
+            ),
+            (
+                BackendConfig(type="greptime", endpoint="http://localhost:4000", db="hermes"),
+                {"endpoint": "http://localhost:4000"},
+                {"db": "hermes"},
+            ),
+            (
+                BackendConfig(
+                    type="elastic", endpoint="http://localhost:8200", dataset="d", namespace="n"
+                ),
+                {"endpoint": "http://localhost:8200", "dataset": "d", "namespace": "n"},
+                {},
+            ),
+        ],
+        ids=["victoria", "mlflow", "opik", "greptime", "elastic"],
+    )
+    def test_every_configured_field_reaches_the_card_and_the_yaml(
+        self, entry, want_fields, want_credentials
+    ):
+        """Regression for #501: the field lists are derived from the manifest and
+        ``BackendConfig``, so no configured scalar is dropped from the card or
+        from the effective YAML the tab offers to paste back."""
+        card = settings_report._backend_summary(entry, {}, reveal=False)
+        assert card["fields"] == want_fields
+        assert {c["field"]: c["value"] for c in card["credentials"]} == want_credentials
+        as_yaml = settings_report._backend_as_yaml(card)
+        for k, v in {**want_fields, **want_credentials}.items():
+            assert as_yaml[k] == v, k
+
+    def test_field_lists_cover_every_backend_config_scalar(self):
+        """Every ``BackendConfig`` field is either structured (reported under
+        its own key), a credential from the manifest, a ``*_env`` pointer, or
+        a plain scalar; nothing falls through."""
+        names = {f.name for f in dataclasses.fields(BackendConfig)}
+        covered = (
+            set(settings_report._STRUCTURED_BACKEND_FIELDS)
+            | set(settings_report._ALL_CREDENTIAL_FIELDS)
+            | set(settings_report._PLAIN_BACKEND_FIELDS)
+            | {n for n in names if n.endswith("_env")}
+        )
+        assert covered == names
+        assert set(settings_report._ALL_CREDENTIAL_FIELDS) == {
+            c.field for s in SPECS for c in s.credentials
+        }
+
     def test_query_fields_and_effective_yaml_round_trip(self, cards, home):
         assert cards["jaeger-query"]["query_fields"] == {"query_port": 16686}
         assert cards["phoenix"]["query_fields"] == {}
@@ -422,3 +518,201 @@ class TestBackendCards:
         assert "ui_url: http://localhost:3000/explore" in text
         assert "metrics_temporality: cumulative" in text
         assert "logs: false" in text
+
+
+class TestMaskingGaps:
+    """Credential masking gaps found in the dashboard review (#286)."""
+
+    def test_otlp_header_list_is_masked_per_pair(self, monkeypatch):
+        monkeypatch.setenv(
+            "OTEL_EXPORTER_OTLP_HEADERS", "Authorization=Bearer abc,x-team=blue,api-key=k1"
+        )
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS", "x-honeycomb-team=hcaik_abc")
+        env = {e["name"]: e for e in env_inventory()}
+        assert env["OTEL_EXPORTER_OTLP_HEADERS"]["value"] == (
+            f"Authorization={MASK},x-team=blue,api-key={MASK}"
+        )
+        assert env["OTEL_EXPORTER_OTLP_TRACES_HEADERS"]["value"] == f"x-honeycomb-team={MASK}"
+        revealed = {e["name"]: e for e in env_inventory(reveal=True)}
+        assert revealed["OTEL_EXPORTER_OTLP_HEADERS"]["value"].startswith(
+            "Authorization=Bearer abc"
+        )
+
+    def test_other_otel_vars_with_bearer_values_are_masked(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SOMETHING_NEW", "Bearer tok")
+        env = {e["name"]: e for e in env_inventory()}
+        assert env["OTEL_SOMETHING_NEW"]["value"] == MASK
+
+    def test_yaml_list_item_secret_is_masked(self):
+        text = "backends:\n  - secret_key: sk-on-dash-line\n    name: x\n  - public_key: pk\n"
+        assert redact_yaml_text(text) == (
+            f"backends:\n  - secret_key: {MASK}\n    name: x\n  - public_key: {MASK}\n"
+        )
+
+    def test_yaml_header_values_are_masked_inside_headers_block(self):
+        text = (
+            "headers:\n  x-honeycomb-team: hcaik_abc\n  x-team: blue\n"
+            "resource_attributes:\n  team: platform\nname: fine\n"
+        )
+        assert redact_yaml_text(text) == (
+            f"headers:\n  x-honeycomb-team: {MASK}\n  x-team: blue\n"
+            "resource_attributes:\n  team: platform\nname: fine\n"
+        )
+
+    def test_yaml_block_scalar_secret_is_masked(self):
+        text = "secret_key: |\n  line one\n  line two\nname: ok\n"
+        assert redact_yaml_text(text) == f"secret_key: |\n  {MASK}\n  {MASK}\nname: ok\n"
+        assert redact_yaml_text("api_key: >-\n  abc\n") == f"api_key: >-\n  {MASK}\n"
+
+    def test_quoted_keys_and_env_refs_stay_correct(self):
+        text = '"api_key": abc\nsecret_key_env: VAR\ntoken: ${TOK}\n'
+        assert (
+            redact_yaml_text(text) == f'"api_key": {MASK}\nsecret_key_env: VAR\ntoken: ${{TOK}}\n'
+        )
+
+    def test_headers_map_masks_vendor_team_header(self, home):
+        (home / "hermes_otel.yaml").write_text(
+            YAML + "    headers:\n      x-honeycomb-team: hcaik\n      x-team: blue\n",
+            encoding="utf-8",
+        )
+        backends = {b["name"]: b for b in build_settings_report()["fields"][-1]["value"]}
+        assert backends["openobserve"]["headers"] == {"x-honeycomb-team": MASK, "x-team": "blue"}
+        revealed = {b["name"]: b for b in build_settings_report(reveal=True)["fields"][-1]["value"]}
+        assert revealed["openobserve"]["headers"]["x-honeycomb-team"] == "hcaik"
+
+
+class TestProfileAwareReport:
+    """#286: a profile's own file is 'durable', and flat log spellings are marked."""
+
+    def test_path_source_is_judged_against_the_home_in_force(self, tmp_path, monkeypatch):
+        pytest.importorskip("yaml")
+        profile = tmp_path / "profiles" / "minimal"
+        profile.mkdir(parents=True)
+        (profile / "hermes_otel.yaml").write_text("project_name: p\n", encoding="utf-8")
+        monkeypatch.setenv("HERMES_HOME", str(profile))
+        monkeypatch.delenv(pc.CONFIG_PATH_ENV, raising=False)
+        # Unpinned (production): both locations follow the home in force at
+        # call time, so a multiplexed gateway's second profile reads its own (#405).
+        monkeypatch.setattr(pc, "DURABLE_CONFIG_PATH", None)
+        monkeypatch.setattr(pc, "DEFAULT_CONFIG_PATH", None)
+        from hermes_otel.settings_report import config_path_source
+
+        assert pc.resolve_config_path_with_reason() == (profile / "hermes_otel.yaml", "durable")
+        assert config_path_source(profile / "hermes_otel.yaml") == "durable"
+        assert config_path_source(profile / "plugins" / "hermes_otel" / "config.yaml") == "legacy"
+        assert config_path_source(tmp_path / "somewhere.yaml") == "explicit"
+        other = tmp_path / "profiles" / "other"
+        other.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(other))
+        assert pc.durable_config_path() == other / "hermes_otel.yaml"
+        assert pc.resolve_config_path_with_reason() == (None, "none")
+
+    def test_flat_log_spellings_are_listed_as_deprecated(self, home):
+        (home / "hermes_otel.yaml").write_text(
+            "capture_logs: true\nlog_level: INFO\nproject_name: p\n", encoding="utf-8"
+        )
+        rep = build_settings_report()
+        assert [d["key"] for d in rep["config"]["deprecated_keys"]] == ["capture_logs", "log_level"]
+        assert "logs: block" in rep["config"]["deprecated_keys"][0]["note"]
+        # the block spelling is the preferred form: nothing to mark
+        (home / "hermes_otel.yaml").write_text(
+            "logs:\n  capture: true\n  level: INFO\nproject_name: p\n", encoding="utf-8"
+        )
+        rep = build_settings_report()
+        assert rep["config"]["deprecated_keys"] == []
+        assert rep["process"]["note"].startswith("Resolved by the dashboard process")
+
+
+class TestMetricsSettingsMirrorTheLoader:
+    """``load_config`` drops an unknown ``metrics_histogram`` / ``metrics_temporality``
+    (the field's ``choices`` rule); the report used to show the bad value as
+    applied (#413)."""
+
+    def test_unknown_histogram_from_the_file_is_flagged_and_the_default_applies(self, home):
+        (home / "hermes_otel.yaml").write_text(YAML + "metrics_histogram: sideways\n")
+        by_key = {f["key"]: f for f in build_settings_report()["fields"]}
+        entry = by_key["metrics_histogram"]
+        assert entry["file_invalid"] is True and entry["source"] == "default"
+        assert entry["value"] == "explicit"
+
+    def test_env_temporality_is_normalised_or_flagged(self, home, monkeypatch):
+        monkeypatch.setenv("HERMES_OTEL_METRICS_TEMPORALITY", "DELTA")
+        by_key = {f["key"]: f for f in build_settings_report()["fields"]}
+        assert by_key["metrics_temporality"]["value"] == "delta"
+        assert by_key["metrics_temporality"]["source"] == "env"
+        monkeypatch.setenv("HERMES_OTEL_METRICS_TEMPORALITY", "sometimes")
+        by_key = {f["key"]: f for f in build_settings_report()["fields"]}
+        entry = by_key["metrics_temporality"]
+        assert entry["env_invalid"] is True and entry["source"] == "default"
+
+    def test_sdk_env_preference_is_reported_as_the_default(self, home, monkeypatch):
+        (home / "hermes_otel.yaml").write_text(
+            "backends:\n  - type: lgtm\n    endpoint: http://l:4318/v1/traces\n", encoding="utf-8"
+        )
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE", "delta")
+        (card,) = build_settings_report()["fields"][-1]["value"]
+        assert card["metrics_temporality"] == {
+            "value": "delta",
+            "source": "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
+        }
+
+
+class TestLoaderProvenance:
+    """The report formats the loader's decisions instead of re-running it (#405)."""
+
+    def test_report_imports_no_private_loader_names(self):
+        import inspect
+
+        import hermes_otel.settings_report as sr
+
+        src = inspect.getsource(sr)
+        assert "pc._" not in src and "_backends._" not in src
+
+    def test_sources_record_file_env_invalid_and_derived(self, home, monkeypatch):
+        (home / "hermes_otel.yaml").write_text(
+            "project_name: demo\npreview_max_chars: lots\ncapture_previews: false\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("HERMES_OTEL_SAMPLE_RATE", "0.5")
+        monkeypatch.setenv("HERMES_OTEL_ROOT_SPAN_TTL_MS", "soon")
+        cfg, src = pc.load_config_with_sources(warn=False)
+        assert cfg == pc.load_config()
+        assert src["project_name"].source == "file"
+        assert src["sample_rate"].source == "env" and src["sample_rate"].env_raw == "0.5"
+        assert src["root_span_ttl_ms"].env_invalid and src["root_span_ttl_ms"].source == "default"
+        assert src["preview_max_chars"].file_invalid and src["preview_max_chars"].file_raw == "lots"
+        assert src["content_capture"].derived_from == ("capture_previews",)
+        assert src["content_capture"].source == "file" and cfg.content_capture == "off"
+
+    def test_label_limit_shows_the_value_the_loader_applies(self, home):
+        (home / "hermes_otel.yaml").write_text("metrics_label_limit: -5\n", encoding="utf-8")
+        reports, cfg = field_reports({"metrics_label_limit": -5})
+        row = next(r for r in reports if r["key"] == "metrics_label_limit")
+        assert row["value"] == 0 == cfg.metrics_label_limit == pc.load_config().metrics_label_limit
+
+    def test_credential_falls_back_like_the_resolver(self, home, monkeypatch):
+        """A named ``<field>_env`` that is empty falls through to the vendor
+        variable, in the exporter and now on the Settings card as well."""
+        (home / "hermes_otel.yaml").write_text(
+            "backends:\n  - type: langfuse\n    endpoint: http://localhost:3000\n"
+            "    public_key: pk\n    secret_key_env: MISSING_SECRET\n",
+            encoding="utf-8",
+        )
+        monkeypatch.delenv("MISSING_SECRET", raising=False)
+        monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-vendor")
+        rep = build_settings_report()
+        card = next(r for r in rep["fields"] if r["key"] == "backends")["value"][0]
+        cred = next(c for c in card["credentials"] if c["field"] == "secret_key")
+        assert cred["set"] is True and cred["source"] == "env LANGFUSE_SECRET_KEY"
+
+    def test_victoria_signals_match_the_exporter(self, home):
+        (home / "hermes_otel.yaml").write_text(
+            "backends:\n  - type: victoria\n    endpoint: http://localhost:10428\n",
+            encoding="utf-8",
+        )
+        rep = build_settings_report()
+        card = next(r for r in rep["fields"] if r["key"] == "backends")["value"][0]
+        # no metrics_endpoint / logs_endpoint: the resolver exports traces only
+        assert card["signals"]["traces"]["exported"] is True
+        assert card["signals"]["metrics"]["exported"] is False
+        assert card["signals"]["logs"]["exported"] is False

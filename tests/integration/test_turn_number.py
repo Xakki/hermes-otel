@@ -5,83 +5,23 @@ numbers the turn; every span opened afterwards in that turn (api / tool) and
 the turn's session root carry the same number.
 """
 
+from helpers.turns import run_turn
+
 from hermes_otel.hooks import (
-    on_post_api_request,
-    on_post_llm_call,
     on_post_tool_call,
-    on_pre_api_request,
-    on_pre_llm_call,
     on_pre_tool_call,
-    on_session_end,
-    on_session_start,
 )
 from hermes_otel.session_state import SessionState
 
 
 def _turn(session_id: str, is_first_turn: bool, tools=("terminal",)):
-    if is_first_turn:
-        on_session_start(session_id=session_id, model="gpt-4", platform="cli")
-    on_pre_llm_call(
-        session_id=session_id,
-        user_message="hello",
-        conversation_history=[],
-        is_first_turn=is_first_turn,
-        model="gpt-4",
-        platform="cli",
-    )
-    on_pre_api_request(
-        task_id=f"api-{session_id}",
-        session_id=session_id,
-        platform="cli",
-        model="gpt-4",
-        provider="openai",
-        base_url="",
-        api_mode="chat",
-        api_call_count=1,
-        message_count=1,
-        tool_count=len(tools),
-        approx_input_tokens=10,
-        request_char_count=40,
-        max_tokens=100,
-    )
-    for i, name in enumerate(tools):
-        on_pre_tool_call(
-            tool_name=name, args={"command": "ls"}, task_id=f"t{i}", session_id=session_id
-        )
-        on_post_tool_call(
-            tool_name=name,
-            args={"command": "ls"},
-            result="ok",
-            task_id=f"t{i}",
-            session_id=session_id,
-        )
-    on_post_api_request(
-        task_id=f"api-{session_id}",
-        session_id=session_id,
-        platform="cli",
-        model="gpt-4",
-        provider="openai",
-        base_url="",
-        api_mode="chat",
-        api_call_count=1,
-        api_duration=0.1,
-        finish_reason="stop",
-        message_count=1,
-        response_model="gpt-4",
+    run_turn(
+        session_id,
+        first=is_first_turn,
+        tools=tools,
         usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        assistant_content_chars=2,
-        assistant_tool_call_count=len(tools),
-    )
-    on_post_llm_call(
-        session_id=session_id,
-        user_message="hello",
+        max_tokens=100,
         assistant_response="done",
-        conversation_history=[],
-        model="gpt-4",
-        platform="cli",
-    )
-    on_session_end(
-        session_id=session_id, completed=True, interrupted=False, model="gpt-4", platform="cli"
     )
 
 
@@ -132,6 +72,29 @@ class TestTurnNumberOnSpans:
         _turn("s1", is_first_turn=True)
         assert set(_turn_numbers(exporter.get_finished_spans()).values()) == {1}
 
+    def test_resumed_session_continues_from_its_history(self, inmemory_otel_setup):
+        """``hermes -r`` runs the third turn in a fresh process: the counter is
+        empty, but the conversation Hermes passes holds three user prompts."""
+        exporter, _plugin = inmemory_otel_setup
+        history = [
+            {"role": "user", "content": "one"},
+            {"role": "assistant", "content": "ok"},
+            {"role": "user", "content": "two"},
+            {"role": "assistant", "content": "ok"},
+            {"role": "tool", "content": "x"},
+            {"role": "user", "content": "three"},
+        ]
+        run_turn("s1", first=False, history=history, usage={"total_tokens": 2})
+        assert set(_turn_numbers(exporter.get_finished_spans()).values()) == {3}
+
+    def test_compacted_history_never_lowers_the_count(self, inmemory_otel_setup):
+        exporter, _plugin = inmemory_otel_setup
+        for first in (True, False, False):
+            _turn("s1", is_first_turn=first)
+        exporter.clear()
+        run_turn("s1", first=False, history=[{"role": "user", "content": "summary"}])
+        assert set(_turn_numbers(exporter.get_finished_spans()).values()) == {4}
+
     def test_tool_before_any_llm_call_has_no_turn_attribute(self, inmemory_otel_setup):
         exporter, _plugin = inmemory_otel_setup
         on_pre_tool_call(tool_name="terminal", args={}, task_id="t0", session_id="s1")
@@ -148,6 +111,12 @@ class TestSessionStateTurnCounter:
         assert st.next_turn("s") == 2
         assert st.turn_number("s") == 2
         assert st.next_turn("s", reset=True) == 1
+
+    def test_history_is_a_floor_and_reset_wins(self):
+        st = SessionState()
+        assert st.next_turn("s", history_turns=3) == 3
+        assert st.next_turn("s", history_turns=1) == 4
+        assert st.next_turn("s", reset=True, history_turns=7) == 1
 
     def test_counter_survives_pop_of_the_per_turn_aggregator(self):
         st = SessionState()

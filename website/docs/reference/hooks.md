@@ -6,17 +6,21 @@ description: "The Hermes lifecycle hooks this plugin subscribes to, and the span
 
 # Hooks reference
 
-hermes-otel subscribes to a set of Hermes lifecycle hooks. Six (`pre_tool_call` … `post_api_request`) are "always available" on any Hermes version with plugin support. The rest — `api_request_error`, the session hooks, the sub-agent delegation hooks, the approval hooks — are registered conditionally, so older Hermes builds simply register fewer; the startup banner reports the count (13 on Hermes 0.21). `mcp_request_headers` is implemented but waits on an upstream hook that no Hermes release fires (see below).
+A hook is a named point in Hermes's agent loop where a plugin can run a callback. hermes-otel declares 34 hooks in `plugin.yaml` (`provides_hooks`) and turns each one into a span, a span attribute, a metric point or an event. The table that ties each hook to its callback is `HOOKS` in `hermes_otel/hooks/__init__.py`.
 
-## Always available
+`register()` subscribes the hooks one at a time. If the running Hermes lacks one, the plugin writes a debug line and moves on, so an older Hermes simply registers fewer. The startup log line `Registered N hooks` gives the count. `mcp_request_headers` is implemented but is not one of the 34: no Hermes release has that hook (see [below](#mcp_request_headers-pending-upstream)).
+
+Every callback returns `None`, so the plugin only observes. It never changes or blocks what Hermes does.
+
+## Tool, LLM and API-request hooks
 
 ### `pre_tool_call`
 
 Fires just before Hermes runs a tool.
 
-- **Span op:** `tracker.start("tool.{name}", parent=current_api or current_llm)`
-- **Attributes set on start:** `tool.name`, `gen_ai.tool.call.id` (Hermes' `tool_call_id`, falling back to `task_id`), `input.value` (args JSON), `hermes.tool.target`, `hermes.tool.command`, `hermes.skill.name`
-- **Side effects:** increments the session aggregator (`session_state`) for turn summary; orphan sweep runs first
+- **Span op:** opens `tool.{name}` under the in-flight `api.*` span, else the `llm.*` span
+- **Attributes set on start:** `tool.name`, `gen_ai.tool.name`, `gen_ai.tool.call.id` (Hermes' `tool_call_id`, falling back to `task_id`), `input.value` and `gen_ai.tool.call.arguments` (the args JSON), `hermes.tool.target`, `hermes.tool.command`, `hermes.skill.name` and `hermes.skill.source` when the call loads a skill
+- **Side effects:** the expired-turn sweep runs first; the tool is added to the turn summary (the per-turn roll-up stamped on the root at the end)
 
 ### `post_tool_call`
 
@@ -26,29 +30,31 @@ Fires when the tool returns (success, error, timeout, block, or cancel).
 - **Attributes set on end:** `output.value` (result), `hermes.tool.outcome` (a specific non-success hook `status` — `timeout` / `blocked` / `cancelled` — is authoritative; a coarse hook `error` yields to an explicit `blocked` / `timeout` / `cancelled` in the result's `status` field, so governance blocks are not counted as errors; otherwise the result's own `status`, else `completed`)
 - **Span status:** `ERROR` if outcome is `error`, else `OK`
 - **Skill spans:** when the call loaded a skill and succeeded (`skill_view` result `success: true`, or a `/skills/` file read that did not error), opens the `skill.<name>` span and adds the skill to `hermes.turn.skills`; failed loads do neither
-- **Metrics:** `hermes.tool.duration{tool_name}` histogram (on end); `hermes.skill.inferred{skill_name, source}` counter (on start) — see [Metrics](/reference/metrics)
+- **Commits (#478):** when the terminal tool's command was a `git commit` (matched as a word, so `git commit-tree` is not one) and it exited 0 (the result's `exit_code`), the span gets `hermes.tool.git_commit: true`, `hermes.commit.count{platform, model}` is incremented and the `commit` event is emitted with the message's first line from git's own `[branch sha] subject` confirmation (redacted, content-gated). A failed commit, another tool or another command leaves nothing behind
+- **Metrics:** `hermes.tool.duration{tool_name}` histogram (on end); `hermes.skill.inferred{skill_name, source}` counter (on start); `hermes.commit.count{platform, model}` on a successful `git commit` — see [Metrics](/reference/metrics)
 
 ### `pre_llm_call`
 
 Fires before the logical LLM turn starts (before any HTTP round-trips).
 
-- **Span op:** `tracker.start("llm.{model}", parent=session_root)`
-- **Attributes set on start:** `llm.model_name`, `llm.provider`, `gen_ai.request.model`, and (when `capture_conversation_history: true`) `input.value` JSON + `input.mime_type=application/json` + `hermes.conversation.message_count`
-- **Side effects:** stores the current `llm.*` as the parent for subsequent `api.*` and `tool.*`
+- **Span op:** opens `llm.{model}` under the turn root. Hermes fires `on_session_start` only for a session's first turn, so on later turns this hook opens the `agent` / `cron` root first
+- **Attributes set on start:** `llm.model_name`, `llm.provider`, `gen_ai.request.model`, the latest user message as `input.value` and `gen_ai.input.messages`; with `capture_conversation_history: true`, the whole conversation as JSON instead (`input.mime_type=application/json`) plus `hermes.conversation.message_count` (and `hermes.conversation.dropped_messages` when the oldest messages were left out to fit the cap)
+- **Side effects:** numbers the turn (`hermes.turn.number`) and emits the `hermes.turn.start` event; pushes the `llm.*` span as the parent of the `api.*` and `tool.*` spans that follow
 
 ### `post_llm_call`
 
 Fires after the logical LLM turn finishes (all round-trips done, final response received).
 
 - **Span op:** closes the `llm.*` span
-- **Attributes set on end:** `output.value` (final assistant response), `gen_ai.content.completion`
+- **Attributes set on end:** `output.value` and `gen_ai.output.messages` (the final assistant response), the provider and response model the turn's API calls reported
+- **Metrics:** `hermes.message.count{model, provider}`
 
 ### `pre_api_request`
 
-Fires before each HTTP request to the LLM provider. Can fire multiple times per `llm.*` turn.
+Fires before each HTTP request to the LLM provider. Can fire several times per `llm.*` span.
 
-- **Span op:** `tracker.start("api.{model}", parent=current_llm)`
-- **Attributes set on start:** `llm.model_name`, `llm.provider`, `llm.invocation_parameters`
+- **Span op:** opens `api.{model}` under the `llm.*` span
+- **Attributes set on start:** `llm.model_name`, `llm.provider`, `gen_ai.request.model`, `llm.api_mode`, `hermes.query_source`, the request's sizes (`llm.request.message_count`, `llm.request.approx_input_tokens`, `llm.request.max_tokens`), each request parameter Hermes passes (`gen_ai.request.temperature`, `gen_ai.request.stream`, …), and the full request with `content_capture: full`
 - **Side effects:** increments `hermes.turn.api_call_count`
 
 ### `post_api_request`
@@ -56,32 +62,41 @@ Fires before each HTTP request to the LLM provider. Can fire multiple times per 
 Fires when the HTTP response is parsed.
 
 - **Span op:** closes the `api.*` span
-- **Attributes set on end:** token counts (both conventions), `gen_ai.response.finish_reason`, `http.duration_ms`
-- **Metrics:** `hermes.token.usage{token_type}`, `hermes.prompt_cache.tokens{cache_result}`, `hermes.prompt_cache.observations{cache_result}` (see [Metrics](/reference/metrics)), `hermes.cost.usage`, `hermes.model.usage` counters; `gen_ai.client.token.usage` and `gen_ai.client.operation.duration` histograms
+- **Attributes set on end:** token counts in both conventions (`gen_ai.usage.*`, `llm.token_count.*`), `gen_ai.response.finish_reasons` and `llm.response.finish_reason`, `llm.response.duration_ms`, `hermes.api.ttfc_ms` for a streamed call, `hermes.cost.usage` and `hermes.cost.status`
+- **Metrics:** `hermes.token.usage{token_type}`, `hermes.prompt_cache.tokens{cache_result}`, `hermes.prompt_cache.observations{cache_result}`, `hermes.cost.usage`, `hermes.model.usage` counters; `hermes.api.time_to_first_chunk` (streamed calls), `gen_ai.client.token.usage` and `gen_ai.client.operation.duration` histograms (see [Metrics](/reference/metrics))
 
 ### `api_request_error`
 
-Fires when a provider API request **fails** (rate limit, timeout, 5xx, network error) instead of returning a response. Registered conditionally (newer Hermes).
+Fires when a provider API request **fails** (rate limit, timeout, 5xx, network error) instead of returning a response.
 
 - **Span op:** closes the in-flight `api.{model}` span (key `api:{task_id}`) as **ERROR** with a recorded `exception` event. Without this hook that span would be left to the orphan sweep and end `OK` — hiding the failure. If no in-flight span exists (error before `pre_api_request`, or already swept) a short-lived `api.error` span is created so the failure is still visible.
 - **Attributes set on end:** `error.type`, `http.response.status_code` + `gen_ai.response.status_code`, `hermes.retry.count`, `hermes.max_retries`, `hermes.retryable`, `llm.response.duration_ms`
+- **Turn state:** marks the turn's last attempt as failed (a later successful `post_api_request` clears it). Hermes fires no `on_session_end` when every attempt fails, so whichever closes the root next (`on_session_finalize`, the orphan sweep, or the session's next `on_session_start` / `pre_llm_call`) ends it `ERROR` with `hermes.turn.final_status=failed` (#467).
 - **Span event:** `exception` (`exception.type`, `exception.message`, `exception.escaped`)
 - **Metrics:** `hermes.api.error.count{error_type, status_class, retryable, model, provider}` counter; `hermes.retry.count{model, provider}` counter (once per *retryable* failure); `gen_ai.client.operation.duration` with `error.type`
 - **Side effect:** records the `error.type` on the session aggregator so `on_session_end` can stamp it on the turn's root span
 
 Only API-level failures become `ERROR`. Tool timeout/blocked outcomes deliberately stay `OK` (see [Limitations](/reference/limitations)) so they don't inflate error rates.
 
-## Newer (session + sub-agent hooks)
+### `pre_auxiliary_call` / `post_auxiliary_call`
 
-Registered inside a `try:/except:` because older Hermes versions don't expose them. If any is missing, the plugin logs a debug message and degrades gracefully (older Hermes simply registers fewer hooks).
+Fire once per physical provider attempt of every **auxiliary** LLM call Hermes makes on the agent's behalf: session titling, context compression, the Mixture-of-Agents reference models and aggregator, vision, approval classification, the kanban decomposer and triage specifier, the `/goal` judge, … (`agent/auxiliary_hooks.py` upstream). They carry the `pre_api_request` / `post_api_request` payload shape plus `aux_task` and the identity of the main turn they run under (`session_id` is empty for turn-less callers such as the kanban dispatcher). Hermes keeps them separate on purpose: the main-loop `*_api_request` hooks never see this traffic, so without these two hooks every auxiliary call would be invisible and the turn's spend under-reported.
+
+- **Span op:** `api.{model}` (span kind `LLM`), nested under whatever the owning turn has in flight (`llm.*`, `api.*` or the root); its own root when there is no turn. Never pushed as a parent: nothing runs inside an auxiliary attempt (the MoA aggregator's tool calls belong to the main loop's `api.*`). An attempt that starts **after** its session's turn root ended (title generation can fire after `on_session_end`) is not parented under the ended root: it is its own root with `hermes.span.after_turn=true` and a span link (`hermes.link=turn_root`) to that root, and its usage is counted on no turn's `hermes.turn.auxiliary.*` (that roll-up is already exported). An attempt whose `turn_id` names a newer turn (preflight compression, which runs before the next turn's root opens) is not an after-turn call and counts on that next turn.
+- **Attributes:** `hermes.query_source=auxiliary`, `hermes.auxiliary.task` (`title_generation`, `compression`, `moa_reference`, `moa_aggregator`, `vision`, `approval`, `kanban_decomposer`, `triage_specifier`, `goal_judge`, …), then the same model, provider, request, token, cost and duration attributes as a main-loop `api.*` span; `error.type` + an `exception` span event and status `ERROR` when the attempt failed; `gen_ai.request.stream=true` and no usage for a streamed attempt (Hermes hands the stream back unconsumed).
+- **Turn roll-up:** counted on the owning turn's root as `hermes.turn.auxiliary.*` (call count, error count, tokens, cost), **beside** the turn totals, never inside them: the main loop's `api.*` span for the `moa` provider already carries what the MoA facade returns, so folding the attempts in would count them twice. The dashboard's trace totals skip auxiliary spans for the same reason.
+- **Metrics:** `hermes.auxiliary.count{aux_task, status, model, provider}`; the usual `hermes.token.usage`, `hermes.cost.usage`, `hermes.model.usage` with `query_source=auxiliary` (main-loop calls carry `main` or `subagent`); `gen_ai.client.token.usage` and `gen_ai.client.operation.duration`.
+- **Event:** `hermes.auxiliary.call` (`ERROR` on failure), see [log events](/reference/log-events).
+
+## Session, sub-agent and approval hooks
 
 ### `on_session_start`
 
-Fires at the start of a user turn (CLI input, inbound message, cron wake-up).
+Fires when Hermes starts a session in this process: the first turn of a CLI run, a new gateway conversation, a cron wake-up. Later turns of the same session do not fire it; `pre_llm_call` opens their root instead.
 
-- **Span op:** `tracker.start("agent")` (or `"cron"` for cron sessions), `parent=None` — this becomes the root of the trace
+- **Span op:** opens `agent` (or `cron` for a cron session) with no parent: the root of the turn's trace. A delegated child or a launcher's `HERMES_OTEL_TRACEPARENT` can give it a parent instead
 - **Attributes set on start:** `hermes.session.kind`, `hermes.session_id`, `session.id`, `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name`, the Weave turn markers; `user.id` / `hermes.sender.id` with `capture_sender_id`. See [Span attributes](/reference/span-attributes#agent--cron-turn-root)
-- **Fallback if not available:** the `llm.*` span becomes the root; turn summary is attached there instead of on a dedicated session root
+- **When it does not fire:** `pre_llm_call` opens the same root itself (a resumed `hermes -r`, a continuation turn, a Hermes without this hook), so every turn still has an `agent` / `cron` root
 
 ### `on_session_end`
 
@@ -89,14 +104,14 @@ Fires when the turn is fully complete (assistant has returned its final response
 
 - **Span op:** closes the `agent` / `cron` root span
 - **Attributes set on end:** the full [turn summary](/architecture/turn-summary) — `hermes.turn.tool_count`, `hermes.turn.tools`, `hermes.turn.tool_targets`, `hermes.turn.tool_commands`, `hermes.turn.tool_outcomes`, `hermes.turn.skill_count`, `hermes.turn.skills`, `hermes.turn.api_call_count`, `hermes.turn.final_status`
-- **Metrics:** `hermes.session.count{platform}` counter (on start); `gen_ai.agent.token.usage` per-turn rollup (on end)
+- **Metrics:** `hermes.session.count{platform}` counter (when the root opens); on end, `hermes.active_time.total{type=cli}` (the turn's wall-clock) and the `gen_ai.agent.token.usage` per-turn roll-up
 - **Side effects:** if `force_flush_on_session_end: true` (default), force-flushes every `BatchSpanProcessor` from a background thread (500 ms per backend, coalesced) so the trace appears in the backend UI promptly without the agent loop waiting on a collector
 
 ### `on_session_finalize`
 
 Fires once, at the session's true end: CLI exit, `/new` or `/reset`, a gateway session expiring, a TUI session closing. Payload: `session_id`, `platform`, `reason` (`session_boundary`, `shutdown`, `new_session`, …).
 
-- **Span op:** none of its own. A session is not a span: backends export a span only when it ends, and a gateway session can live for hours, so each turn stays its own trace and the session is the `session.id` / `gen_ai.conversation.id` attribute on every span. If a turn's `agent` / `cron` root is still open (a turn in flight, or an orphan), it is closed with `hermes.session.finalize_reason` and `hermes.turn.final_status=finalized`.
+- **Span op:** none of its own. A session is not a span: backends export a span only when it ends, and a gateway session can live for hours, so each turn stays its own trace and the session is the `session.id` / `gen_ai.conversation.id` attribute on every span. If a turn's `agent` / `cron` root is still open (a turn in flight, or an orphan), it is closed with `hermes.session.finalize_reason` and `hermes.turn.final_status=finalized`, or `failed` (status `ERROR`, `error.type`) when the turn's last API attempt failed (#467).
 - **Metrics:** `hermes.session.turns{platform, reason}` histogram (turns the session had) and `hermes.session.duration{platform, reason}` histogram (seconds from its first turn); nothing is recorded for a session this process never saw a turn of, which happens when a gateway restarts before expiry fires.
 - **Log:** one `INFO` line, `session <id> finalized (<reason>): N turn(s) over Ns`, with `hermes.session_id`, `hermes.session.turn_count`, `hermes.session.duration_s` and `hermes.session.finalize_reason` as attributes, exported when `capture_logs` is on.
 - **Side effects:** every per-session record (aggregator, turn counter, parent stack, open skill spans, delegation record) is dropped, so a session id that comes back starts at turn 1; the span context of the session's last root is kept so a replacing session can link to it; every backend is force-flushed regardless of `force_flush_on_session_end`.
@@ -112,7 +127,7 @@ Fires when a new session replaces an old one (`/new`, `/reset`). The gateway pas
 
 Fires when a parent agent delegates work to a child agent (the `delegate_task` tool). Dispatched in the parent's process, on the parent thread.
 
-- **Span op:** `tracker.start("subagent.{role}", parent=current_api or current_llm)` — a delegation span in the **parent's** trace
+- **Span op:** opens `subagent.{role}` under the parent's in-flight `api.*` span, else its `llm.*` span: a delegation span in the **parent's** trace
 - **Attributes set on start:** `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name`, `hermes.subagent.role`, `hermes.subagent.child_session_id`, `hermes.subagent.parent_session_id`, `hermes.subagent.parent_turn_id`, `hermes.subagent.child_id`, `hermes.subagent.goal`, `input.value`
 - **Side effects:** stashes the delegation span (and its `SpanContext`) keyed by `child_session_id` in the tracer's sub-agent registry so the child's own root span can rejoin this trace; registers the span with the orphan sweep under the parent session
 
@@ -150,7 +165,119 @@ Fires when the human answers (or the prompt times out).
 
 ### `mcp_request_headers` (pending upstream)
 
-Not a hook in any Hermes release (v0.21.3 has 39 hooks and no `mcp_request_headers`), so it is **not** declared in `plugin.yaml` and is not part of the "15 hooks" count. The plugin side is implemented: `register()` subscribes only when the running Hermes lists the hook in `hermes_cli.plugins.VALID_HOOKS`, and stays unregistered when that registry cannot be inspected, so the plugin catalog's declared-vs-registered check never sees an undeclared hook. The upstream proposal ([hermes-agent#52211](https://github.com/NousResearch/hermes-agent/issues/52211)) was closed because the MCP SDK 2.x propagates trace context in-protocol; the remaining gap is parenting on Hermes' MCP loop thread. See [MCP trace propagation](/configuration/mcp-trace-propagation) for the status.
+Not a hook in any Hermes release, so it is **not** declared in `plugin.yaml` and is not one of the 34 hooks above. The plugin side is implemented: `register()` subscribes only when the running Hermes lists the hook in `hermes_cli.plugins.VALID_HOOKS`, and stays unregistered when that registry cannot be inspected, so the plugin catalog's declared-vs-registered check never sees an undeclared hook. The upstream proposal ([hermes-agent#52211](https://github.com/NousResearch/hermes-agent/issues/52211)) was closed because the MCP SDK 2.x propagates trace context in-protocol; the remaining gap is parenting on Hermes' MCP loop thread. See [MCP trace propagation](/configuration/mcp-trace-propagation) for the status.
+
+## Observers on transform hooks
+
+Hermes' `transform_*` hooks let a plugin *replace* content (the first non-empty string returned wins). hermes-otel subscribes to two of them as pure observers: every handler returns `None`, so content is never changed, and only sizes and metadata are recorded. Every callback of a transform hook receives the same original value, so a replacement made by another plugin is invisible to an observer; what these make visible is Hermes' own truncation.
+
+### `transform_terminal_output`
+
+Fires inside the terminal tool with the output as the tool collected it, before Hermes applies its head+tail output limit, whitespace strip and redaction. (A very large output has already been cut to the capture window by then; Hermes records that cut in the result, and `post_tool_call` reads it.)
+
+- **Span op:** sets attributes on the open `tool.terminal` span
+- **Attributes:** `hermes.terminal.output.chars` (raw size), `hermes.terminal.returncode`, `hermes.terminal.env_type`
+- **Then, on `post_tool_call`:** `hermes.terminal.output.truncated` and `hermes.terminal.output.dropped_chars` report whether Hermes' output limit cut the output and by how much, read from Hermes' own truncation markers in the result; `hermes.tool.result.chars` records the result size for every tool
+- **Returns:** always `None`
+
+### `transform_llm_output`
+
+Fires in the turn finalizer with the final response text.
+
+- **Span op:** sets `hermes.llm.output.chars` on the turn root (`agent` / `cron`); the `llm.*` span is already closed by then
+- **Returns:** always `None`
+
+`transform_tool_result` is not subscribed: it fires after `post_tool_call` with the same result the plugin already saw there, so there is nothing new to observe and no reason to register a third behaviour-changing hook.
+
+## Kanban board transitions
+
+Hermes' kanban is a durable task board: a dispatcher (inside the gateway, or `hermes kanban dispatch`) claims a ready card and spawns a worker, a fresh `hermes -p <assignee> chat` process that finishes the card with `kanban_complete` or `kanban_block`. Six observer hooks fire around that lifecycle, in two processes, and the plugin turns each into one short `kanban.*` span, a `hermes.kanban.transition` event and a point on `hermes.kanban.task.count`. The two processes are joined into one trace: the dispatcher hands the claim span to the worker through the `TRACEPARENT` environment variable, and the worker's turn root parents under it (#388). `hermes.kanban.task_id` and `hermes.kanban.run_id` on every span (and on the worker's Resource, see [resource attributes](/reference/span-attributes#resource-on-every-span)) join them when a backend cannot. All six return `None`; Hermes ignores their return value and every fire site is best-effort.
+
+### `kanban_task_claimed`
+
+Fires in the **dispatcher** process right before the worker is spawned, inside the board's dispatch lock.
+
+- **Span op:** `kanban.claim`, opened and closed at once, the root of the run's trace (the dispatcher serves every session, so it never nests under whatever turn is in flight). The plugin sets `TRACEPARENT` to this span in the dispatcher's environment so the worker's turn joins the trace, and removes it on `on_kanban_worker_spawned` (#388)
+- **Attributes:** `hermes.kanban.task_id`, `hermes.kanban.board`, `hermes.kanban.assignee`, `hermes.kanban.run_id`, `hermes.kanban.event=claimed`
+- **Metrics:** `hermes.kanban.task.count{outcome=claimed, board}`
+
+### `on_kanban_worker_spawned`
+
+Fires in the **dispatcher** after the worker's PID is persisted.
+
+- **Span op:** `kanban.spawn`, under the run's `kanban.claim` span (a root of its own when this process did not open the claim)
+- **Attributes:** the card identity plus `hermes.kanban.worker_pid`; `workspace_path` is deliberately not recorded (a filesystem path)
+
+### `on_kanban_worker_exited`
+
+Fires in the **dispatcher** when a tick finds a worker's process gone and reclaims its run.
+
+- **Span op:** `kanban.worker_exit`, placed like `kanban.spawn`. A one-shot `hermes kanban dispatch` forgets the claim when it exits, so an exit found by a later pass is a root of its own
+- **Attributes:** the card identity plus `hermes.kanban.exit_kind` (`clean_exit` · `rate_limited` · `nonzero_exit` · `signaled` · `unknown`), `hermes.kanban.exit_code`, `hermes.kanban.outcome`, `hermes.kanban.retry_status`
+- **Span status:** `ERROR` for `nonzero_exit` and `signaled` (a crash, or a kill such as the dispatcher's own runtime-cap SIGTERM); `OK` otherwise
+
+### `on_kanban_worker_stale_claim`
+
+Fires in the **dispatcher** when a claim's TTL expired with no heartbeat.
+
+- **Span op:** `kanban.stale_claim`, placed like `kanban.worker_exit`, status `OK`
+- **Attributes:** the card identity plus `hermes.kanban.worker_pid`, `hermes.kanban.heartbeat_stale`, `hermes.kanban.retry_status`
+
+### `agent_loop_stopped`
+
+Fires in the **gateway** when it stops a running turn (`/stop`, or the running-agent fast path of `/new`). Kwargs: `session_key`, `platform`, `reason`, `invalidation_reason`.
+
+- **Effect:** the turn is found by its gateway session key, which the plugin records from `HERMES_SESSION_KEY` when the root opens. The root is marked `hermes.turn.stop_reason`. The turn is **not** ended here, because Hermes usually still ends it with `on_session_end(interrupted=True)`, which carries the turn's usage. If no end arrives, the orphan sweep finalizes the marked root as `hermes.turn.final_status=interrupted` instead of `timed_out`.
+
+### `pre_verify`
+
+Fires once per turn when the agent edited code and is about to verify or finish. It is a decision hook: a plugin that returns a dict keeps Hermes's turn going.
+
+- **Effect:** the plugin's observer always returns `None`. It counts the calls into `hermes.turn.verify_nudges` on the root, and never records `changed_paths` or `final_response`.
+
+### `pre_command`, `on_human_input_*`, `on_skill_lifecycle`, `pre_transcription`
+
+These are small observers (#400). All return `None`, and none of them reads the free text Hermes passes along.
+
+- **`pre_command`:** records `hermes.command.count{command, surface}` with Hermes's canonical command name. Never the arguments.
+- **`on_human_input_request` / `on_human_input_resolved`:**
+  - A `clarify` wait or a password prompt becomes a `human_input.{kind}` span under the session's in-flight span, carrying the redacted prompt as a preview, the outcome and `hermes.human_input.wait_s`.
+  - An `approval` wait is only counted, since it already has its `approval.*` span.
+  - Every wait records `hermes.human_input.count{kind, outcome}`.
+- **`on_skill_lifecycle`:** records `hermes.skill.lifecycle.count{action, provenance}`. Never the skill name, because a profile can hold any number of skills.
+- **`pre_transcription`:** records `hermes.transcription.count{provider, model, source}`. It's a decision hook in Hermes, but the observer never returns a value and never reads `file_path` or `prompt`.
+
+`transform_api_error_classification` (fires before Hermes classifies an error, so it has no outcome to record) and `transform_tool_result` (`post_tool_call` already records the result) are deliberately not registered. `scripts/hook_audit/hook_audit.py` lists every skipped hook with its reason.
+
+### Streaming hooks (`on_stream_*`, `on_interim_message`): not used
+
+Time to first chunk comes from `post_api_request`, which already carries Hermes's own `started_at` and `first_chunk_at` (wall clock, `first_chunk_at` only for a streamed call). `hermes.api.ttfc_ms` goes on the `api.*` span and into `hermes.api.time_to_first_chunk`. The stream hooks run on a queued worker thread (drop-oldest), and their payloads carry no timestamps, so they would only measure later and less exactly.
+
+### `on_kanban_dispatch_tick` / `on_kanban_task_updated`
+
+Board health (#397), metrics only.
+
+- **`on_kanban_dispatch_tick`:** fires once per dispatcher pass, after the dispatch lock is released. It records `hermes.kanban.dispatch.count{outcome, board}`, plus `hermes.kanban.dispatch.result{kind, board}` for each non-zero `DispatchResult` field (spawned, reclaimed, crashed, auto_blocked, …). The task ids, assignees and workspace paths in the result are never exported, only how many there were. Dry runs are not counted. There is no span: an idle board ticks every minute, and what a busy pass did is already on the run's `kanban.*` spans.
+- **`on_kanban_task_updated`:** a task-row edit outside claim / complete / block. It records `hermes.kanban.task.updated{field, board}` once per changed field *name*. Hermes never passes the values.
+
+### `kanban_task_completed`
+
+Fires in the **worker** from inside the `kanban_complete` tool (or in a CLI process when a human runs `hermes kanban complete`).
+
+- **Span op:** `kanban.complete`, in the worker's own trace under its in-flight `llm` span (or turn root); a root of its own when no turn is in flight
+- **Attributes:** the card identity, `hermes.kanban.outcome=completed`, `hermes.kanban.summary` (preview-clipped; suppressed when `capture_previews=false`)
+- **Also:** the worker's `agent` root is stamped with `hermes.kanban.task_id`, `board`, `run_id` and `outcome`, so span-only readers (the bundled dashboard's live store) can find the card's turn
+
+### `kanban_task_blocked`
+
+Fires in the **worker** from inside `kanban_block` (or in the dispatcher when its breaker blocks a card, or on the CLI).
+
+- **Span op:** `kanban.block`, placed like `kanban.complete`
+- **Attributes:** the card identity, `hermes.kanban.outcome=blocked`, `hermes.kanban.reason` (preview-clipped)
+- **Span status:** always `OK`; a blocked card is waiting for a human, not an error. The event is emitted at WARN
+
+Two dispatcher outcomes fire no hook at all in Hermes: a worker killed by the card's runtime cap closes its run as `timed_out`, and the breaker's auto-block writes the card's status directly, so neither produces a `kanban.*` span (the worker's own trace ends interrupted, and the card's `task_events` carry the record). `on_kanban_worker_exited` covers a worker that died on its own.
+
 
 ## Hook → span mapping
 
@@ -162,10 +289,29 @@ pre_llm_call             open  llm.{model}       (child of session)
 pre_api_request          open  api.{model}       (child of llm)
 pre_tool_call            open  tool.{name}       (child of api or llm)
 subagent_start           open  subagent.{role}   (child of api or llm)
-post_tool_call           close tool.{name}
+transform_terminal_output  attrs tool.terminal   (raw output size, return code, env type; returns None)
+post_tool_call           close tool.{name}       + result size, terminal truncation, git commit (attr + hermes.commit.count + commit event)
 post_api_request         close api.{model}        (OK)
 api_request_error        close api.{model}        (ERROR + exception + retry attrs/metrics)
+pre_auxiliary_call       open  api.{model}       (auxiliary: child of the turn's llm/api/root, or own root, linked to the ended root after the turn; not a parent)
+post_auxiliary_call      close api.{model}       (auxiliary: usage, cost, ERROR on failure; turn roll-up hermes.turn.auxiliary.*)
 post_llm_call            close llm.{model}
+transform_llm_output     attr  agent/cron        (final response size; returns None)
+kanban_task_claimed      open+close kanban.claim        (dispatcher; the run's root; sets TRACEPARENT for the worker)
+on_kanban_worker_spawned open+close kanban.spawn        (dispatcher; under the claim; clears TRACEPARENT)
+on_kanban_worker_exited  open+close kanban.worker_exit  (dispatcher; under the claim; ERROR on crash/kill)
+on_kanban_worker_stale_claim open+close kanban.stale_claim (dispatcher; under the claim)
+pre_command              metric hermes.command.count{command, surface}
+on_human_input_request   open  human_input.{kind}   (every kind but approval, which is counted only)
+on_human_input_resolved  close human_input.{kind}   (outcome, wait_s) + hermes.human_input.count
+on_skill_lifecycle       metric hermes.skill.lifecycle.count{action, provenance}
+pre_transcription        metric hermes.transcription.count (returns None)
+agent_loop_stopped       attr  agent root          (hermes.turn.stop_reason; sweep ends it interrupted, not timed_out)
+pre_verify               attr  agent root          (hermes.turn.verify_nudges; always returns None)
+on_kanban_dispatch_tick  metrics only: hermes.kanban.dispatch.count / .result (dispatcher, after the lock)
+on_kanban_task_updated   metrics only: hermes.kanban.task.updated{field}
+kanban_task_completed    open+close kanban.complete     (worker; in the turn's trace + root stamped)
+kanban_task_blocked      open+close kanban.block        (worker; OK + outcome=blocked)
 subagent_stop            close subagent.{role}   + status + duration + metrics
 pre_approval_request     open  approval.{pattern} (child of api/turn; → gated tool)
 post_approval_response   close approval.{pattern} + choice + wait duration + metrics
@@ -179,4 +325,4 @@ mcp_request_headers      (pending upstream; no span) would return traceparent/tr
 
 When the model emits multiple tool calls in a single response, Hermes fires `pre_tool_call` / `post_tool_call` for each in sequence (or in parallel, depending on the Hermes version). The plugin handles both: each tool span gets its own `span.start` / `span.end`, and they're all children of the same `api.*` parent.
 
-See the `hermes_otel/hooks/` package for the callback implementations (one module per hook family) and the `SpanTracker` class for the parent-stack management.
+See the `hermes_otel/hooks/` package for the callbacks (one module per hook family) and `hermes_otel/span_tracker.py` for the parent stack (which open span a new span nests under).

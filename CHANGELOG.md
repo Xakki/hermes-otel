@@ -1,5 +1,392 @@
 # Changelog
 
+## [1.33.1](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.33.0...hermes-otel-v1.33.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* **lifecycle:** close live store on plugin unload ([390bcc9](https://github.com/briancaffey/hermes-otel/commit/390bcc98c5561b6fae4da9cb359936a1ff22669b))
+
+## [1.33.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.32.6...hermes-otel-v1.33.0) (2026-11-11)
+
+
+### Features
+
+* **privacy:** settings to leave tool commands, targets and error text out ([#670](https://github.com/briancaffey/hermes-otel/issues/670)) ([cd1ae01](https://github.com/briancaffey/hermes-otel/commit/cd1ae01614121a57c08782d59ba97cbd3253a1df))
+
+
+### Bug Fixes
+
+* avoid applying span redaction twice in live store ([051431f](https://github.com/briancaffey/hermes-otel/commit/051431feb55413a29b1eb1e58a730c175dce4cb8))
+* **pipeline:** redact commands, targets, errors and span events, once per span ([0a06bca](https://github.com/briancaffey/hermes-otel/commit/0a06bcaa04b4b7216ee9254843202e163b281456)), closes [#653](https://github.com/briancaffey/hermes-otel/issues/653)
+* redact sensitive span content before export ([e809166](https://github.com/briancaffey/hermes-otel/commit/e809166ff8d300fe6fd835a654418380234d6bee))
+* **redaction:** keep JSON content valid and redact values with their key in view ([d53c574](https://github.com/briancaffey/hermes-otel/commit/d53c5744617e36fe12ce738d1351c7eba235125f))
+
+
+### Documentation
+
+* **privacy:** say what span redaction masks, what it does not, and its cost ([809e096](https://github.com/briancaffey/hermes-otel/commit/809e09682da5f26466c50d16574a6daf05d04353))
+
+## [1.32.6](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.32.5...hermes-otel-v1.32.6) (2026-11-07)
+
+
+### Bug Fixes
+
+* **llm:** keep conversation-history JSON valid over conversation_history_max_chars ([#651](https://github.com/briancaffey/hermes-otel/issues/651)) ([ffb6708](https://github.com/briancaffey/hermes-otel/commit/ffb6708d17201600abdfc3f55efef2280ca5f7d2)), closes [#650](https://github.com/briancaffey/hermes-otel/issues/650)
+
+## [1.32.5](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.32.4...hermes-otel-v1.32.5) (2026-11-07)
+
+
+### Bug Fixes
+
+* **semconv:** carry Anthropic and Responses tool rounds and the turn's finish reason into the GenAI parts schema ([314769e](https://github.com/briancaffey/hermes-otel/commit/314769eff3799a7730f4d1e7e1e8c3488335c855)), closes [#647](https://github.com/briancaffey/hermes-otel/issues/647)
+* **semconv:** emit gen_ai.*.messages and gen_ai.system_instructions in the GenAI parts schema ([4a6fbf7](https://github.com/briancaffey/hermes-otel/commit/4a6fbf73c11252bc3bc41ca86028019cf2eb3843))
+
+## [1.32.4](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.32.3...hermes-otel-v1.32.4) (2026-11-02)
+
+
+### Bug Fixes
+
+* register the plugin in Hermes's hermes_agent.plugins entry-point group ([#643](https://github.com/briancaffey/hermes-otel/issues/643)) ([#644](https://github.com/briancaffey/hermes-otel/issues/644)) ([4dbcb28](https://github.com/briancaffey/hermes-otel/commit/4dbcb28db77856def894e968f25c25208647e153))
+
+## [1.32.3](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.32.2...hermes-otel-v1.32.3) (2026-10-28)
+
+
+### Bug Fixes
+
+* classify gateway-run chat -q turns as oneshot and keep the e2e tier green on hermes-agent main ([#637](https://github.com/briancaffey/hermes-otel/issues/637)) ([#641](https://github.com/briancaffey/hermes-otel/issues/641)) ([0dc1f14](https://github.com/briancaffey/hermes-otel/commit/0dc1f14233f4d089af5898c7e34dd7e12cf8bde5))
+* **dashboard:** take the plugins dir off sys.path after importing hermes_otel ([#638](https://github.com/briancaffey/hermes-otel/issues/638)) ([#640](https://github.com/briancaffey/hermes-otel/issues/640)) ([ac17f25](https://github.com/briancaffey/hermes-otel/commit/ac17f252761313dbb3f979627c3843bcd7022971))
+
+## [1.32.2](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.32.1...hermes-otel-v1.32.2) (2026-10-18)
+
+
+### Bug Fixes
+
+* **backends:** a GreptimeDB pipeline header under headers: goes to traces only ([#606](https://github.com/briancaffey/hermes-otel/issues/606)) ([#620](https://github.com/briancaffey/hermes-otel/issues/620)) ([8ef0964](https://github.com/briancaffey/hermes-otel/commit/8ef0964735c0806c9f1da231353e4ff6da3ae3e7))
+* **backends:** an entry's metrics_endpoint / logs_endpoint apply on every type ([#607](https://github.com/briancaffey/hermes-otel/issues/607)) ([#625](https://github.com/briancaffey/hermes-otel/issues/625)) ([a1c697c](https://github.com/briancaffey/hermes-otel/commit/a1c697cb36af60c22b454869e5e32ad628237413))
+* **compose:** LangWatch's mint-api-key.py ticks the onboarding checkbox on current builds ([#635](https://github.com/briancaffey/hermes-otel/issues/635)) ([#636](https://github.com/briancaffey/hermes-otel/issues/636)) ([6b1f939](https://github.com/briancaffey/hermes-otel/commit/6b1f9397ddeb87ff3d6cf7441534598c88ecabfe))
+* **compose:** the Agenta stack starts on agenta-api:latest again ([#628](https://github.com/briancaffey/hermes-otel/issues/628)) ([#631](https://github.com/briancaffey/hermes-otel/issues/631)) ([5c39595](https://github.com/briancaffey/hermes-otel/commit/5c395951b87f9ec48ef0130173482c5546135de3))
+* **dashboard:** a `type: jaeger` entry without query_port queries 16686, not the OTLP port ([#605](https://github.com/briancaffey/hermes-otel/issues/605)) ([#621](https://github.com/briancaffey/hermes-otel/issues/621)) ([8d1049b](https://github.com/briancaffey/hermes-otel/commit/8d1049bb6292ca886034d6246fda7b3472ac7a4f))
+* **dashboard:** adapters resolve an entry's settings the way the exporter does ([#614](https://github.com/briancaffey/hermes-otel/issues/614)) ([#624](https://github.com/briancaffey/hermes-otel/issues/624)) ([7dccd7a](https://github.com/briancaffey/hermes-otel/commit/7dccd7a2e61a706ea7bda7b415e64bcbc357485c))
+* **dashboard:** name hermes_otel.yaml and tell a failed live store from a failed import ([#616](https://github.com/briancaffey/hermes-otel/issues/616)) ([#626](https://github.com/briancaffey/hermes-otel/issues/626)) ([223d57a](https://github.com/briancaffey/hermes-otel/commit/223d57ae1db0a55160e88f6fb89efa3faa02769f))
+* **dashboard:** read current Agenta's moved model, tool and text keys ([#630](https://github.com/briancaffey/hermes-otel/issues/630)) ([#633](https://github.com/briancaffey/hermes-otel/issues/633)) ([06c26ba](https://github.com/briancaffey/hermes-otel/commit/06c26bacb7eb68fb6eb137fe7fb4d6dcf673d013))
+* **dashboard:** read the Hermes host ApiError's status and body ([#611](https://github.com/briancaffey/hermes-otel/issues/611)) ([#623](https://github.com/briancaffey/hermes-otel/issues/623)) ([efb4ef3](https://github.com/briancaffey/hermes-otel/commit/efb4ef301c5335e1dc82c73081bd1e8a87ae5385))
+* **dashboard:** show the turn's tool sets apart and split targets on | ([#612](https://github.com/briancaffey/hermes-otel/issues/612)) ([#629](https://github.com/briancaffey/hermes-otel/issues/629)) ([3f83754](https://github.com/briancaffey/hermes-otel/commit/3f83754d317b5aef2c40a93f060203273b08fb7b))
+* **hooks:** attribute the subagent.stop log event to the parent session ([#613](https://github.com/briancaffey/hermes-otel/issues/613)) ([#619](https://github.com/briancaffey/hermes-otel/issues/619)) ([5414e5c](https://github.com/briancaffey/hermes-otel/commit/5414e5c601a0ae9bfd1362988dbe14e997b796ba))
+* **pipeline:** startup banner names the exported signals when traces is off ([#608](https://github.com/briancaffey/hermes-otel/issues/608)) ([#618](https://github.com/briancaffey/hermes-otel/issues/618)) ([9439544](https://github.com/briancaffey/hermes-otel/commit/943954447b39a03692cf83055ed78282e0bb40b1))
+* **settings:** say OTEL_SERVICE_NAME is overridden by the plugin ([#609](https://github.com/briancaffey/hermes-otel/issues/609)) ([#622](https://github.com/briancaffey/hermes-otel/issues/622)) ([feccccb](https://github.com/briancaffey/hermes-otel/commit/feccccb61b049a8ee1d2a3f681d70d193b616b8d))
+* **tracer:** every backends: entry invalid falls back to live-only ([#610](https://github.com/briancaffey/hermes-otel/issues/610)) ([#627](https://github.com/briancaffey/hermes-otel/issues/627)) ([2f325a4](https://github.com/briancaffey/hermes-otel/commit/2f325a44e7ed85c332261739f5b8696fb50bbf86))
+
+
+### Documentation
+
+* audit every page, README and comment against the code ([#604](https://github.com/briancaffey/hermes-otel/issues/604)) ([#634](https://github.com/briancaffey/hermes-otel/issues/634)) ([2948eff](https://github.com/briancaffey/hermes-otel/commit/2948effffb50f1a4dcfd6a3142dc86d1d5284a27))
+
+## [1.32.1](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.32.0...hermes-otel-v1.32.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **otlp:** SDK TLS variables no longer refuse a plaintext http:// backend ([#602](https://github.com/briancaffey/hermes-otel/issues/602)) ([8dda876](https://github.com/briancaffey/hermes-otel/commit/8dda87608461301f5c2dc1d878781691274fe3dd))
+
+## [1.32.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.31.0...hermes-otel-v1.32.0) (2026-10-18)
+
+
+### Features
+
+* **backends:** a headers_helper stands in for the static credential a type requires ([#583](https://github.com/briancaffey/hermes-otel/issues/583)) ([#599](https://github.com/briancaffey/hermes-otel/issues/599)) ([771d16d](https://github.com/briancaffey/hermes-otel/commit/771d16d6ad751bdbbfc3d43c99359139106c48a3))
+* **backends:** headers_helper mints OTLP headers per backend and refreshes them once on 401/403 ([#483](https://github.com/briancaffey/hermes-otel/issues/483)) ([43e4c4e](https://github.com/briancaffey/hermes-otel/commit/43e4c4e22bf57263c77e4aa5076f174f1d252b7d))
+* **backends:** one headers_helper refresh serves the traces, metrics and logs sessions of a backend ([#584](https://github.com/briancaffey/hermes-otel/issues/584)) ([#592](https://github.com/briancaffey/hermes-otel/issues/592)) ([dee2864](https://github.com/briancaffey/hermes-otel/commit/dee28649415e1d39b7f9838db9ad5c26e736e418))
+* **config:** common_attributes stamped on every span, log record and metric point ([#480](https://github.com/briancaffey/hermes-otel/issues/480)) ([4531c55](https://github.com/briancaffey/hermes-otel/commit/4531c55a953422100d3121cff2f32c302e4cbfda))
+* **config:** disable_metrics and disable_spans switch off individual instruments and span families ([#479](https://github.com/briancaffey/hermes-otel/issues/479)) ([8ea922e](https://github.com/briancaffey/hermes-otel/commit/8ea922ed25a1edf42700b1c5c10dbdc9a2b05aff))
+* **hooks:** an auxiliary api.* call after the turn links to the ended root ([#588](https://github.com/briancaffey/hermes-otel/issues/588)) ([#590](https://github.com/briancaffey/hermes-otel/issues/590)) ([8bc2495](https://github.com/briancaffey/hermes-otel/commit/8bc24950608d809279754ccace5f17e9c4219d10))
+* **metrics:** hermes.commit.count and a commit event when the terminal tool runs git commit ([#478](https://github.com/briancaffey/hermes-otel/issues/478)) ([63ff796](https://github.com/briancaffey/hermes-otel/commit/63ff796ed826406ae61c9a5284ae529a4df4e3b5))
+* **otlp:** add gRPC transport and TLS/mTLS configuration ([#469](https://github.com/briancaffey/hermes-otel/issues/469)) ([2417cc1](https://github.com/briancaffey/hermes-otel/commit/2417cc15b1bd3fae5e59a6b34c4d477a7ffed92a))
+
+
+### Bug Fixes
+
+* **backends:** complete an OpenObserve endpoint given as a bare origin to /api/&lt;org&gt;/v1/traces ([#582](https://github.com/briancaffey/hermes-otel/issues/582)) ([#591](https://github.com/briancaffey/hermes-otel/issues/591)) ([1bd0f6a](https://github.com/briancaffey/hermes-otel/commit/1bd0f6a8f48aaa285aa6c8acc85062dfd97fc19f))
+* **config:** host_metrics_gpu: off in yaml switches GPU probing off ([#563](https://github.com/briancaffey/hermes-otel/issues/563)) ([c655882](https://github.com/briancaffey/hermes-otel/commit/c65588240a18d1288d29a5fab1f4e8a80431970b))
+* **dashboard:** a kind-filtered Tempo or Gigapipe card is timed as the matched span ([#598](https://github.com/briancaffey/hermes-otel/issues/598)) ([#601](https://github.com/briancaffey/hermes-otel/issues/601)) ([e845266](https://github.com/briancaffey/hermes-otel/commit/e84526686864df4dea6d1121081e2c20e6014a39))
+* **dashboard:** a widened search without a kind cards the trace's root on every adapter ([#558](https://github.com/briancaffey/hermes-otel/issues/558)) ([#597](https://github.com/briancaffey/hermes-otel/issues/597)) ([f3787b2](https://github.com/briancaffey/hermes-otel/commit/f3787b2d7a499799203eb5b066a33adac6e2dd8d))
+* **dashboard:** alias backend entries get their canonical type's UI link on the Settings card ([#557](https://github.com/briancaffey/hermes-otel/issues/557)) ([#593](https://github.com/briancaffey/hermes-otel/issues/593)) ([ab5653d](https://github.com/briancaffey/hermes-otel/commit/ab5653d76e20eebcdd04673b4443fe924ad09e7e))
+* **dashboard:** one level-text list for the OpenObserve min_level filter ([#555](https://github.com/briancaffey/hermes-otel/issues/555)) ([86356bf](https://github.com/briancaffey/hermes-otel/commit/86356bf5c49bf7859a1faf7fab819d31e558144d))
+* **semconv:** human_input spans classify as human_input, not other ([#556](https://github.com/briancaffey/hermes-otel/issues/556)) ([7f55634](https://github.com/briancaffey/hermes-otel/commit/7f5563454e5b5d4b08bd5df89756a58ce35f5089))
+* **tracer:** config fingerprint on re-init, an unchanged config keeps the pipeline and a changed one rebuilds it ([#484](https://github.com/briancaffey/hermes-otel/issues/484)) ([7dc8bb2](https://github.com/briancaffey/hermes-otel/commit/7dc8bb25b4d4391480ef3f8fd831c6e8d87b94d0))
+
+
+### Documentation
+
+* **architecture:** module list after the milestone-16 split ([#565](https://github.com/briancaffey/hermes-otel/issues/565)) ([cc05a63](https://github.com/briancaffey/hermes-otel/commit/cc05a63663e7850f1c52b630b42fda4f3668446f))
+* **config:** list the env overrides of list fields in the env-vars reference ([#587](https://github.com/briancaffey/hermes-otel/issues/587)) ([#589](https://github.com/briancaffey/hermes-otel/issues/589)) ([d1fb382](https://github.com/briancaffey/hermes-otel/commit/d1fb382fa7353fd9ec9571d510d4fcf12249828f))
+
+## [1.31.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.30.0...hermes-otel-v1.31.0) (2026-10-17)
+
+
+### Features
+
+* **attributes:** gen_ai.provider.name and llm.provider use their convention's well-known spelling; the Hermes id stays in hermes.provider ([#475](https://github.com/briancaffey/hermes-otel/issues/475)) ([#495](https://github.com/briancaffey/hermes-otel/issues/495)) ([4b2e705](https://github.com/briancaffey/hermes-otel/commit/4b2e70534a9b0b4be6ca14fff44c4f7b0d815eab))
+* **lgtm:** Agents: Hermes and Claude Code Grafana dashboard, generated, beside the community one ([#485](https://github.com/briancaffey/hermes-otel/issues/485)) ([22168a3](https://github.com/briancaffey/hermes-otel/commit/22168a3bd984483fdbf27c70e988cce51b4865e5))
+* **metrics:** Claude Code metric-name compatibility (claude_code.*) and the Claude Code Grafana dashboard in the LGTM stack ([#485](https://github.com/briancaffey/hermes-otel/issues/485)) ([4c95d15](https://github.com/briancaffey/hermes-otel/commit/4c95d15cd48eb6925ef7818b979337ad55d496f7))
+* **pipeline:** one TCP reachability probe per backend endpoint at init, logged per backend, and a reachability column in the status CLI ([#481](https://github.com/briancaffey/hermes-otel/issues/481)) ([#496](https://github.com/briancaffey/hermes-otel/issues/496)) ([bfa2b55](https://github.com/briancaffey/hermes-otel/commit/bfa2b55207a4940bb21d79817630ed32c8e7d3a6))
+* **propagation:** HERMES_OTEL_TRACEPARENT parents every turn root under an outer span, not only inside a kanban worker ([#474](https://github.com/briancaffey/hermes-otel/issues/474)) ([#494](https://github.com/briancaffey/hermes-otel/issues/494)) ([6f07903](https://github.com/briancaffey/hermes-otel/commit/6f0790362cd00a28ef9fd043034a9b78338acf80))
+* **resource:** os.type and host.arch on the Resource, in the OTel spellings ([#476](https://github.com/briancaffey/hermes-otel/issues/476)) ([#497](https://github.com/briancaffey/hermes-otel/issues/497)) ([2ac1891](https://github.com/briancaffey/hermes-otel/commit/2ac1891ce68ac16980a64d5e461aa256784f7790))
+
+
+### Bug Fixes
+
+* **config:** numeric settings are range-checked at load; out of range warns and keeps the default ([#487](https://github.com/briancaffey/hermes-otel/issues/487)) ([#491](https://github.com/briancaffey/hermes-otel/issues/491)) ([d1dad6a](https://github.com/briancaffey/hermes-otel/commit/d1dad6abf6a1083a91e0e7ae696f1e122c243396))
+* **metrics:** hermes.session.count counts a session when this process first roots it, not only on on_session_start ([#473](https://github.com/briancaffey/hermes-otel/issues/473)) ([#490](https://github.com/briancaffey/hermes-otel/issues/490)) ([5a9f3f4](https://github.com/briancaffey/hermes-otel/commit/5a9f3f4c3e8fb9b92dba5feef3802af5f9cde25b))
+* **pipeline:** exporters built without headers no longer inherit OTEL_EXPORTER_OTLP_*HEADERS from the shell ([#472](https://github.com/briancaffey/hermes-otel/issues/472)) ([#489](https://github.com/briancaffey/hermes-otel/issues/489)) ([a578cbf](https://github.com/briancaffey/hermes-otel/commit/a578cbfa17af89ddbd517183a018bef313e05be3))
+* **settings:** derive the Settings tab's backend field lists from the manifest and BackendConfig ([#501](https://github.com/briancaffey/hermes-otel/issues/501)) ([5ab2da6](https://github.com/briancaffey/hermes-otel/commit/5ab2da691dd2d9bbbd4cee5d5285479bbfe47b6f))
+* **spans:** children still open when a turn ends are ended, marked hermes.span.ended_by=sweep with a reason, and counted ([#477](https://github.com/briancaffey/hermes-otel/issues/477)) ([#493](https://github.com/briancaffey/hermes-otel/issues/493)) ([dcfd056](https://github.com/briancaffey/hermes-otel/commit/dcfd056aad6c7cabd001f8d42cb8e7eb489909ea))
+
+## [1.30.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.29.0...hermes-otel-v1.30.0) (2026-10-14)
+
+
+### Features
+
+* **scenarios:** scenario harness: real Hermes runs (cli, resume, gateway, cron, kanban) with telemetry expectations ([#468](https://github.com/briancaffey/hermes-otel/issues/468)) ([7e5cff8](https://github.com/briancaffey/hermes-otel/commit/7e5cff87774ed846229e2bed1d3c1ff2bf23471e))
+
+
+### Bug Fixes
+
+* **spans:** a turn whose API attempts all fail ends failed, not finalized ([#471](https://github.com/briancaffey/hermes-otel/issues/471)) ([a215dd4](https://github.com/briancaffey/hermes-otel/commit/a215dd4bf377d7c1a7f3604b7bef4bc9af7a114d)), closes [#467](https://github.com/briancaffey/hermes-otel/issues/467)
+* **spans:** hermes.cron.job_id on cron roots, parsed from the scheduler's session id ([#465](https://github.com/briancaffey/hermes-otel/issues/465)) ([080616f](https://github.com/briancaffey/hermes-otel/commit/080616f1e0a710c90bd4a3dc933763815a679ea1))
+* **spans:** hermes.turn.number continues on a resumed session instead of restarting at 1 ([#466](https://github.com/briancaffey/hermes-otel/issues/466)) ([18e28c4](https://github.com/briancaffey/hermes-otel/commit/18e28c49ecc986680a1648f9639516ed7269b9fc))
+
+## [1.29.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.28.0...hermes-otel-v1.29.0) (2026-10-13)
+
+
+### Features
+
+* **dashboard:** cost and tokens per agent: a by-agent table on the trace detail, sub-agent totals on the cards ([#447](https://github.com/briancaffey/hermes-otel/issues/447)) ([#463](https://github.com/briancaffey/hermes-otel/issues/463)) ([c4518b0](https://github.com/briancaffey/hermes-otel/commit/c4518b0727181d71d2c67abac9bfd8273ca74492))
+
+## [1.28.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.27.1...hermes-otel-v1.28.0) (2026-10-13)
+
+
+### Features
+
+* **resource:** one service per profile with service_name_from_profile; gen_ai.agent.name from the named profile ([#395](https://github.com/briancaffey/hermes-otel/issues/395)) ([#460](https://github.com/briancaffey/hermes-otel/issues/460)) ([7af19fd](https://github.com/briancaffey/hermes-otel/commit/7af19fd79157e487dd7b8f3427333613bd6d09bf))
+
+## [1.27.1](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.27.0...hermes-otel-v1.27.1) (2026-10-12)
+
+
+### Documentation
+
+* **backends:** Azure Monitor / Application Insights through the Collector folder's azuremonitor target ([#387](https://github.com/briancaffey/hermes-otel/issues/387)) ([e73eaa5](https://github.com/briancaffey/hermes-otel/commit/e73eaa5d4b24ab8a8dc4502ba856997a1eed2065)), closes [#228](https://github.com/briancaffey/hermes-otel/issues/228)
+
+## [1.27.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.26.0...hermes-otel-v1.27.0) (2026-10-12)
+
+
+### Features
+
+* **kanban:** one trace per task run: the dispatcher hands its claim span to the worker through TRACEPARENT ([#388](https://github.com/briancaffey/hermes-otel/issues/388)) ([#446](https://github.com/briancaffey/hermes-otel/issues/446)) ([308b0eb](https://github.com/briancaffey/hermes-otel/commit/308b0eb7cd45a63b5ced5f8fc3663b6fdc935962))
+* **metrics:** kanban board health from on_kanban_dispatch_tick and on_kanban_task_updated ([#397](https://github.com/briancaffey/hermes-otel/issues/397)) ([#450](https://github.com/briancaffey/hermes-otel/issues/450)) ([2599068](https://github.com/briancaffey/hermes-otel/commit/2599068abbc3b3947947795f3d1eac0c9f650aa3))
+* **metrics:** observers for slash commands, human-input waits, skill lifecycle and transcriptions ([#400](https://github.com/briancaffey/hermes-otel/issues/400)) ([#456](https://github.com/briancaffey/hermes-otel/issues/456)) ([6a069e1](https://github.com/briancaffey/hermes-otel/commit/6a069e1ae26773bc796c5209a788058f2fc68e91))
+* **spans:** cost and tokens per agent: subtree rollups on subagent.* spans, nested orchestrators counted once ([#390](https://github.com/briancaffey/hermes-otel/issues/390)) ([#448](https://github.com/briancaffey/hermes-otel/issues/448)) ([778b371](https://github.com/briancaffey/hermes-otel/commit/778b37167c1698e734d9225a7ef0d0379d80da1c))
+* **spans:** hermes.turn.trigger on every turn root: user, cron, kanban, subagent, a2a, api, oneshot, curator, batch, system ([#394](https://github.com/briancaffey/hermes-otel/issues/394)) ([#445](https://github.com/briancaffey/hermes-otel/issues/445)) ([750170a](https://github.com/briancaffey/hermes-otel/commit/750170a6dd0568aa5a0b93c142802c6318480a81))
+* **spans:** per-agent models on the agent-level spans: the child's model on subagent.*, model_inherited, and hermes.agent.model_override on every root ([#391](https://github.com/briancaffey/hermes-otel/issues/391)) ([#443](https://github.com/briancaffey/hermes-otel/issues/443)) ([e465c2a](https://github.com/briancaffey/hermes-otel/commit/e465c2ae06b265fd727355ea5d40a4affb690653))
+* **spans:** time to first chunk on api spans, stopped turns end interrupted, verify nudges counted ([#396](https://github.com/briancaffey/hermes-otel/issues/396)) ([#451](https://github.com/briancaffey/hermes-otel/issues/451)) ([9f95cb1](https://github.com/briancaffey/hermes-otel/commit/9f95cb1ba88c717971ab4b75247d806a03ad896e))
+
+
+### Bug Fixes
+
+* **live_store:** close connections of exited threads so the gateway stops leaking 2 fds per worker thread ([#457](https://github.com/briancaffey/hermes-otel/issues/457)) ([1efb52e](https://github.com/briancaffey/hermes-otel/commit/1efb52e80afe1ea9983d33309e89cf4869a0d575))
+* **spans:** delegation spans outlive the parent's turn and have their own TTL; stalled children are errors ([#392](https://github.com/briancaffey/hermes-otel/issues/392)) ([#435](https://github.com/briancaffey/hermes-otel/issues/435)) ([10f7d60](https://github.com/briancaffey/hermes-otel/commit/10f7d60ad5549a52d6345dc8d19b3a7647433963))
+
+
+### Documentation
+
+* observing a fleet: the guide, and a three-profile fleet demo read back from Jaeger ([#398](https://github.com/briancaffey/hermes-otel/issues/398)) ([#454](https://github.com/briancaffey/hermes-otel/issues/454)) ([1186be2](https://github.com/briancaffey/hermes-otel/commit/1186be200cc576d1dbd5c0f91301e5a63414ed96))
+
+## [1.26.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.25.0...hermes-otel-v1.26.0) (2026-10-12)
+
+
+### Features
+
+* **backends:** retire the LangSmith run-tree client; type: langsmith is an OTLP preset that fans out like every other backend ([#421](https://github.com/briancaffey/hermes-otel/issues/421)) ([349b679](https://github.com/briancaffey/hermes-otel/commit/349b6793b139c0a01023a8001d92e889910eaf37))
+* **spans:** auxiliary LLM calls as api.* spans with query_source (pre/post_auxiliary_call) ([#401](https://github.com/briancaffey/hermes-otel/issues/401)) ([68539b9](https://github.com/briancaffey/hermes-otel/commit/68539b960db76a4f125eca73a5c7cbfda428c61b)), closes [#389](https://github.com/briancaffey/hermes-otel/issues/389)
+
+
+### Bug Fixes
+
+* **spans:** traceloop.span.kind carries Traceloop's lowercase kinds (agent, tool, task, unknown) ([#385](https://github.com/briancaffey/hermes-otel/issues/385)) ([0d6789f](https://github.com/briancaffey/hermes-otel/commit/0d6789f603efb0f69d6c67c29bbb4bdfc63da47c)), closes [#382](https://github.com/briancaffey/hermes-otel/issues/382)
+* the bugs the refactor audit found: Laminar signal_support, aspire status, Phoenix empty pages, secret precedence, Langfuse status probe, dashboard config path, settings report ([#413](https://github.com/briancaffey/hermes-otel/issues/413)) ([#416](https://github.com/briancaffey/hermes-otel/issues/416)) ([d6d76e0](https://github.com/briancaffey/hermes-otel/commit/d6d76e0d3dab7f44d4f0785c7d0b9a3a4ab4b2f3))
+
+## [1.25.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.24.0...hermes-otel-v1.25.0) (2026-10-12)
+
+
+### Features
+
+* **backends:** explicit Agenta backend (type: agenta) with a traces dashboard adapter on the spans query API ([#378](https://github.com/briancaffey/hermes-otel/issues/378)) ([b36b221](https://github.com/briancaffey/hermes-otel/commit/b36b221f3df922d9c8a088c5c06069b277e130d1))
+* **backends:** explicit Aspire Dashboard backend (type: aspire) with a traces + logs dashboard adapter on its read API ([#376](https://github.com/briancaffey/hermes-otel/issues/376)) ([580227c](https://github.com/briancaffey/hermes-otel/commit/580227c7efe399db9446bf4b432220f0415a7d16))
+* **backends:** explicit ClickStack / HyperDX backend (type: clickstack) with a ClickHouse SQL dashboard adapter for traces, metrics and logs ([#374](https://github.com/briancaffey/hermes-otel/issues/374)) ([f113423](https://github.com/briancaffey/hermes-otel/commit/f1134233c58a1382bfae5a506e1ad6a172b2d07e))
+* **backends:** explicit Gigapipe (qryn) backend (type: gigapipe) with the LGTM dashboard adapter on one port ([#377](https://github.com/briancaffey/hermes-otel/issues/377)) ([5c50e6e](https://github.com/briancaffey/hermes-otel/commit/5c50e6ed67b99048d3d39c30ebb52398102e3893))
+* **backends:** explicit GreptimeDB backend (type: greptime) with per-signal headers and a traces + metrics + logs dashboard adapter ([#373](https://github.com/briancaffey/hermes-otel/issues/373)) ([adb8eaa](https://github.com/briancaffey/hermes-otel/commit/adb8eaa834874ceb8e35744c49fe7575254e18da))
+* **backends:** explicit VictoriaTraces + VictoriaMetrics + VictoriaLogs backend (type: victoria) with per-signal endpoints and a Jaeger + Prometheus + LogsQL dashboard adapter ([#375](https://github.com/briancaffey/hermes-otel/issues/375)) ([4f64e0d](https://github.com/briancaffey/hermes-otel/commit/4f64e0da6cb078dddc78d9b20be3bb6ec34d46d1))
+* **backends:** explicit Zipkin backend (type: zipkin) via the zipkin-otel image, with an API v2 dashboard adapter ([#372](https://github.com/briancaffey/hermes-otel/issues/372)) ([c20dcff](https://github.com/briancaffey/hermes-otel/commit/c20dcffce839a5f3bd936667b94c6626a2e0161e))
+* **backends:** generic OpenTelemetry Collector folder with debug, otlphttp, Azure Monitor, AWS and Google Cloud targets (generic type: otlp) ([#380](https://github.com/briancaffey/hermes-otel/issues/380)) ([6f942ff](https://github.com/briancaffey/hermes-otel/commit/6f942ff4ba3206248bcd15cde9428ac9198cd4e6))
+* **backends:** otel-desktop-viewer compose folder and otel-tui recipe (generic type: otlp) ([#379](https://github.com/briancaffey/hermes-otel/issues/379)) ([698252f](https://github.com/briancaffey/hermes-otel/commit/698252f3e8c2920dcca67d814a0a056383ae0e4d))
+* **hooks:** kanban board transitions as spans, a counter and events, plus an end-to-end demo ([#362](https://github.com/briancaffey/hermes-otel/issues/362)) ([de4ae0a](https://github.com/briancaffey/hermes-otel/commit/de4ae0ae38336128718df5326ccdfe8169c183be))
+* **hooks:** observe terminal output truncation and final response size through the transform hooks ([#360](https://github.com/briancaffey/hermes-otel/issues/360)) ([025a964](https://github.com/briancaffey/hermes-otel/commit/025a9642f19ed900e130db430c181a99c9c414e4)), closes [#33](https://github.com/briancaffey/hermes-otel/issues/33)
+* **skill:** otel.py mcp-config derives the opentelemetry-mcp server config from the configured backends; the skill prefers the MCP tools when present ([#384](https://github.com/briancaffey/hermes-otel/issues/384)) ([4d674e8](https://github.com/briancaffey/hermes-otel/commit/4d674e83cd117ca3a7a16ec506786476510f550a)), closes [#304](https://github.com/briancaffey/hermes-otel/issues/304)
+
+
+### Bug Fixes
+
+* **catalog:** install as hermes_otel, render the entry under the merged name and disclosure ([#381](https://github.com/briancaffey/hermes-otel/issues/381)) ([aec9d9f](https://github.com/briancaffey/hermes-otel/commit/aec9d9f8105dfa040551583cdfbab8f6d21926a1)), closes [#134](https://github.com/briancaffey/hermes-otel/issues/134)
+
+
+### Documentation
+
+* **mcp:** verify Traceloop's opentelemetry-mcp against Hermes traces on Jaeger and Tempo, document the setup for Hermes, Claude Code and Cursor ([#383](https://github.com/briancaffey/hermes-otel/issues/383)) ([6abd6b1](https://github.com/briancaffey/hermes-otel/commit/6abd6b1057be61cffe984b75f4f3e607a71f2baa)), closes [#303](https://github.com/briancaffey/hermes-otel/issues/303)
+
+## [1.24.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.23.0...hermes-otel-v1.24.0) (2026-10-11)
+
+
+### Features
+
+* **backends:** opik and langwatch entries drop the agent root's token roll-up (root_usage) so trace totals stop doubling ([#353](https://github.com/briancaffey/hermes-otel/issues/353)) ([768523b](https://github.com/briancaffey/hermes-otel/commit/768523b5a8985e4408ef6e3013ddf52d5453edb0))
+* **resource:** kanban worker task id, board and run id on the Resource ([#357](https://github.com/briancaffey/hermes-otel/issues/357)) ([f0894ba](https://github.com/briancaffey/hermes-otel/commit/f0894ba5c2989a4932df1854da2f9208bf1df2c8))
+
+
+### Bug Fixes
+
+* **dashboard:** Langfuse v3 trace detail reads the exported span attributes, so the header shows the model and token roll-up ([#351](https://github.com/briancaffey/hermes-otel/issues/351)) ([863d516](https://github.com/briancaffey/hermes-otel/commit/863d5162fadd659d43ff5ccbc94a89d83dbee71b)), closes [#346](https://github.com/briancaffey/hermes-otel/issues/346)
+* **logs:** export log records from one-shot (hermes -z) runs ([#358](https://github.com/briancaffey/hermes-otel/issues/358)) ([5d48bda](https://github.com/briancaffey/hermes-otel/commit/5d48bdaf5ec47a65264bbb46127a32ebc5a8cb39))
+
+
+### Documentation
+
+* **backends:** catalog what each backend does differently and the treatment hermes-otel gives it ([#356](https://github.com/briancaffey/hermes-otel/issues/356)) ([89ef1a9](https://github.com/briancaffey/hermes-otel/commit/89ef1a9df464076b854c9ab91a9aca9aaad0e1f3))
+* **backends:** quirks catalog records root_usage as shipped, not as an open PR ([#359](https://github.com/briancaffey/hermes-otel/issues/359)) ([9899872](https://github.com/briancaffey/hermes-otel/commit/9899872e974cb15f5dcabbf17ae6897d93c78e25))
+
+## [1.23.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.22.1...hermes-otel-v1.23.0) (2026-10-10)
+
+
+### Features
+
+* **backends:** add Comet Opik backend (type: opik) ([#328](https://github.com/briancaffey/hermes-otel/issues/328)) ([bd87de6](https://github.com/briancaffey/hermes-otel/commit/bd87de60520eaf712dc9c020386eb40a0c4280be)), closes [#220](https://github.com/briancaffey/hermes-otel/issues/220)
+* **backends:** add Laminar backend (type: laminar) ([#329](https://github.com/briancaffey/hermes-otel/issues/329)) ([89ea286](https://github.com/briancaffey/hermes-otel/commit/89ea286e061adcd38df481825e4b4fa801a2da87)), closes [#223](https://github.com/briancaffey/hermes-otel/issues/223)
+* **backends:** add LangWatch backend (type: langwatch) ([#330](https://github.com/briancaffey/hermes-otel/issues/330)) ([1e4a8d5](https://github.com/briancaffey/hermes-otel/commit/1e4a8d5fd39c363abf7a9f2f8862131097acce7f)), closes [#229](https://github.com/briancaffey/hermes-otel/issues/229)
+* **backends:** add Latitude backend (type: latitude) ([#331](https://github.com/briancaffey/hermes-otel/issues/331)) ([fc2d59d](https://github.com/briancaffey/hermes-otel/commit/fc2d59d7454f826c37a9b074d3fd0536b5130936)), closes [#230](https://github.com/briancaffey/hermes-otel/issues/230)
+* **backends:** add MLflow backend (type: mlflow) ([#326](https://github.com/briancaffey/hermes-otel/issues/326)) ([b22da78](https://github.com/briancaffey/hermes-otel/commit/b22da78dfc61d1ca6cd40abdadce916595390fc1)), closes [#221](https://github.com/briancaffey/hermes-otel/issues/221)
+* **backends:** add OpenLIT backend (type: openlit) ([#324](https://github.com/briancaffey/hermes-otel/issues/324)) ([7d2682a](https://github.com/briancaffey/hermes-otel/commit/7d2682a424697df95ecbc5d544ce576768dd0f67)), closes [#222](https://github.com/briancaffey/hermes-otel/issues/222)
+* **dashboard:** Jaeger adapter speaks Jaeger v2's /api/v3 query API ([#338](https://github.com/briancaffey/hermes-otel/issues/338)) ([d74c88e](https://github.com/briancaffey/hermes-otel/commit/d74c88ea1cb3b826acb02d418e2d567b0a318193))
+* **dashboard:** Langfuse adapter reads Langfuse v4 (events_only) through the v2 observations and metrics APIs ([#340](https://github.com/briancaffey/hermes-otel/issues/340)) ([8662483](https://github.com/briancaffey/hermes-otel/commit/8662483d01710228fb95f90f436206b0d691ab94))
+
+
+### Bug Fixes
+
+* **dashboard:** epoch windows, bounded live-store readers, one home resolver, window defaults documented ([#341](https://github.com/briancaffey/hermes-otel/issues/341)) ([a1b1354](https://github.com/briancaffey/hermes-otel/commit/a1b1354db1ac04818da0147c4f5b8a74bf5a89c1))
+* **dashboard:** OpenObserve events-only answers empty before the first event on current builds ([#335](https://github.com/briancaffey/hermes-otel/issues/335)) ([4d9e4af](https://github.com/briancaffey/hermes-otel/commit/4d9e4af17366a83bef52d7de209c068f4a293754))
+* **dashboard:** Phoenix roots via parent_id on Phoenix 20; widened search is one card per trace ([#339](https://github.com/briancaffey/hermes-otel/issues/339)) ([b6e9429](https://github.com/briancaffey/hermes-otel/commit/b6e9429cf5833cd0b0c582dbf604f34a142dfe79))
+* **dashboard:** Settings judges the config file's origin against the profile's home and marks deprecated spellings ([#342](https://github.com/briancaffey/hermes-otel/issues/342)) ([6c10bd3](https://github.com/briancaffey/hermes-otel/commit/6c10bd30fd0638c0b50a4e646271746f07b0e2b2))
+* **dashboard:** SigNoz metrics open on the step grid so a short window keeps its first samples ([#336](https://github.com/briancaffey/hermes-otel/issues/336)) ([f134f37](https://github.com/briancaffey/hermes-otel/commit/f134f37780d0bee56dbc6276a8b97effa6afd878))
+* **dashboard:** Tempo paging over-fetches the newest rows; a raw TraceQL query keeps min duration and reports replaced fields ([#334](https://github.com/briancaffey/hermes-otel/issues/334)) ([f723771](https://github.com/briancaffey/hermes-otel/commit/f7237715420e0ebd5974fd4d23c2a4205526470a))
+* **dashboard:** the light theme applies, every Select has a name, expandable rows are not nested buttons ([#343](https://github.com/briancaffey/hermes-otel/issues/343)) ([692ec52](https://github.com/briancaffey/hermes-otel/commit/692ec529abfd8cdfcf536a34de4080298019bb95))
+* **dashboard:** Uptrace logs filter by span via _parent_id; widened pages fetch per-trace rows and keep an exact cursor ([#337](https://github.com/briancaffey/hermes-otel/issues/337)) ([62db1b8](https://github.com/briancaffey/hermes-otel/commit/62db1b881288b00814243890902a59da82d642ec))
+* **elastic:** dashboard follow-ups from the [#333](https://github.com/briancaffey/hermes-otel/issues/333) review; CSS-usage test accepts className: sites ([#345](https://github.com/briancaffey/hermes-otel/issues/345)) ([7e77b04](https://github.com/briancaffey/hermes-otel/commit/7e77b04351f53ad5ba1dbc0015e2886ecb23f66d))
+* **elastic:** harden dashboard import script; make tool-duration panel render on all backends ([#333](https://github.com/briancaffey/hermes-otel/issues/333)) ([2ae8c2a](https://github.com/briancaffey/hermes-otel/commit/2ae8c2abf90564c4700ea44acf14cf78c5b0d7d3)), closes [#318](https://github.com/briancaffey/hermes-otel/issues/318)
+
+
+### Documentation
+
+* dashboard.md backend row. ([4d9e4af](https://github.com/briancaffey/hermes-otel/commit/4d9e4af17366a83bef52d7de209c068f4a293754))
+* dashboard.md Uptrace row. ([62db1b8](https://github.com/briancaffey/hermes-otel/commit/62db1b881288b00814243890902a59da82d642ec))
+* **dashboard:** list the six new backend types without a dashboard adapter ([#332](https://github.com/briancaffey/hermes-otel/issues/332)) ([a615a07](https://github.com/briancaffey/hermes-otel/commit/a615a07dba778300a5c82f9f94b2b12374bf49a7))
+* **dashboard:** record the 2026-10-09 verification of every backend and the verify skill's results ([#344](https://github.com/briancaffey/hermes-otel/issues/344)) ([1663029](https://github.com/briancaffey/hermes-otel/commit/1663029a90eb554785445ba981ec9cc7d5ec32ba))
+
+## [1.22.1](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.22.0...hermes-otel-v1.22.1) (2026-10-09)
+
+
+### Documentation
+
+* **backends:** bring every backend list up to date after Elastic and the compose layout ([#323](https://github.com/briancaffey/hermes-otel/issues/323)) ([e4696b8](https://github.com/briancaffey/hermes-otel/commit/e4696b8f23a3b4d0ad064adf51695a692afe4838))
+* **backends:** one folder per local backend, compose stacks for every open-issue candidate ([#279](https://github.com/briancaffey/hermes-otel/issues/279)) ([0e701e3](https://github.com/briancaffey/hermes-otel/commit/0e701e314a775710046656e81bc1d4a057074ad6))
+
+## [1.22.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.21.0...hermes-otel-v1.22.0) (2026-10-08)
+
+
+### Features
+
+* **backends:** add Elastic backend (type: elastic) ([#319](https://github.com/briancaffey/hermes-otel/issues/319)) ([dc117b2](https://github.com/briancaffey/hermes-otel/commit/dc117b2ffc8433dc91dfe31edc403d70b4f203b6))
+
+
+### Bug Fixes
+
+* **elastic:** review follow-ups for the Elastic backend ([#321](https://github.com/briancaffey/hermes-otel/issues/321)) ([9c4be6d](https://github.com/briancaffey/hermes-otel/commit/9c4be6d8df4ea2041d08c373bbece3b96ef7791b))
+
+## [1.21.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.20.1...hermes-otel-v1.21.0) (2026-10-07)
+
+
+### Features
+
+* **dashboard:** backend verification harness and the adapter fixes it found ([#316](https://github.com/briancaffey/hermes-otel/issues/316)) ([94c4375](https://github.com/briancaffey/hermes-otel/commit/94c437540c803a2c820e6ee7dd45523eb348d210))
+
+
+### Documentation
+
+* website/docs/dashboard.md backend rows updated. ([94c4375](https://github.com/briancaffey/hermes-otel/commit/94c437540c803a2c820e6ee7dd45523eb348d210))
+
+## [1.20.1](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.20.0...hermes-otel-v1.20.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **tracer:** flush every metric reader concurrently so one dead backend cannot starve the rest ([#314](https://github.com/briancaffey/hermes-otel/issues/314)) ([716a16a](https://github.com/briancaffey/hermes-otel/commit/716a16afc4e08650fc432d0df0bd3329ca51d24f)), closes [#300](https://github.com/briancaffey/hermes-otel/issues/300)
+
+## [1.20.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.19.0...hermes-otel-v1.20.0) (2026-10-06)
+
+
+### Features
+
+* **dashboard:** adapter contract — declared filters, cursor paging, one error taxonomy, cached adapters, seven adapter fixes ([#309](https://github.com/briancaffey/hermes-otel/issues/309)) ([f0d913d](https://github.com/briancaffey/hermes-otel/commit/f0d913dcc8047e0c08cd5b46fc300037a8d6e677))
+* **dashboard:** one card, cursor paging and URL state on every page; shell with mounted pages, error boundaries and profile forwarding; docs and verification ([#313](https://github.com/briancaffey/hermes-otel/issues/313)) ([f906b93](https://github.com/briancaffey/hermes-otel/commit/f906b934c8bff9085215e30b78143b601434e104))
+
+
+### Bug Fixes
+
+* **dashboard:** live store correctness and durability, settings masking gaps, live-route validation ([#308](https://github.com/briancaffey/hermes-otel/issues/308)) ([de48f45](https://github.com/briancaffey/hermes-otel/commit/de48f45b5018f0d03514162c81c28fb9cc9d7890))
+* **dashboard:** type check, lint and page smoke tests in CI; host utilities the current Hermes no longer ships ([#307](https://github.com/briancaffey/hermes-otel/issues/307)) ([81fee75](https://github.com/briancaffey/hermes-otel/commit/81fee75475e84caaec6efe0da9a72283140a8ea3)), closes [#288](https://github.com/briancaffey/hermes-otel/issues/288)
+
+## [1.19.0](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.18.2...hermes-otel-v1.19.0) (2026-10-04)
+
+
+### Features
+
+* **dashboard:** logs as a first-class signal in the Logs tab, CLI and every adapter ([#277](https://github.com/briancaffey/hermes-otel/issues/277)) ([be6232f](https://github.com/briancaffey/hermes-otel/commit/be6232f0335dc3175209296f1ce5cbf9771a15f6)), closes [#268](https://github.com/briancaffey/hermes-otel/issues/268)
+* **logs:** a logs: config block with per-backend overrides, pipeline controls, one severity spelling ([#272](https://github.com/briancaffey/hermes-otel/issues/272)) ([fabf8eb](https://github.com/briancaffey/hermes-otel/commit/fabf8eb38bd5a9964537c7c160bf0c227341a556))
+* **logs:** structured hermes.* and GenAI events from the hooks (off by default) ([#275](https://github.com/briancaffey/hermes-otel/issues/275)) ([e67e999](https://github.com/briancaffey/hermes-otel/commit/e67e999d64eb3d36569f73b1e6be66787d83e31c))
+
+
+### Bug Fixes
+
+* **ci:** retry and cache scanner downloads ([#274](https://github.com/briancaffey/hermes-otel/issues/274)) ([3585397](https://github.com/briancaffey/hermes-otel/commit/3585397dabbb1d938d1b888723f8f00547cb30fe))
+* **logs:** one enrichment processor for every log sink: exact attribution, no host internals, redaction ([#270](https://github.com/briancaffey/hermes-otel/issues/270)) ([8edc21f](https://github.com/briancaffey/hermes-otel/commit/8edc21f573701100c26926b746d163345b755b15))
+
+
+### Documentation
+
+* **logs:** Logs and events guide, generated log-events reference with a drift test, privacy and batch-export sections ([#276](https://github.com/briancaffey/hermes-otel/issues/276)) ([35fab22](https://github.com/briancaffey/hermes-otel/commit/35fab227ccde7a9b532d0d6774bc73bb828ad99e))
+
+## [1.18.2](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.18.1...hermes-otel-v1.18.2) (2026-10-02)
+
+
+### Bug Fixes
+
+* create the live store and debug.log owner-only (0600) ([#262](https://github.com/briancaffey/hermes-otel/issues/262)) ([d1be8d5](https://github.com/briancaffey/hermes-otel/commit/d1be8d58494685d6b20d2e92136b6945f02a85cb))
+* declare the measured OpenTelemetry floor (&gt;=1.35) and test on it in CI ([#264](https://github.com/briancaffey/hermes-otel/issues/264)) ([79b24ac](https://github.com/briancaffey/hermes-otel/commit/79b24ac0cf18b17f4b8f027badccbd56e285db51))
+* require an OTEL_* opt-in for vendor env-var mode; import dashboard backends through the package ([#255](https://github.com/briancaffey/hermes-otel/issues/255)) ([ea014c1](https://github.com/briancaffey/hermes-otel/commit/ea014c12e6a4d14e9b237d663eef8025abd9d35f))
+* say why env-var mode ignored vendor credentials instead of going quiet ([#263](https://github.com/briancaffey/hermes-otel/issues/263)) ([9632e49](https://github.com/briancaffey/hermes-otel/commit/9632e4992664490b63cd22dc52fec680face89fe))
+
+
+### Documentation
+
+* describe the OTEL_* opt-in rule everywhere env-var mode is explained ([#261](https://github.com/briancaffey/hermes-otel/issues/261)) ([36bf1d8](https://github.com/briancaffey/hermes-otel/commit/36bf1d8c6b8017a506fedd1838039c1055d2582c))
+
 ## [1.18.1](https://github.com/briancaffey/hermes-otel/compare/hermes-otel-v1.18.0...hermes-otel-v1.18.1) (2026-09-29)
 
 

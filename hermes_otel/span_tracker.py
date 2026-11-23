@@ -27,15 +27,21 @@ Two parent stacks run in parallel:
 and falls back to the ContextVar.
 
 Span keys are namespaced strings: ``session:<session_id>``,
-``llm:<session_id>``, ``api:<task_id>``, ``<tool_name>:<task_id>``,
-``approval:<session_id>:<tool_call_id>``, ``skill:<session_id>:<name>``
-and ``subagent:<child_session_id>``.
+``llm:<session_id>``, ``api:<task_id>``, ``aux:<request_id>``,
+``<tool_name>:<tool_call_id>`` (the task id on a Hermes without tool-call
+ids), ``approval:<session_id>:<tool_call_id>``, ``skill:<session_id>:<name>``,
+``human_input:<request_id>`` and ``subagent:<child_session_id>``. The same
+keys index the pending-start table (:meth:`SpanTracker.mark_started`), the
+one place the plugin remembers *when* a pre-hook fired so its post-hook can
+measure the run or the wait.
 """
 
 from __future__ import annotations
 
 import contextvars
 import threading
+import time
+from collections import OrderedDict
 from typing import Any, Dict, Optional
 
 # Imported at module load on purpose: SpanTracker.end_span() needs Status /
@@ -62,6 +68,20 @@ _PARENT_STACK: contextvars.ContextVar[Optional[list]] = contextvars.ContextVar(
 )
 
 
+SWEEP_REASONS = ("turn_end", "session_end", "turn_failed", "ttl", "shutdown")
+
+
+def sweep_attributes(reason: str) -> dict:
+    """The marker set on a span the plugin ended on the operation's behalf (#477).
+
+    ``reason`` is one of :data:`SWEEP_REASONS`: ``turn_end`` (open at
+    ``on_session_end``), ``session_end`` (open at finalize / reset),
+    ``turn_failed`` (the turn's API attempts all failed and the next turn
+    closed it), ``ttl`` (the orphan sweep) or ``shutdown``.
+    """
+    return {"hermes.span.ended_by": "sweep", "hermes.span.sweep_reason": reason}
+
+
 class SpanTracker:
     """Active-span registry + parent-span stack. See module docstring.
 
@@ -83,18 +103,43 @@ class SpanTracker:
         # turn boundary — they are tracked here (NOT on the parent stack) so
         # several can be active at once without disturbing tool/LLM nesting.
         self._session_skill_spans: Dict[str, Dict[str, str]] = {}
-        # approval span key -> perf_counter start, so post_approval_response can
-        # compute the human-wait duration. Flat (not per-session) — keys are
-        # already namespaced by session_id + tool_call_id.
-        self._approval_starts: Dict[str, float] = {}
+        # span key -> perf_counter start, for every hook pair that measures a
+        # run or a wait (tool calls, approvals, human-input requests). Flat
+        # (not per-session): the keys namespace themselves.
+        self._started_at: Dict[str, float] = {}
+        # Raw terminal output size per tool key, recorded by the
+        # transform_terminal_output observer and read back in post_tool_call.
+        self._tool_output_chars: Dict[str, int] = {}
         # Sub-agent delegation registry: delegated child's session_id -> record
         # about the delegation span opened in the parent on ``subagent_start``
         # (``{"span", "context", "role", "parent_session_id"}``), so the child's
         # own root span can rejoin the parent trace on ``on_session_start``.
         # Process-local: in-process delegation parents the child root directly
         # under the delegation span (one connected trace); cross-process
-        # delegation degrades to attribute-only correlation.
-        self._subagent_registry: Dict[str, Dict[str, Any]] = {}
+        # delegation degrades to attribute-only correlation. Bounded (oldest
+        # out) like the per-session tables in SessionState: a child whose
+        # session never starts would otherwise pin its record for ever.
+        self._subagent_registry: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+        # Delegation start times, child_session_id -> perf_counter. Separate
+        # from the registry, which the child's own session end may drop: the
+        # delegation span itself lives until subagent_stop (#392).
+        self._delegation_started_at: Dict[str, float] = {}
+        # Turn registry for the orphan sweep (#405): session_id -> perf_counter
+        # start time, and session_id -> the active span keys opened under it
+        # (api:/tool: keys do not embed the session id), so a timed-out turn's
+        # sub-spans can be finalized before its root.
+        self._turn_started_at: Dict[str, float] = {}
+        self._session_keys: "OrderedDict[str, set]" = OrderedDict()
+
+    # Per-session tables keyed by a session id Hermes may never close: the
+    # same cap SessionState uses for its own.
+    _MAX_SESSIONS = 4096
+
+    def _remember(self, table: "OrderedDict[str, Any]", key: str, value: Any) -> None:
+        table[key] = value
+        table.move_to_end(key)
+        while len(table) > self._MAX_SESSIONS:
+            table.popitem(last=False)
 
     def _parent_stack(self) -> list:
         """Return this context's parent span stack, creating it if needed."""
@@ -124,8 +169,7 @@ class SpanTracker:
     def discard(self, key: str):
         """Forget a tracked span without ending it; returns it (or None).
 
-        Used for LangSmith runs, which are plain dicts the tracer closes over
-        HTTP itself rather than via ``span.end()``.
+        For callers that close a span by other means than ``span.end()``.
         """
         with self._lock:
             return self._active_spans.pop(key, None)
@@ -245,24 +289,68 @@ class SpanTracker:
         with self._lock:
             return self._session_skill_spans.pop(session_id, {})
 
-    # ── Approval waits ───────────────────────────────────────────────────
+    # ── Pending starts ───────────────────────────────────────────────────
 
-    def record_approval_start(self, key: str, started_at: float) -> None:
-        """Stash the start time of an approval wait, keyed by span key."""
-        with self._lock:
-            self._approval_starts[key] = started_at
+    def mark_started(self, key: str, started_at: Optional[float] = None) -> None:
+        """Remember when the operation tracked under ``key`` began.
 
-    def pop_approval_start(self, key: str) -> Optional[float]:
-        """Return and remove an approval's start time, or None if unknown."""
+        ``started_at`` is a ``time.perf_counter()`` value; it defaults to now.
+        """
         with self._lock:
-            return self._approval_starts.pop(key, None)
+            self._started_at[key] = started_at if started_at is not None else time.perf_counter()
+
+    def has_started(self, key: str) -> bool:
+        """True while a start is pending under ``key``."""
+        with self._lock:
+            return key in self._started_at
+
+    def pop_started(self, key: str) -> Optional[float]:
+        """Forget and return the ``perf_counter`` start recorded under ``key``, or None."""
+        with self._lock:
+            return self._started_at.pop(key, None)
+
+    def pop_elapsed(self, key: str) -> Optional[float]:
+        """Seconds since :meth:`mark_started` was called for ``key``, forgetting
+        the start; None when no start is pending (the pre-hook never fired)."""
+        started = self.pop_started(key)
+        return time.perf_counter() - started if started is not None else None
+
+    def record_tool_output_chars(self, key: str, chars: int) -> None:
+        with self._lock:
+            self._tool_output_chars[key] = chars
+
+    def pop_tool_output_chars(self, key: str) -> Optional[int]:
+        with self._lock:
+            return self._tool_output_chars.pop(key, None)
 
     # ── Sub-agent delegation ─────────────────────────────────────────────
 
-    def register_subagent(self, child_session_id: str, record: Dict[str, Any]) -> None:
+    def register_subagent(
+        self, child_session_id: str, record: Dict[str, Any], started_at: Optional[float] = None
+    ) -> None:
         """Remember the delegation span opened for ``child_session_id``."""
         with self._lock:
-            self._subagent_registry[str(child_session_id)] = record
+            self._remember(self._subagent_registry, str(child_session_id), record)
+            self._delegation_started_at[str(child_session_id)] = (
+                started_at if started_at is not None else time.perf_counter()
+            )
+
+    def end_delegation(self, child_session_id: Optional[str]) -> None:
+        """Forget a delegation's start time (its span has ended)."""
+        if not child_session_id:
+            return
+        with self._lock:
+            self._delegation_started_at.pop(str(child_session_id), None)
+
+    def expired_delegations(self, ttl_seconds: float) -> list:
+        """Child session ids whose delegation started more than ``ttl_seconds`` ago."""
+        with self._lock:
+            now = time.perf_counter()
+            return [
+                cid
+                for cid, started in self._delegation_started_at.items()
+                if now - started > ttl_seconds
+            ]
 
     def get_subagent(self, child_session_id: Optional[str]) -> Optional[Dict[str, Any]]:
         """The delegation record for a child session, or None."""
@@ -277,6 +365,72 @@ class SpanTracker:
             return None
         with self._lock:
             return self._subagent_registry.pop(str(child_session_id), None)
+
+    # ── Turn registry (orphan sweep) ─────────────────────────────────────
+
+    def register_turn(self, session_id: str, started_at: Optional[float] = None) -> None:
+        """Record the start time of a session's turn for TTL tracking.
+
+        ``started_at`` is a ``time.perf_counter()``-style monotonic value
+        (seconds, arbitrary epoch). Defaults to ``now``; tests pass a
+        back-dated value to simulate timeouts without monkeypatching ``time``.
+        """
+        if not session_id:
+            return
+        with self._lock:
+            self._turn_started_at[session_id] = (
+                started_at if started_at is not None else time.perf_counter()
+            )
+
+    def unregister_turn(self, session_id: str) -> None:
+        """Forget a session's turn start (normal end)."""
+        with self._lock:
+            self._turn_started_at.pop(session_id, None)
+
+    def turn_started_at(self, session_id: Optional[str]) -> Optional[float]:
+        """When the session's current turn started, or None."""
+        if not session_id:
+            return None
+        with self._lock:
+            return self._turn_started_at.get(session_id)
+
+    def expired_turns(self, ttl_seconds: float) -> list:
+        """Sessions whose turn started more than ``ttl_seconds`` ago."""
+        with self._lock:
+            if not self._turn_started_at:
+                return []
+            now = time.perf_counter()
+            return [
+                sid for sid, started in self._turn_started_at.items() if now - started > ttl_seconds
+            ]
+
+    def link_key(self, session_id: str, key: str) -> None:
+        """Remember that ``key`` was opened under ``session_id``."""
+        with self._lock:
+            keys = self._session_keys.get(session_id)
+            if keys is None:
+                keys = set()
+                self._remember(self._session_keys, session_id, keys)
+            keys.add(key)
+
+    def unlink_key(self, key: str) -> None:
+        """Forget ``key`` in every session's active-key set."""
+        with self._lock:
+            for sid, keys in list(self._session_keys.items()):
+                keys.discard(key)
+                if not keys:
+                    self._session_keys.pop(sid, None)
+
+    def pop_session_keys(self, session_id: str) -> set:
+        """Return and forget the active keys opened under ``session_id``."""
+        with self._lock:
+            self._turn_started_at.pop(session_id, None)
+            return self._session_keys.pop(session_id, set())
+
+    def clear_turns(self) -> None:
+        with self._lock:
+            self._turn_started_at.clear()
+            self._session_keys.clear()
 
     # ── Ending spans ─────────────────────────────────────────────────────
 
@@ -312,24 +466,27 @@ class SpanTracker:
 
         span.end()
 
-    def end_all(self) -> None:
+    def end_all(self, attributes: Optional[dict] = None) -> None:
         """End every tracked span and drop all shared state (cleanup).
 
-        Clears the session-keyed stacks, skill spans, approval starts and the
+        Clears the session-keyed stacks, skill spans, pending starts and the
         delegation registry, plus *this* context's ContextVar stack. Other
         contexts' ContextVar stacks are unreachable from here and are left
-        as they are.
+        as they are. ``attributes`` are set on every span ended here (the
+        shutdown sweep marker, #477).
         """
         with self._lock:
             keys = list(self._active_spans.keys())
         for key in keys:
-            self.end_span(key)
+            self.end_span(key, attributes=attributes)
         with self._lock:
             self._active_spans.clear()
             self._session_parent_stacks.clear()
             self._session_skill_spans.clear()
-            self._approval_starts.clear()
+            self._started_at.clear()
+            self._tool_output_chars.clear()
             self._subagent_registry.clear()
+            self._delegation_started_at.clear()
         stack = _PARENT_STACK.get()
         if stack is not None:
             stack.clear()

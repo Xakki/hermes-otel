@@ -151,9 +151,7 @@ def test_two_profiles_in_one_process(fake_hermes):
         for profile, module_name in zip(("alpha", "beta"), names):
             with scope(profile) as home:
                 # per-profile config, as a user would write it
-                (home / "hermes_otel.yaml").write_text(
-                    f"project_name: proj-{profile}\nmetrics:\n  enabled: true\n"
-                )
+                (home / "hermes_otel.yaml").write_text(f"project_name: proj-{profile}\n")
                 mod = _load_copy(module_name)
                 mod.register(FakeCtx())
                 copies[profile] = mod
@@ -171,7 +169,7 @@ def test_two_profiles_in_one_process(fake_hermes):
         for profile, mod in copies.items():
             with scope(profile):
                 _turn(mod, f"s-{profile}")
-            mod.tracer.get_tracer()._force_flush()
+            mod.tracer.get_tracer().pipeline.force_flush()
 
         for profile in ("alpha", "beta"):
             home = root / "profiles" / profile

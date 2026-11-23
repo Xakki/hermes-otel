@@ -8,7 +8,8 @@ produces in ``_init_otlp_pipeline``.
 import pytest
 
 from hermes_otel import hooks
-from hermes_otel.live_store import LiveStore, get_live_store
+from hermes_otel.live_store import LiveStore
+from hermes_otel.live_store_registry import get_live_store
 from hermes_otel.plugin_config import HermesOtelConfig
 
 
@@ -17,9 +18,11 @@ def live_plugin(tmp_path):
     from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import TracerProvider
 
-    import hermes_otel.live_store as ls
+    import hermes_otel.live_store_registry as ls
     import hermes_otel.tracer as tracer_mod
-    from hermes_otel.tracer import HermesOTelPlugin, _LiveSpanProcessor
+    from hermes_otel.pipeline import _LiveSpanProcessor
+    from hermes_otel.testing import attach_pipeline
+    from hermes_otel.tracer import HermesOTelPlugin
 
     ls._LIVE_STORE = LiveStore(db_path=str(tmp_path / "live.db"))  # fresh tmp store
     store = get_live_store()
@@ -28,10 +31,8 @@ def live_plugin(tmp_path):
     provider.add_span_processor(_LiveSpanProcessor(store))
 
     plugin = HermesOTelPlugin()
-    plugin.tracer = provider.get_tracer("live-test")
-    plugin._initialized = True
-    plugin._live_active = True
-    plugin.config = HermesOtelConfig(dashboard_live=True, metrics_enabled=True)
+    attach_pipeline(plugin, tracer=provider.get_tracer("live-test"), live_active=True)
+    plugin.config = HermesOtelConfig(dashboard_live=True)
 
     prev = tracer_mod._tracer
     tracer_mod._tracer = plugin
@@ -46,6 +47,30 @@ def live_plugin(tmp_path):
 
 
 class TestLivePipeline:
+    def test_span_processor_shutdown_releases_the_store_for_reload(self, monkeypatch):
+        import hermes_otel.live_store_registry as registry
+        from hermes_otel.pipeline import _LiveSpanProcessor
+
+        class Store:
+            closed = False
+            flushed = False
+
+            def close(self):
+                self.closed = True
+
+            def flush(self):
+                self.flushed = True
+
+        store = Store()
+        monkeypatch.setattr(registry, "_LIVE_STORE", store)
+        monkeypatch.setattr(registry, "_STORES_BY_PATH", {"live.db": store})
+        _LiveSpanProcessor(store).shutdown()
+
+        assert store.closed is True
+        assert store.flushed is False
+        assert registry._LIVE_STORE is None
+        assert registry._STORES_BY_PATH == {}
+
     def test_full_turn_lands_in_store(self, live_plugin):
         store, _ = live_plugin
         hooks.on_session_start(session_id="s1", model="gpt-4", platform="telegram")
@@ -76,7 +101,7 @@ class TestLivePipeline:
         # No MeterProvider is wired (live-only), yet record_metric still feeds
         # the live store because the tap runs before the meter guard.
         store, plugin = live_plugin
-        assert plugin._meter is None
+        assert plugin.pipeline.meter is None
         hooks.on_session_start(session_id="s2", model="gpt-4", platform="cli")
         names = [m["name"] for m in store.metrics()]
         assert "hermes.session.count" in names  # the OTLP name, as the backends see it (#95)
