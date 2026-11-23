@@ -14,7 +14,6 @@ import pytest
 
 from hermes_otel import hooks
 from hermes_otel import redaction as r
-from hermes_otel.live_store import LiveStore
 from hermes_otel.live_store_registry import get_live_store
 from hermes_otel.plugin_config import HermesOtelConfig
 
@@ -45,7 +44,7 @@ def redacting_pipeline(tmp_path, monkeypatch):
     monkeypatch.setattr(r, "_hermes_redactor", None)
     monkeypatch.delenv("HERMES_REDACT_SECRETS", raising=False)
 
-    ls._LIVE_STORE = LiveStore(db_path=str(tmp_path / "live.db"))
+    get_live_store(create=True, db_path=str(tmp_path / "live.db"))
     store = get_live_store()
     provider = TracerProvider(resource=Resource.create({"service.name": "redaction-test"}))
     provider.add_span_processor(_LiveSpanProcessor(store))
@@ -63,9 +62,7 @@ def redacting_pipeline(tmp_path, monkeypatch):
         yield store, backends
     finally:
         tracer_mod._tracer = prev
-        if ls._LIVE_STORE is not None:
-            ls._LIVE_STORE.close()
-        ls._LIVE_STORE = None
+        ls.close_live_stores()
         provider.shutdown()
 
 

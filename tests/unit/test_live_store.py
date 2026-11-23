@@ -114,9 +114,9 @@ class TestLiveStore:
     def test_singleton_create_flag(self, tmp_path):
         import hermes_otel.live_store_registry as ls
 
-        ls._LIVE_STORE = None
+        ls.close_live_stores()
         assert get_live_store(create=False) is None
         a = get_live_store(create=True, db_path=str(tmp_path / "s.db"))
         b = get_live_store(create=False)
         assert a is b is not None
-        ls._LIVE_STORE = None  # cleanup
+        ls.close_live_stores()

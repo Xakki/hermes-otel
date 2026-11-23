@@ -76,8 +76,9 @@ A numeric field's **Bounds** are checked at load (#487). A value outside them, i
 | `remote_parent` | bool | `true` | Parent the turn root under the span named by `HERMES_OTEL_TRACEPARENT` (+ `HERMES_OTEL_TRACESTATE`) when an outer process exported them; `false` ignores the variables. The kanban worker hand-off (`TRACEPARENT`) is separate |
 | `probe_backends` | bool | `true` | At init, open one TCP connection to each backend endpoint on a background thread and log reachable / unreachable per backend; once, never periodic, no bytes sent, exports never wait for it |
 | `discovery_prompt` | bool | `false` | Register a system-prompt section advertising `hermes_otel:observability` (changes what the model sees every turn; opt-in) |
-| `dashboard_live` | bool | `true` | Keep recent spans/metrics/logs in `$HERMES_HOME/hermes_otel_live.db` for the dashboard's Live mode |
-| `dashboard_live_max_spans` | int | `1000` | Rows kept per kind (spans, metrics, logs) in the live store. Bounds: ≥ 1 |
+| `dashboard_live` | bool | `true` | Keep recent spans, metrics and logs in the local live store |
+| `dashboard_live_storage` | string | `"memory"` | `memory` is process-local; `disk` enables persistent, cross-process Live queries |
+| `dashboard_live_max_spans` | int | `1000` | Total live rows in memory mode; rows per kind in disk mode. Bounds: 1–9223372036854775807 |
 | `dashboard_live_retention_hours` | float | `168.0` | Rows older than this are dropped from the live store (`0` = only the row cap applies). Bounds: ≥ 0.0 |
 | `host_metrics` | bool | `false` | Sample CPU/GPU and emit `process.*` / `system.*` / `hw.*` metrics; see [Host & GPU metrics](/configuration/host-metrics) |
 | `host_metrics_gpu` | string | `"auto"` | `auto` · `amd` · `nvidia` · `off` — which GPU SDK to probe |

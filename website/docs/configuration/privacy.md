@@ -120,7 +120,7 @@ The logs signal is off by default on both of its switches. When on:
 
 - **Forwarded log records** (`logs.capture`) are not filtered by privacy mode: a body is whatever Hermes or a library logged. Secrets are redacted before export with Hermes' own `agent.redact` (the redactor behind `agent.log`) or the plugin's built-in set, and Hermes' host-internal record attributes (`hermes_home`, `session_tag`) never leave. Other sensitive text flows unless the logging application redacts it; narrow with `logs.exclude_loggers`, `logs.logger_levels` or `logs.only_in_turn`.
 - **Events** (`logs.events.enabled`) follow privacy mode: `logs.events.content: inherit` means `content_capture: off` puts no prompt, response or tool content on any event, `preview` clips it, `full` sends what the span has. A backend entry's `logs: {events: {content: off}}` removes content for that backend alone, so a SaaS log sink can stay content-free while a local one keeps everything.
-- The dashboard's live store holds the same records as the backends, redacted the same way, in a file created owner-only. Spans in the live store are redacted too (see [Secrets in span content](#secrets-in-span-content)).
+- The live store uses the same redaction as the backends. It lives in the recording process's memory by default; opt-in disk mode creates an owner-only file. Spans in the live store are redacted too (see [Secrets in span content](#secrets-in-span-content)).
 
 See [Logs and events](/configuration/logs#what-never-leaves-the-machine) for the measured redaction cost and the attribution rules.
 

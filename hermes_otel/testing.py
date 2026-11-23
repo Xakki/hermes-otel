@@ -57,13 +57,7 @@ def reset_state() -> None:
                 pass
     _tr._tracer = None
     _st._PARENT_STACK.set(None)
-    store = _ls._LIVE_STORE
-    if store is not None:
-        try:
-            store.close()
-        except Exception:
-            pass
-    _ls._LIVE_STORE = None
+    _ls.close_live_stores()
     _red._hermes_resolved = False
     _red._hermes_redactor = None
     from .hooks import kanban as _kb

@@ -381,7 +381,7 @@ class TestLiveHardening:
         """The module imported but creating the store raised: say so, not "import" (#616)."""
         from hermes_otel import live_store_registry as ls
 
-        monkeypatch.setattr(ls, "_LIVE_STORE", None)
+        ls.close_live_stores()
         monkeypatch.setattr(ls, "_STORES_BY_PATH", {})
         monkeypatch.setattr(ls, "_CREATE_ERRORS", {})
         db = tmp_path / "nope.db"
@@ -404,7 +404,7 @@ class TestLiveHardening:
     def test_router_resolves_the_store_from_the_environment(self, tmp_path, monkeypatch):
         from hermes_otel import live_store_registry as ls
 
-        monkeypatch.setattr(ls, "_LIVE_STORE", None)
+        ls.close_live_stores()
         monkeypatch.setattr(ls, "_STORES_BY_PATH", {})
         db = tmp_path / "env.db"
         monkeypatch.setenv("HERMES_OTEL_LIVE_DB", str(db))

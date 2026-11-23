@@ -8,8 +8,8 @@ files and expands ``${HERMES_SKILL_DIR}`` in the skill text, so the agent can ru
 
 from the chat. The plugin directory is not on ``sys.path`` (Hermes loads
 plugins by path), so this adds the package's parent and hands over to
-``query_cli.main``. Only the standard library is needed for the live store;
-``--source <backend>`` additionally needs ``pyyaml`` (the Hermes venv has it).
+``query_cli.main``. An explicit ``--db`` only needs the standard library;
+YAML settings and backend discovery need PyYAML (the Hermes venv has it).
 """
 
 from __future__ import annotations
