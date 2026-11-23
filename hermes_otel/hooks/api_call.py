@@ -348,15 +348,23 @@ def record_first_chunk(
 
 
 def record_operation_duration(
-    tracer, api_duration: Optional[float], dims: Dict[str, Any], error_type: Optional[str] = None
+    tracer,
+    api_duration: Optional[float],
+    dims: Dict[str, Any],
+    *,
+    provider_label: Optional[str],
+    error_type: Optional[str] = None,
 ) -> None:
     """The OTel GenAI operation-duration histogram, in SECONDS (the spec
     unit), tagged with ``error.type`` on the failure path so success and
     error durations are queryable from one histogram."""
     if not api_duration:
         return
+    dims = dict(dims)
+    # Match the request counter's dashboard selector without changing the GenAI label.
+    if provider_label:
+        dims["provider"] = provider_label
     if error_type is not None:
-        dims = dict(dims)
         dims["error.type"] = error_type
     tracer.record_metric("gen_ai.client.operation.duration", api_duration, dims)
 

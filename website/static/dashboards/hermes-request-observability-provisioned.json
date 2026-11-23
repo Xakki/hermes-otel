@@ -149,7 +149,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gen_ai_client_operation_duration_seconds_bucket{gen_ai_provider_name=~\"${provider:regex}\",gen_ai_request_model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gen_ai_client_operation_duration_seconds_bucket{provider=~\"${provider:regex}\",gen_ai_request_model=~\"${model:regex}\",account_name=~\"${account:regex}\"}[$__rate_interval])))",
           "instant": true
         }
       ],
