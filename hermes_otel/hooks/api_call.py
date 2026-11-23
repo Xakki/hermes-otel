@@ -352,7 +352,7 @@ def record_operation_duration(
     api_duration: Optional[float],
     dims: Dict[str, Any],
     *,
-    provider_label: Optional[str],
+    provider_label: Optional[str] = None,
     error_type: Optional[str] = None,
 ) -> None:
     """The OTel GenAI operation-duration histogram, in SECONDS (the spec

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from _helpers import get_metric, metric_points
 from _helpers import parent_span_id as _parent_span_id
 from _helpers import span_by_name as _span_by_name
 from opentelemetry.trace import StatusCode
@@ -28,6 +29,9 @@ from hermes_otel.hooks import (
     on_session_start,
     on_subagent_start,
 )
+from hermes_otel.log_events import AUXILIARY_CALL
+from hermes_otel.plugin_config import HermesOtelConfig
+from hermes_otel.testing import build_inmemory_plugin, install_singleton
 
 SID = "s-aux"
 
@@ -101,7 +105,7 @@ def _pre(**overrides):
 def _post(base, *, usage=None, error=None, duration=0.25):
     payload = dict(
         base,
-        ended_at=base["started_at"] + duration,
+        ended_at=base["started_at"] + duration if duration is not None else None,
         api_duration=duration,
         error=error,
         error_type=None if error is None else error.split(":")[0],
@@ -137,6 +141,42 @@ def _aux_spans(exporter):
         for s in exporter.get_finished_spans()
         if s.attributes.get("hermes.query_source") == "auxiliary"
     ]
+
+
+@pytest.mark.parametrize("duration", [0.25, None], ids=["timed", "untimed"])
+def test_auxiliary_attempt_exports_completion_with_or_without_duration(duration):
+    sinks = build_inmemory_plugin(metrics=True, logs=True, config=HermesOtelConfig(log_events=True))
+    install_singleton(sinks.plugin)
+    try:
+        base = _pre(provider="openai-codex", request_id="aux-codex")
+        assert not _aux_spans(sinks.span_exporter)
+        _post(base, duration=duration)
+
+        reader = sinks.metric_reader
+        assert sum(p.value for p in metric_points(get_metric(reader, "hermes.token.usage"))) == 15
+        counters = metric_points(get_metric(reader, "hermes.auxiliary.count"))
+        spans = _aux_spans(sinks.span_exporter)
+        events = [
+            r.log_record
+            for r in sinks.log_exporter.get_finished_logs()
+            if r.log_record.event_name == AUXILIARY_CALL
+        ]
+        assert (len(counters), len(spans), len(events)) == (1, 1, 1)
+        assert counters[0].value == 1 and counters[0].attributes["status"] == "ok"
+        span = spans[0]
+        assert span.status.status_code == StatusCode.OK
+        assert events[0].span_id == span.context.span_id
+        assert events[0].attributes["hermes.auxiliary.task"] == "title_generation"
+        histogram = metric_points(get_metric(reader, "gen_ai.client.operation.duration"))
+        if duration is None:
+            assert not histogram
+        else:
+            (point,) = histogram
+            assert point.count == 1 and point.sum == duration
+            assert point.attributes["gen_ai.provider.name"] == "openai-codex"
+            assert "provider" not in point.attributes
+    finally:
+        sinks.shutdown()
 
 
 class TestSpanShape:
